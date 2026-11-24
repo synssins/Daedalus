@@ -50,7 +50,7 @@ function rail() {
   r.replaceChildren(
     h('div', {class: 'brand', html: 'HomePanel <span>Studio</span>'}),
     item('Tablets', 'tablet', A.view === 'tablets', () => go('tablets'), pending ? '<span class="dot" title="A tablet is waiting for approval"></span>' : `<span class="n">${A.state.tablets.length}</span>`),
-    item('Designs', 'sheet', A.view === 'designs', () => go('designs'), `<span class="n">${A.state.designs.length}</span>`),
+    item('Designs', 'sheet', A.view === 'designs' || A.view === 'editor', () => go('designs'), `<span class="n">${A.state.designs.length}</span>`),
     ...A.state.designs.map(d => item(d.name, null, A.view === 'editor' && A.ed && A.ed.id === d.id, () => openDesign(d.id), '', 'sub')));
 }
 function go(view) {
@@ -211,7 +211,9 @@ function viewEditor(keepFrame) {
   if (keepFrame && $('.ed')) {
     // Same design, same sheet: swap the toolbar and redraw the edit layer only. Re-inserting the preview
     // frame would make the browser reload it and reconnect to the house on every page switch or undo.
+    const held = document.activeElement && document.activeElement.dataset.k;  // keep keyboard focus on Undo/Redo across the swap
     $('.bar').replaceWith(bar); $('.stage').classList.toggle('use', e.use);
+    if (held && !$('.bar [data-k=' + held + ']').disabled) $('.bar [data-k=' + held + ']').focus();
     saveLabel(); boxes(); inspector(); push();
     return;
   }
@@ -250,6 +252,7 @@ window.addEventListener('message', ev => { if (ev.data && ev.data.type === 'hp-r
 /** One box per tile over the preview: numbered like instruments on a plot; the selected one shows its measurements. */
 function boxes() {
   const e = ed(), over = $('.over'); if (!over) return;
+  const hadFocus = over.contains(document.activeElement);  // redrawing replaces the focused box: give focus back after
   over.replaceChildren(...page().tiles.map((t, i) => {
     const b = h('div', {class: 'box' + (i === e.sel ? ' sel' : ''), tabIndex: 0, role: 'button', 'aria-label': `Tile ${i + 1}, ${(TYPES[t.type] || {}).label || t.type}`, 'aria-pressed': i === e.sel, style: `left:${t.x * e.cw}px;top:${t.y * e.ch}px;width:${t.w * e.cw}px;height:${t.h * e.ch}px`, title: (TYPES[t.type] || {}).label || t.type},
       h('span', {class: 'tag'}, String(i + 1)), h('span', {class: 'dim' + (t.y + t.h > e.design.grid.rows - 3 ? ' up' : '')}, `${t.w} × ${t.h} at ${t.x}, ${t.y}`),
@@ -258,6 +261,7 @@ function boxes() {
     b.addEventListener('focus', () => { if (e.sel !== i) { e.sel = i; e.tab = 'tile'; boxes(); inspector(); $('.over').children[i].focus(); } });
     return b;
   }));
+  if (hadFocus && over.children[e.sel]) over.children[e.sel].focus();
 }
 function drag(ev, i, b) {
   const e = ed(), t = page().tiles[i], g = e.design.grid, corner = ev.target.dataset.c, o = {x: t.x, y: t.y, w: t.w, h: t.h};
@@ -308,6 +312,8 @@ function inspector() {
     r.addEventListener('input', show); show(); r.after(out);
   });
 }
+/** Small button that drops a per-tile override and goes back to the theme's value. An icon, so the slider beside it keeps its room. */
+const reset = fn => { const b = btn('', 'undo', fn, 'icon mini'); b.title = "Use the theme's value"; b.setAttribute('aria-label', b.title); return b; };
 const row = (label, ...ctl) => h('div', {class: 'f'}, h('label', null, label), h('div', {class: 'w'}, ...ctl));
 const textIn = (val, set, ph) => h('input', {type: 'text', value: val == null ? '' : val, placeholder: ph || '', oninput: ev => set(ev.target.value), onchange: settle});
 /** Colour plus see-through amount, stored as rgba(). "Theme" clears the override. */
@@ -315,7 +321,7 @@ function colourIn(val, set, fallback, clearable) {
   const c = rgba(val) || rgba(fallback) || {hex: '#ffffff', a: 0.15};
   const col = h('input', {type: 'color', value: c.hex, 'aria-label': 'Colour', oninput: () => set(toRgba(col.value, +al.value)), onchange: settle});
   const al = h('input', {type: 'range', min: 0, max: 1, step: 0.01, value: c.a, 'aria-label': 'Opacity', title: 'How solid the colour is', oninput: () => set(toRgba(col.value, +al.value)), onchange: settle});
-  return [col, al, clearable && val ? btn('Theme', null, () => { set(null); settle(); inspector(); }) : null];
+  return [col, al, clearable && val ? reset(() => { set(null); settle(); inspector(); }) : null];
 }
 function entityPick(val, set, domains, many) {
   const name = id => { const x = A.ents.find(n => n.id === id); return x ? x.name : id || ''; };
@@ -387,8 +393,8 @@ function tileFields() {
   if (!t.flat) out.push(
     row('Fill', ...colourIn(s.fill, v => style('fill', v), th.fill, true)),
     row('Border', ...colourIn(s.border, v => style('border', v), th.border || 'rgba(255,255,255,.4)', true)),
-    row('Corners', h('input', {type: 'range', min: 0, max: 60, step: 1, value: s.radius == null ? th.radius || 22 : s.radius, oninput: ev => style('radius', +ev.target.value), onchange: settle}), s.radius != null ? btn('Theme', null, () => { style('radius', null); settle(); inspector(); }) : null),
-    row('Text', h('input', {type: 'color', value: (rgba(s.text) || {hex: '#ffffff'}).hex, 'aria-label': 'Text colour', oninput: ev => style('text', ev.target.value), onchange: settle}), s.text ? btn('Theme', null, () => { style('text', null); settle(); inspector(); }) : null),
+    row('Corners', h('input', {type: 'range', min: 0, max: 60, step: 1, value: s.radius == null ? th.radius || 22 : s.radius, oninput: ev => style('radius', +ev.target.value), onchange: settle}), s.radius != null ? reset(() => { style('radius', null); settle(); inspector(); }) : null),
+    row('Text', h('input', {type: 'color', value: (rgba(s.text) || {hex: '#ffffff'}).hex, 'aria-label': 'Text colour', oninput: ev => style('text', ev.target.value), onchange: settle}), s.text ? reset(() => { style('text', null); settle(); inspector(); }) : null),
     h('h2', null, 'Picture'), picture(s.image, v => style('image', v)));
   out.push(h('div', {class: 'apart'},
     btn('Duplicate', 'copy', () => { const c = JSON.parse(JSON.stringify(t)); c.x = Math.min(d.grid.cols - c.w, c.x + 1); c.y = Math.min(d.grid.rows - c.h, c.y + 1); change(() => page().tiles.push(c)); e.sel = page().tiles.length - 1; boxes(); inspector(); }),

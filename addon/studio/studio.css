@@ -47,7 +47,7 @@ textarea { height: auto; padding: 7px 9px; resize: vertical; }
 input::placeholder { color: var(--chalk-3); }
 input:hover, select:hover { border-color: var(--chalk-3); }
 input[type=range] { accent-color: var(--edit); width: 100%; }
-input[type=color] { width: 32px; height: 32px; padding: 2px; border: 1px solid var(--seam); border-radius: var(--r); background: var(--rail); }
+input[type=color] { flex: none; width: 32px; height: 32px; padding: 2px; border: 1px solid var(--seam); border-radius: var(--r); background: var(--rail); }
 .chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--chalk-2); }
 .chip::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--chalk-3); }
 .chip.live::before { background: var(--live); } .chip.wait::before { background: var(--go); }
@@ -143,15 +143,18 @@ td input[type=text]:hover, td input[type=text]:focus { background: var(--rail); 
 .apart { margin-top: 30px; padding-top: 14px; border-top: 1px solid var(--seam-soft); display: flex; gap: 8px; }
 .apart .btn.stop { margin-left: auto; }
 .val { flex: none; width: 44px; text-align: right; color: var(--chalk-2); font-size: 12.5px; }
-.f > .w > input[type=range] { flex: 1; min-width: 0; }
+.f > .w > input[type=range] { flex: 1; min-width: 56px; }
+.btn.mini { width: 26px; height: 26px; flex: none; }
+.btn.mini svg.i { width: 15px; height: 15px; }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 
 /* Narrow windows (the HA sidebar takes its share): the rail and the tile list fold to icons so the sheet keeps its size. */
+/* Only while editing: the list views have width to spare and keep the full rail. */
 @media (max-width: 1500px) {
-  #rail { width: 58px; padding: 18px 8px; }
-  #rail .brand, #rail button span:not(.dot), #rail button.sub { display: none; }
-  #rail button { justify-content: center; padding: 9px 0; position: relative; }
-  #rail button .dot { position: absolute; right: 8px; top: 6px; margin: 0; }
+  body:has(.ed) #rail { width: 58px; padding: 18px 8px; }
+  body:has(.ed) #rail .brand, body:has(.ed) #rail button span:not(.dot), body:has(.ed) #rail button.sub { display: none; }
+  body:has(.ed) #rail button { justify-content: center; padding: 9px 0; position: relative; }
+  body:has(.ed) #rail button .dot { position: absolute; right: 8px; top: 6px; margin: 0; }
   .palette { width: 52px; padding: 12px 8px; }
   .palette h2, .palette button span { display: none; }
   .palette button { justify-content: center; padding: 8px 0; }
