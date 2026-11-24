@@ -490,7 +490,7 @@ function overlayFields(d) {
       btn('', 'trash', () => { chg(() => drop(k), {inspect: true}); settle(); }, 'icon mini'))];
     for (const o of def.options || []) {
       const val = c[o.key] == null ? o.default : c[o.key];
-      if (o.type === 'range') { const r = h('input', {type: 'range', min: o.min, max: o.max, step: o.step || (o.max <= 1 ? 0.01 : 1), value: val, oninput: ev => set(o.key, +ev.target.value)}); if (o.max > 1) r.dataset.unit = ''; out.push(row(o.label, r)); }
+      if (o.type === 'range') { const r = h('input', {type: 'range', min: o.min, max: o.max, step: o.step || (o.max <= 1 ? 0.01 : 1), value: val, oninput: ev => set(o.key, +ev.target.value)}); if (o.unit) r.dataset.unit = ' ' + o.unit; else if (o.max > 1) r.dataset.unit = ''; out.push(row(o.label, r)); }
       else if (o.type === 'select') out.push(row(o.label, h('select', {'aria-label': o.label, onchange: ev => set(o.key, ev.target.value, true)}, ...o.choices.map(ch => h('option', {value: ch[0], selected: val === ch[0]}, ch[1])))));
       else if (o.type === 'bool') out.push(row(o.label, h('input', {type: 'checkbox', checked: !!val, 'aria-label': o.label, onchange: ev => set(o.key, ev.target.checked, true)})));
     }

@@ -20,7 +20,7 @@
 //   days: 7,                  // default cycle length for a kind that grows
 //   live: false,              // true = animated (redrawn at fps); false = slow layer
 //   fps: 12,                  // for live kinds, at most 15
-//   options: [{key, label, type: 'range'|'select'|'bool', min, max, step, choices: [[value, label]], default}],
+//   options: [{key, label, type: 'range'|'select'|'bool', min, max, step, unit: 's'|'min' (shown after a range's value), choices: [[value, label]], default}],
 //   create(ctx) -> state      // build whatever the kind needs to remember; called again when the layout changes
 //   draw(g, state, ctx, t, dt)// g is a 2D canvas context in CSS pixels; t seconds since start, dt since last frame
 //   tap(state, x, y, ctx)     // optional; return true to claim the tap (the button underneath does not get it)

@@ -280,8 +280,8 @@
       const d = bx > (best.x1 + best.x2) / 2 ? -1 : 1;
       q.push({a: 'walk', x: U.clamp(bx - d * 20, best.x1 + 2, best.x2 - 2)}, {a: 'dig', dir: d, n: 2 + (Math.random() * 3 | 0)});
       const r = Math.random();
-      if (r < st.pace.rest) q.push([{a: 'rest', an: SA.lean, tool: 2, dur: 2.6}, {a: 'rest', an: SA.wipe, tool: 2, dur: 1.6}, {a: 'rest', an: SA.stamp, tool: 0, dur: 1.4}][Math.random() * 3 | 0]);
-      else if (r < st.pace.rest + st.pace.ball) { const m = st.crew.filter(o => o !== f && !o.gone && !o.re && Math.abs(o.x - bx) + Math.abs(o.y - best.y) < 460)[0]; if (m) q.push({a: 'ball', to: m}); }
+      if (r < S_REST) q.push([{a: 'rest', an: SA.lean, tool: 2, dur: 2.6}, {a: 'rest', an: SA.wipe, tool: 2, dur: 1.6}, {a: 'rest', an: SA.stamp, tool: 0, dur: 1.4}][Math.random() * 3 | 0]);
+      else if (r < S_REST + S_BALL) { const m = st.crew.filter(o => o !== f && !o.gone && !o.re && Math.abs(o.x - bx) + Math.abs(o.y - best.y) < 460)[0]; if (m) q.push({a: 'ball', to: m}); }
       return;
     }
     f.job = null;
@@ -398,11 +398,11 @@
   function rowStart(st, a, b) {
     const same = a.pl === b.pl && Math.abs(a.x - b.x) < 40;
     st.rowNext = 1e9;  // the wait for the next one starts when this one is over
-    const row = st.row = {a, b, t: 0, stage: 0, same, brawl: same && (st.force === 'brawl' || Math.random() < st.pace.brawl), end: 0, du: {tag: '', last: ''}};
+    const row = st.row = {a, b, t: 0, stage: 0, same, brawl: same && (st.force === 'brawl' || Math.random() < S_BRAWL), end: 0, du: {tag: '', last: ''}};
     for (const f of [a, b]) { f.row = row; f.q.length = 0; f.act = null; f.re = null; f.an = null; f.cur = null; f.wpn = 0; f.load = 0; }
     a.dir = b.x >= a.x ? 1 : -1; b.dir = -a.dir;
   }
-  function rowEnd(st) { const row = st.row; if (!row) return; st.rowNext = st.clock + U.lerp(st.pace.bump[0], st.pace.bump[1], Math.random()); for (const f of [row.a, row.b]) { f.row = null; f.q.length = 0; f.cur = null; f.act = null; f.an = null; f.wpn = 0; f.lift = 0; f.pin = 0; f.p[10] = 0; f.y = st.plats[f.pl].y; } st.row = null; }
+  function rowEnd(st) { const row = st.row; if (!row) return; st.rowNext = st.clock + st.bumpGap * (0.75 + Math.random() * 0.5); for (const f of [row.a, row.b]) { f.row = null; f.q.length = 0; f.cur = null; f.act = null; f.an = null; f.wpn = 0; f.lift = 0; f.pin = 0; f.p[10] = 0; f.y = st.plats[f.pl].y; } st.row = null; }
   function rowStep(st, row, dt) {
     const a = row.a, b = row.b, P = st.plats[a.pl], two = [a, b]; row.t += dt; const t = row.t, ease = (f, q) => { f.an = null; for (let j = 0; j < 10; j++) f.p[j] += (q[j] - f.p[j]) * 0.5; };
     if (row.stage < 3) {
@@ -442,23 +442,14 @@
     } else rowEnd(st);
   }
 
-  // "How often": every timed or chance-driven extra in the snow crew, in one place.
-  //   bump  seconds from the end of one row between two of the crew to the next (least, most)
-  //   brawl the chance that a row turns into a proper fight
-  //   rest  the chance of a breather after a spell of digging;  ball  of a snowball at a workmate instead
-  const S_PACE = {
-    rarely: {bump: [150, 240], brawl: 0.2, rest: 0.1, ball: 0.05},
-    sometimes: {bump: [50, 80], brawl: 0.33, rest: 0.18, ball: 0.1},
-    often: {bump: [20, 30], brawl: 0.5, rest: 0.22, ball: 0.14},
-    constantly: {bump: [8, 8], brawl: 0.9, rest: 0.3, ball: 0.25},
-  };
+  const S_BRAWL = 0.5, S_REST = 0.22, S_BALL = 0.14;  // the chance a row becomes a fight; of a breather after digging; of a snowball instead
 
   HP.fx.add('snowcrew', {
     label: 'Snow crew',
     live: true, fps: 12,
     options: [{key: 'crew', label: 'Crew', type: 'range', min: 1, max: 6, step: 1, default: 3},
       {key: 'always', label: 'Whatever the weather', type: 'bool', default: false},
-      {key: 'pace', label: 'How often', type: 'select', choices: [['rarely', 'Rarely'], ['sometimes', 'Sometimes'], ['often', 'Often'], ['constantly', 'Constantly']], default: 'often'}],
+      {key: 'bump', label: 'Bump interval', type: 'range', min: 8, max: 300, step: 2, unit: 's', default: 24}],
     create(ctx) {
       const r = ctx.rand, W = ctx.w, H = ctx.h, plats = ground(ctx);
       for (const P of plats) {
@@ -492,7 +483,7 @@
       for (let i = 0; i < n; i++) { const f = figure(0, plats[0].y, 0.9 + r() * 0.2); Object.assign(f, {gone: true, q: [], act: null, re: null, job: null, jx: 0, pl: 0, tool: 0, load: 0, hat: HATS[i], n: i * 2 + 1, rq: 0, ov: null, fear: null, row: null, gd: null, cur: null, em: [], wpn: 0, tt: 0, x0: 0, y0: 0, fxi: 0, lad: {on: false, k: 0, link: null, len: 130}, T: new Float32Array(4)}); crew.push(f); }
       const flakes = []; for (let i = 0; i < 38; i++) flakes.push({x: r() * W, y: r() * H, v: 22 + r() * 30, w: 0.6 + r() * 1.2, ph: r() * 6.28, z: 1.4 + r() * 1.4});
       const layer = document.createElement('canvas'); layer.width = W; layer.height = H;
-      return {plats, crew, flakes, layer, lg: layer.getContext('2d'), bits: [], balls: [], req: null, quake: 0, row: null, pace: S_PACE[ctx.opts.pace] || S_PACE.often, rowNext: (S_PACE[ctx.opts.pace] || S_PACE.often).bump[0] * 0.6, force: null, on: false, snowing: false, rr: 0, clock: 0, look: 0, w: W, h: H};
+      return {plats, crew, flakes, layer, lg: layer.getContext('2d'), bits: [], balls: [], req: null, quake: 0, row: null, bumpGap: (+ctx.opts.bump || 24), rowNext: (+ctx.opts.bump || 24) * 0.6, force: null, on: false, snowing: false, rr: 0, clock: 0, look: 0, w: W, h: H};
     },
     // a finger dragged along a pile brushes it off, as on the plain snow overlay
     drag(st, x, y) {
@@ -685,16 +676,6 @@
   K.RB = flip(K.RA);
   const KA = {g: anim(0.6, true, [0, K.G], [0.3, K.G2], [0.6, K.G]), s: anim(0.6, true, [0, K.ST], [0.3, K.ST2], [0.6, K.ST]),
     std: anim(2, true, [0, K.STD], [1, pose(3, 6, 3, -6, 3, 9, 12, -7, 12, 2)], [2, K.STD]), crane: anim(1.6, true, [0, K.CR], [0.8, K.CR2], [1.6, K.CR])};
-  // "How often": every timed or chance-driven extra in the fight, in one place.
-  //   pwRound the chance that a round has power moves at all;  pwMax how many it may have;  pwW how strongly they are picked
-  //   petFirst seconds a pettable creature must be on screen before the first truce;  petGap seconds from the end of one truce to the next
-  //   rest    the pause between rounds;  flash  how much the long flashy moves (leaps, wall runs, mid-air) are favoured
-  const K_PACE = {
-    rarely: {pwRound: 0.35, pwMax: 1, pwW: 0.3, petFirst: 20, petGap: 300, rest: 2.0, flash: 0.6},
-    sometimes: {pwRound: 1, pwMax: 1, pwW: 0.6, petFirst: 8, petGap: 90, rest: 1.6, flash: 0.8},
-    often: {pwRound: 1, pwMax: 2, pwW: 1.4, petFirst: 3, petGap: 30, rest: 1.3, flash: 1},
-    constantly: {pwRound: 1, pwMax: 99, pwW: 6, petFirst: 1.5, petGap: 10, rest: 0.7, flash: 1.6},
-  };
   const SASH = ['#ff4d4d', '#3aa0ff', '#3ad17a', '#ffc530', '#c77dff', '#ff8a3d'];
 
   /** One fighter's part in a move. A key is [time, pose, {x: step forward, up: height, rot: turn, wa: weapon angle,
@@ -920,7 +901,7 @@
       }
       startMove(st, du, {d: m.d, A: m.A, B: Bt}, A, B, xa, dA);
       if (Q) B.q[B.q.length - 1].pl = Q.i;
-      du.pwn++; return true;
+      st.pwNext = st.clock + st.pwGap * (0.6 + Math.random() * 0.8); return true;
     };
   }
   /** Under the figures: shockwaves and their cracks, slashes doing their cutting, the fallen corners. */
@@ -1055,8 +1036,7 @@
       if ((m.wp === 1 && !armed) || (m.wp === 0 && armed)) continue;
       let w = m.w * (m.after && m.after === du.tag ? 4 : 1) * (m.n === du.last ? 0.08 : m.n === du.last2 ? 0.4 : 1), xa = 0;
       if (m.sw) w = du.since >= 3 && (armed || st.weapons) ? 2.6 : 0;
-      if (m.pw) w = !st.powers || du.pwn >= du.pwMax ? 0 : m.w * st.pace.pwW * (armed ? 1.5 : 0.8);
-      if (m.n === 'leap' || m.n === 'wallrun' || m.n === 'midair') w *= st.pace.flash;
+      if (m.pw) w = !st.powers || st.clock < st.pwNext ? 0 : m.w * 8 * (armed ? 1.5 : 0.8);  // when one is due it is very likely the next move
       if (st.force) w = m.n === st.force ? 1e6 : w * 1e-3;  // the test page asks for one move by name
       if (m.after && m.after !== du.tag) w *= 0.4;
       if (!w) continue;
@@ -1077,11 +1057,11 @@
     if (du.phase === 'salute') {
       a.calm = b.calm = false; const m = {d: 52, A: T_SALUTE, B: T_SALUTE}, xa = fit(P, m, a.x, dA);
       startMove(st, du, m, a, b, xa == null ? a.x : xa, dA);
-      du.phase = 'fight'; du.n = 6 + (Math.random() * 5 | 0); du.since = 0; du.pwn = 0; du.pwMax = Math.random() < st.pace.pwRound ? st.pace.pwMax : 0; du.A = a; du.B = b; du.tag = ''; return;
+      du.phase = 'fight'; du.n = 6 + (Math.random() * 5 | 0); du.since = 0; du.A = a; du.B = b; du.tag = ''; return;
     }
     if (du.phase === 'fight') {
       if (du.flee) { du.flee = false; if (goLeap(st, du, a, b, false)) return; }
-      if (st.petSeen > st.pace.petFirst && st.clock > st.petNext && !st.petting && startPet(st, du, a, b)) return;  // something to stroke has turned up
+      if (st.petSeen > st.petFirst && st.clock > st.petNext && !st.petting && startPet(st, du, a, b)) return;  // something to stroke has turned up
       if (du.n-- > 0) { nextMove(st, du); return; }
       if (a.wpn) { startMove(st, du, {d: Math.abs(b.x - a.x), A: T_DROP, B: T_DROP}, a, b, a.x, dA); return; }
       // the finishing blow needs room; if this tile is too narrow they take it somewhere wider
@@ -1101,7 +1081,7 @@
     if (du.phase === 'pet1') { du.pet = {t: 0, dur: 5 + Math.random() * 3, heart: 0.5}; du.phase = 'pet2'; return; }
     if (du.phase === 'pet2') { petOff(st, du, du.lost); return; }  // a nod (or a shrug if it left), a few steps apart, a fresh bow
     if (du.phase === 'bow') { du.A.q.push({tr: T_WON}); du.B.q.push({tr: T_LOST}); du.phase = 'rest'; CUT.forEach((c, i) => { c.heal = Math.min(c.heal, st.clock + 0.3 + i * 0.15); }); return; }  // the bow mends every tile
-    if (du.phase === 'rest') { a.calm = b.calm = true; du.wait = st.pace.rest; du.phase = 'again'; return; }
+    if (du.phase === 'rest') { a.calm = b.calm = true; du.wait = 1.3; du.phase = 'again'; return; }
     // a new round: if someone is waiting on a corner, the beaten one swaps places with them
     const sp = st.spare, out = du.B;
     if (sp) {
@@ -1133,7 +1113,7 @@
     const dA = b.x >= a.x ? 1 : -1, m = {d: 24, A: T_SHAKE, B: T_SHAKE}, xa = fit(st.plats[a.pl], m, a.x, dA);
     startMove(st, du, m, a, b, xa == null ? a.x : xa, dA); du.phase = 'pet0'; return true;
   }
-  function petOff(st, du, shrug) { for (const f of du.f) { f.q.push({tr: shrug ? T_SHRUG : T_NOD, wp: f.had}); f.had = 0; } if (st.petting === du) st.petting = null; st.petNext = st.clock + st.pace.petGap * (0.85 + Math.random() * 0.3); du.phase = 'salute'; }
+  function petOff(st, du, shrug) { for (const f of du.f) { f.q.push({tr: shrug ? T_SHRUG : T_NOD, wp: f.had}); f.had = 0; } if (st.petting === du) st.petting = null; st.petNext = st.clock + st.petGap; du.phase = 'salute'; }
   /** Kneeling either side of it, one hand stroking along its back; it is told about every stroke. */
   function petStep(st, du, dt) {
     const pe = du.pet, act = pettable(st, du.pa), P = st.plats[du.f[0].pl]; pe.t += dt;
@@ -1153,7 +1133,7 @@
   }
   /** Goose! Stop everything, drop everything, run. */
   function scareStart(st, du, d) {
-    du.scare = {safe: 0}; du.pet = null; if (st.petting === du) { st.petting = null; st.petNext = st.clock + st.pace.petGap; }
+    du.scare = {safe: 0}; du.pet = null; if (st.petting === du) { st.petting = null; st.petNext = st.clock + st.petGap; }
     for (const f of du.f) {
       endOv(f); f.q.length = 0; if (calmish(f)) f.cur = null; f.panic = true; f.yelp = 0; f.chg = null;
       if (f.wpn) { f.had = f.wpn; st.proj.push({type: f.wpn, x0: f.J[16], y0: f.J[17], to: null, x1: f.x - f.dir * 24, y1: st.h + 60, t: 0, dur: 1.1, h: 30, spin: 11}); f.wpn = 0; }
@@ -1244,7 +1224,8 @@
     options: [{key: 'fighters', label: 'Fighters', type: 'range', min: 2, max: 6, step: 1, default: 2},
       {key: 'weapons', label: 'Weapons', type: 'bool', default: true},
       {key: 'powers', label: 'Powers', type: 'bool', default: true},
-      {key: 'pace', label: 'How often', type: 'select', choices: [['rarely', 'Rarely'], ['sometimes', 'Sometimes'], ['often', 'Often'], ['constantly', 'Constantly']], default: 'often'}],
+      {key: 'power', label: 'Power move interval', type: 'range', min: 5, max: 300, step: 5, unit: 's', default: 20},
+      {key: 'truce', label: 'Petting interval', type: 'range', min: 10, max: 600, step: 10, unit: 's', default: 30}],
     create(ctx) {
       mendAll();  // new tiles arrive whole; any old ones still held are made whole too
       const r = ctx.rand, plats = ground(ctx), n = U.clamp(Math.round(+ctx.opts.fighters || 2), 2, 6), figs = [], duels = [], nd = n >> 1;
@@ -1265,13 +1246,13 @@
       const gg = glow.getContext('2d'), gr = gg.createRadialGradient(32, 32, 0, 32, 32, 32);
       gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.3, 'rgba(190,235,255,.7)'); gr.addColorStop(1, 'rgba(120,190,255,0)'); gg.fillStyle = gr; gg.fillRect(0, 0, 64, 64);
       const st = {plats, figs, duels, spare: null, req: null, fx: [], proj: [], slow: 0, w: ctx.w, h: ctx.h, weapons: ctx.opts.weapons !== false && ctx.opts.weapons !== 0,
-        powers: ctx.opts.powers !== false && ctx.opts.powers !== 0, pace: K_PACE[ctx.opts.pace] || K_PACE.often, rects: ctx.rects, cuts: CUT, pieces: [], pile: new Float32Array(Math.ceil(ctx.w / 24) + 1), slashes: [], shocks: [], cracks: [], glows: [], gl: [], glow, clock: 0, force: null, scene: {actors: [], next: []}, petSeen: 0, petNext: 0, petting: null};
+        powers: ctx.opts.powers !== false && ctx.opts.powers !== 0, pwGap: (+ctx.opts.power || 20), pwNext: (+ctx.opts.power || 20) * (0.3 + r() * 0.4), petGap: (+ctx.opts.truce || 30), petFirst: U.clamp((+ctx.opts.truce || 30) * 0.1, 2, 20), rects: ctx.rects, cuts: CUT, pieces: [], pile: new Float32Array(Math.ceil(ctx.w / 24) + 1), slashes: [], shocks: [], cracks: [], glows: [], gl: [], glow, clock: 0, force: null, scene: {actors: [], next: []}, petSeen: 0, petNext: 0, petting: null};
       // every pair drops in from above onto a tile top of its own
       for (let k = 0; k < nd; k++) {
         const P = spots[k] || plats[0], a = figs[k * 2], b = figs[k * 2 + 1], mid = spots[k] ? (P.x1 + P.x2) / 2 : ctx.w * (k + 1) / (nd + 1);
         a.pl = b.pl = P.i; a.x = mid - 140; b.x = mid + 140; a.y = b.y = -50;
         leapTo(a, P, mid - 28, 1, 0.1 + k * 0.5, false); leapTo(b, P, mid + 28, -1, 0.4 + k * 0.5, true);
-        duels.push({f: [a, b], A: a, B: b, phase: 'salute', rq: 0, pwn: 0, pwMax: 0, n: 0, since: 0, last: '', last2: '', tag: '', wait: 0, bow: false, flee: false});
+        duels.push({f: [a, b], A: a, B: b, phase: 'salute', rq: 0, n: 0, since: 0, last: '', last2: '', tag: '', wait: 0, bow: false, flee: false});
       }
       if (n % 2) {  // the odd one out waits on a corner, on one foot, for the next round
         const f = st.spare = figs[n - 1], S = spots[nd] || plats[0];

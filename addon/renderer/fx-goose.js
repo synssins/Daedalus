@@ -33,17 +33,25 @@
   const hold = () => HOLD || (+(cur && cur.opts.keep) || 60) * 1000;
   const BAN_TYPE = ['camera', 'nav', 'assistant', 'alerts', 'clock', 'weather', 'label', 'image'];
   const BAN_ENTITY = /^(lock|alarm_control_panel|cover|climate|camera)\./;
-  // The pace of everything this kind does on a timer, from the one option "How often". Tune it here.
-  //   visit: minutes between one goose's visits          stick: seconds before it comes out for stick figures
-  //   again: seconds between such visits while they stay  egg: chance of an egg at each opportunity
-  //   train: chance that a visit goes for a running train idle: how long it dawdles between antics (1 = normal)
-  const PACE = {
-    rarely:     {visit: 60,   stick: 180, again: 600, egg: 0.15, train: 0.125, idle: 1.6},
-    sometimes:  {visit: 15,   stick: 60,  again: 180, egg: 0.35, train: 0.25,  idle: 1.25},
-    often:      {visit: 3,    stick: 15,  again: 60,  egg: 0.6,  train: 0.5,   idle: 1},
-    constantly: {visit: 0.67, stick: 4,   again: 20,  egg: 0.9,  train: 0.95,  idle: 0.6},
-  };
-  const pace = () => PACE[cur && cur.opts.every] || PACE.often;
+  // The pace of everything this kind does on a timer comes from one number: the option "Visit interval", the mean
+  // time in minutes between one goose's visits. The rest follows from it, read off these four anchors (in between:
+  // a smooth blend, on the logarithm of the minutes; outside: the nearest one). Tune it here.
+  //   stick: seconds before it comes out for stick figures  again: seconds between such visits while they stay
+  //   egg: chance of an egg at each opportunity             train: chance that a visit goes for a running train
+  //   idle: how long it dawdles between antics (1 = normal)
+  const PACE = [
+    [0.67, {stick: 4,   again: 20,  egg: 0.9,  train: 0.95,  idle: 0.6}],
+    [3,    {stick: 15,  again: 60,  egg: 0.6,  train: 0.5,   idle: 1}],
+    [15,   {stick: 60,  again: 180, egg: 0.35, train: 0.25,  idle: 1.25}],
+    [60,   {stick: 180, again: 600, egg: 0.15, train: 0.125, idle: 1.6}],
+  ];
+  function paceOf(min) {
+    let k = 0; while (k < PACE.length - 2 && min > PACE[k + 1][0]) k++;
+    const a = PACE[k], b = PACE[k + 1], u = U.clamp((Math.log(min) - Math.log(a[0])) / (Math.log(b[0]) - Math.log(a[0])), 0, 1), out = {visit: min};
+    for (const key in a[1]) out[key] = a[1][key] + (b[1][key] - a[1][key]) * u;
+    return out;
+  }
+  const pace = () => paceOf(U.clamp(+(cur && cur.opts.visit) || 3, 0.5, 60));
   const about = sec => sec * 1000 * (0.7 + 0.6 * Math.random());  // a wait of about so many seconds
 
   // ---------- what the geese are up to (survives dashboard changes and restarts) ----------
@@ -242,7 +250,7 @@
   function farFrom(ctx, x, y) { let p; for (let i = 0; i < 40; i++) { p = {x: 70 + Math.random() * (ctx.w - 140), y: 100 + Math.random() * Math.max(1, ctx.h - 130)}; if (Math.hypot(p.x - x, p.y - y) >= 250) break; } return p; }
 
   // ---------- eggs and goslings ----------
-  /** May a goose lay now? One egg at a time, and none once there are four geese. How likely: the pace table. */
+  /** May a goose lay now? One egg at a time, and none once there are four geese. How likely: the pace. */
   const canLay = () => !S.egg && S.geese.filter(q => !q.gone).length < MAX && (Math.random() < pace().egg || !!(cur && cur.opts.egg));
   function lay(page, x, y) { S.egg = {page, x: Math.round(x), y: Math.round(y), at: Date.now()}; save(); }
   function hatch() {
@@ -307,7 +315,7 @@
     const go = m => { v.mode = m; v.T = 0; }, after = () => go(v.i >= 0 && r && r.el === v.el && allowed(r) ? 'tug' : 'exit');
     let pose = 'glare', honk = false, walk = 0, wig = 0, hiss = false, stamp = false, bt = 0, word = 'HONK!';
     v.T += dt * sp;
-    // some visits, when a train is running, are spent on the train instead (how many: the pace table; never with a tile in hand)
+    // some visits, when a train is running, are spent on the train instead (how many: the pace; never with a tile in hand)
     if (!v.trained && !q.taken && !e.tr && /enter|look|honk|exit/.test(v.mode) && v.x > -40 && v.x < ctx.w + 40) {
       const tr = nearest(others(ctx).filter(a => a.kind === 'train'), v.x, v.y, 1e5);
       if (tr) {
@@ -502,7 +510,7 @@
   HP.fx.add('goose', {
     label: 'Goose',
     live: true, fps: 12,
-    options: [{key: 'every', label: 'How often', type: 'select', choices: [['rarely', 'Rarely'], ['sometimes', 'Sometimes'], ['often', 'Often'], ['constantly', 'Constantly']], default: 'often'},
+    options: [{key: 'visit', label: 'Visit interval', type: 'range', min: 0.5, max: 60, step: 0.5, unit: 'min', default: 3},
       {key: 'keep', label: 'Keeps a tile for', type: 'select', choices: [[30, '30 seconds'], [60, '1 minute'], [120, '2 minutes'], [300, '5 minutes'], [600, '10 minutes']], default: 60}],
     create(ctx) {
       cur = ctx;
@@ -553,9 +561,9 @@
         if (q.gone && !e.V) { S.geese.splice(i--, 1); continue; }  // flown
         if (q.phase === 'chick' && !e.V) { chick(q, g, ctx, t, dt, now, line++); continue; }
         if (!e.V && q.phase === 'away') {
-          if (q.next - now > mean() * 1.4) q.next = now + mean() * 1.4;  // "How often" was turned up meanwhile
+          if (q.next - now > mean() * 1.4) q.next = now + mean() * 1.4;  // the interval was shortened meanwhile
           // stick figures on the dashboard: it does not wait for its usual visit. It comes out soon after first
-          // noticing them, and again and again for as long as they stay (how soon: the pace table). Entering, it sees
+          // noticing them, and again and again for as long as they stay (how soon: the pace). Entering, it sees
           // them and the chase comes first.
           if (!sticks) e.sn = null;
           else if (e.sn == null) e.sn = now + about(pace().stick);
@@ -603,7 +611,7 @@
   /** From a console: make the geese come now. */
   HP.fx.gooseNow = () => { S.geese.forEach(q => { if (!q._.V && q.phase === 'away') q.next = 1; }); };
   // for the self-check page only
-  HP.fx.gooseTest = {allowed, pick: (rects, page) => pick(rects, null, page), state: () => S, count: () => S.geese.filter(q => !q.gone).length,
+  HP.fx.gooseTest = {allowed, paceOf, pick: (rects, page) => pick(rects, null, page), state: () => S, count: () => S.geese.filter(q => !q.gone).length,
     times: o => { if ('hold' in o) HOLD = o.hold; if (o.reset) RESET = o.reset; if (o.egg) EGG = o.egg; if (o.grow) GROW = o.grow; },
     add: () => { if (S.geese.length < MAX) { S.geese.push(Object.assign(one(), {next: 1})); S.hatched = Date.now(); } }};
 })();

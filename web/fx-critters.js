@@ -19,8 +19,9 @@
 // }
 // "Where" is a state name, or [[name, weight], ...] to choose by chance, or {key: where, _: where} to choose by
 // the creature's key (its role for the walkers, night or day for the sheep). 0 means: ignore the event.
-// A choice by chance may carry a third item, [name, weight, 'trick']: the weight is then multiplied by that entry of
-// the kind's pace table (W.pace), which is how the "How often" option makes the special things rarer or commoner.
+// A choice by chance may carry a third item, [name, weight, 'trick']: the weight is then multiplied by what the
+// creature's own tag(c, W, 'trick') answers. The sheep uses it to keep its antics to the interval the user set:
+// nothing while the time is not up, almost certainly once it is.
 //
 // Two events come from outside: "notice" (a finger went down somewhere on the glass) and "jolt" (the screen starts
 // to slide to another dashboard). A state takes part by naming where they lead; the rest carry on undisturbed.
@@ -97,7 +98,7 @@
   function pick(t, c, W) {
     for (let n = 0; n < 4 && t && typeof t !== 'string'; n++) {
       if (Array.isArray(t)) {
-        const wt = o => o[1] * (o[2] && W && W.pace ? W.pace[o[2]] : 1);
+        const wt = o => o[1] * (o[2] && c && c.def.tag ? c.def.tag(c, W, o[2]) : 1);
         let sum = 0; for (const o of t) sum += wt(o); let r = Math.random() * sum, got = t[0][0]; for (const o of t) { r -= wt(o); if (r < 0) { got = o[0]; break; } } t = got;
       }
       else { const k = c.def.key(c, W); t = t[k] !== undefined ? t[k] : t._; }
@@ -231,9 +232,11 @@
   }
   const scale = ctx => +ctx.opts.size === 2 ? 2 : 3;
   const SIZE = {key: 'size', label: 'Size', type: 'select', choices: [[2, 'Small'], [3, 'Large']], default: 3};
-  // Nobody stands and watches a wall panel: by default the special things happen often, and how often is the user's choice.
-  const PACE = {key: 'pace', label: 'How often', type: 'select', choices: [['rarely', 'Rarely'], ['sometimes', 'Sometimes'], ['often', 'Often'], ['constantly', 'Constantly']], default: 'often'};
-  const paceOf = (table, ctx) => table[ctx.opts.pace] || table.often;
+  // Nobody stands and watches a wall panel: the special things happen often by default, and how often is the user's
+  // choice, as an interval in seconds.
+  const interval = (ctx, opt) => { const v = +ctx.opts[opt.key]; return v > 0 ? U.clamp(v, opt.min, opt.max) : opt.default; };
+  /** A time about so long: 35% either way. */
+  const about = s => s * (0.65 + Math.random() * 0.7);
 
   // =====================================================================================================
   // Walkers: acorn folk. A russet acorn cap with a stalk, a cream face, red boots. They drop out of a hatch
@@ -271,14 +274,7 @@
   FONT_ART.frames.bang = [[glyph('22202', 'x'), 0, 0]];  // "!", after the digits so their places on the sheet stay
 
   const ROLES = [['walker', 40], ['floater', 14], ['climber', 14], ['builder', 13], ['tunneler', 11], ['blocker', 8]], JOBS = ROLES.slice(1);
-  // "How often" for the walkers. drop: the wait between two walkers leaving the hatch, as a multiple of the usual
-  // (1.25 to 3.25 s for a crowd of eight). job: the share of walkers given a job other than plain walking.
-  const WALK_PACE = {
-    rarely:     {drop: 2.5, job: 1 / 6},
-    sometimes:  {drop: 1.4, job: 0.3},
-    often:      {drop: 0.7, job: 0.5},
-    constantly: {drop: 0.3, job: 0.9},
-  };
+  const DROP = {key: 'drop', label: 'Drop interval', type: 'range', min: 0.3, max: 10, step: 0.1, unit: 's', default: 1.5};  // about this long between two walkers leaving the hatch
   const ACORN = {
     art: ACORN_ART, half: 4, tall: 9, hard: 230, fall: 'fall',
     key: c => c.role,
@@ -390,12 +386,12 @@
   HP.fx.add('walkers', {
     label: 'Walkers',
     live: true, fps: 12,
-    options: [{key: 'count', label: 'How many', type: 'range', min: 3, max: 20, step: 1, default: 8}, SIZE, PACE],
+    options: [{key: 'count', label: 'How many', type: 'range', min: 3, max: 20, step: 1, default: 8}, SIZE, DROP],
     create(ctx) {
       const S = scale(ctx), W = world(ctx, S);
       W.sh = sheet(ACORN_ART, S); W.props = sheet(PROPS_ART, S); W.font = sheet(FONT_ART, 2); prep(ACORN, W.sh);
       const pl = plan(W, ctx);
-      W.hatch = pl.hatch; W.door = pl.door; W.dir = pl.dir; W.saved = 0; W.wait = .5; W.pace = paceOf(WALK_PACE, ctx);
+      W.hatch = pl.hatch; W.door = pl.door; W.dir = pl.dir; W.saved = 0; W.wait = .5; W.drop = interval(ctx, DROP);
       W.spots.push({x: W.door.x, plat: W.door.plat, ev: 'exit', r: 3 * S, lead: 0});
       return W;
     },
@@ -414,7 +410,7 @@
       W.t += dt; W.wait -= dt;
       if (W.wait <= 0 && W.list.length < want) {
         const c = make(ACORN, W.sh, W.hatch.x, W.hatch.y + 6 * S, W.dir);
-        c.role = Math.random() < W.pace.job ? pick(JOBS) : 'walker'; c.alpha = 0; c.born = W.t; go(c, 'drop', W); W.list.push(c); W.wait = (1 + Math.random() * 1.6) * 10 / want * W.pace.drop;  // a bigger crowd comes out faster
+        c.role = pick(ROLES); c.alpha = 0; c.born = W.t; go(c, 'drop', W); W.list.push(c); W.wait = about(W.drop);
       }
       let n = 0, gone = false;
       for (const c of W.list) {
@@ -514,18 +510,15 @@
   }
 
   const FIRE = ['#fffbe0', '#ffe873', '#ffc93c', '#ffa62b', '#ff8424', '#f4631e', '#d9481c', '#b6361b', '#8c2a1a'];
-  // "How often" for the sheep. away: seconds it is gone before the next meteor brings it back. The rest multiply chances:
-  // trick: a run, a look about (which leads to a roll or a jump), a yawn or a sneeze instead of just walking on;
-  // edge: walking off a tile's end, or climbing a tile's side, instead of turning round;
-  // wake: at night, antics instead of going to sleep (0: it only sleeps, sits, yawns and strolls);
-  // nap: a night's sleep is this many times shorter; nosy: the chance, on coming to rest, of going over to a neighbour of another kind.
-  const SHEEP_PACE = {
-    rarely:     {away: [120, 300], trick: 0.4, edge: 0.5, wake: 0,   nap: 1,   nosy: 0.1},
-    sometimes:  {away: [30, 70],   trick: 1,   edge: 1,   wake: 0.3, nap: 1.5, nosy: 0.3},
-    often:      {away: [10, 20],   trick: 2.2, edge: 2,   wake: 1,   nap: 3,   nosy: 0.5},
-    constantly: {away: [3, 6],     trick: 4,   edge: 3.5, wake: 2.5, nap: 6,   nosy: 0.8},
-  };
+  // The sheep's two intervals. Return: about how long it is gone before the next meteor brings it back.
+  // Trick: about how long between antics while it is here (a run, a look about that ends in a roll or a jump, a yawn,
+  // a sneeze, walking off a tile's end, climbing a tile's side); in between it walks, grazes and sits. Each sheep has
+  // a time for its next antic (c.next): until then the antics are not among its choices, after it they nearly always
+  // win, and doing one sets the next time. At night that time is three intervals off, so it mostly sleeps.
+  const AWAY = {key: 'away', label: 'Return interval', type: 'range', min: 3, max: 300, step: 1, unit: 's', default: 15};
+  const TRICK = {key: 'trick', label: 'Trick interval', type: 'range', min: 3, max: 120, step: 1, unit: 's', default: 12};
   const SHEEP = {
+    tag: (c, W) => W.t >= c.next ? 40 : 0,
     art: SHEEP_ART, half: 6, tall: 9, hard: 250, fall: 'fall',
     key: (c, W) => W.ctx.env.night ? 'night' : 'day',
     on: {tap: 'bleat', grab: 'held'},
@@ -535,23 +528,23 @@
       impact: {frames: ['dazed'], ft: .3, enter: 'crater', tick: 'stars', dur: [1.5, 2.3], next: 'shake'},
       shake:  {frames: ['sitL', 'sitF', 'sitR', 'sitF'], ft: .09, dur: 1.08, next: 'idle'},
       idle:   {frames: ['stand', 'stand', 'stand', 'stand', 'stand', 'stand', 'blink'], ft: .3, dur: [1.2, 3.5], enter: 'nosy',
-        next: {night: [['sleep', 6], ['sit', 2], ['yawn', 2], ['walk', 1.5], ['look', 1.2, 'wake'], ['run', .8, 'wake'], ['sneeze', .5, 'wake']],
+        next: {night: [['sleep', 6], ['sit', 2], ['yawn', 2], ['walk', 1.5], ['look', 1.2, 'trick'], ['run', .8, 'trick'], ['sneeze', .5, 'trick']],
           _: [['walk', 6], ['run', 1.2, 'trick'], ['sit', 1.5], ['look', 1.6, 'trick'], ['yawn', .7, 'trick'], ['sneeze', .5, 'trick'], ['turn', 1], ['sleep', .6]]}},
       turn:   {frames: ['stand'], enter: 'flip', dur: 0, next: 'walk'},
       walk:   {frames: ['walk0', 'stand', 'walk1', 'stand'], ft: .16, vx: 8, dur: [2, 7], next: 'idle',
-        on: {edge: [['turn', 3], ['fall', 1.3, 'edge']], wall: [['turn', 3], ['climb', 1.2, 'edge']], screen: [['turn', 2], ['leave', 1]], tuft: [['graze', 4], [0, 1]]}},
-      run:    {frames: ['run0', 'run1'], ft: .11, vx: 24, dur: [.8, 2.2], next: 'idle', on: {edge: [['fall', 2, 'edge'], ['turn', 1]], wall: 'turn', screen: [['turn', 1], ['leave', 1]]}},
+        on: {edge: [['turn', 3], ['fall', 1.3, 'trick']], wall: [['turn', 3], ['climb', 1.2, 'trick']], screen: [['turn', 2], ['leave', 1]], tuft: [['graze', 4], [0, 1]]}},
+      run:    {frames: ['run0', 'run1'], ft: .11, vx: 24, enter: 'antic', dur: [.8, 2.2], next: 'idle', on: {edge: [['fall', 2], ['turn', 1]], wall: 'turn', screen: [['turn', 1], ['leave', 1]]}},
       graze:  {frames: ['graze0', 'graze1'], ft: .22, enter: 'nibble', tick: 'chew', dur: [3, 6], next: 'idle'},
       sit:    {frames: ['sit'], dur: [2.5, 7], next: {night: 'sleep', _: [['idle', 3], ['sleep', 1], ['look', 1]]}},
       sleep:  {frames: ['sleep0', 'sleep1'], ft: 1, tick: 'zzz', enter: 'doze', dur: {night: [40, 120], _: [9, 26]}, next: {night: 'yawn', _: [['yawn', 4], ['launch', 1]]}},
-      yawn:   {frames: ['stand', 'yawn', 'yawn', 'yawn', 'stand'], ft: .3, once: 1, next: 'idle'},
-      look:   {frames: ['look'], dur: [1.5, 3], next: [['idle', 2], ['roll', 1, 'trick'], ['jump', 1, 'trick']]},  // bored: a trick
+      yawn:   {frames: ['stand', 'yawn', 'yawn', 'yawn', 'stand'], ft: .3, once: 1, enter: 'antic', next: 'idle'},
+      look:   {frames: ['look'], dur: [1.5, 3], enter: 'antic', next: [['idle', 2], ['roll', 2], ['jump', 2]]},  // bored: a trick
       roll:   {frames: ['run1'], spin: 1.4, vx: 16, dur: .714, next: 'idle', on: {edge: 'fall', wall: 'idle', screen: 'idle'}},
       jump:   {frames: ['run0'], move: 'air', jump: 330, on: {land: 'idle'}},
-      fall:   {frames: ['fall0', 'fall1'], ft: .09, move: 'air', on: {land: 'bounce', crash: 'impact'}},
+      fall:   {frames: ['fall0', 'fall1'], ft: .09, move: 'air', enter: 'antic', on: {land: 'bounce', crash: 'impact'}},
       bounce: {frames: ['fall0'], move: 'air', jump: 190, on: {land: 'idle'}},
-      climb:  {frames: ['walk0', 'stand', 'walk1', 'stand'], ft: .14, move: 'climb', rot: -.25, vy: 7, on: {top: 'walk'}},
-      sneeze: {frames: ['sneeze0', 'sneeze0', 'sneeze0', 'sneeze1', 'sneeze1', 'stand'], ft: .16, once: 1, tick: 'spray', next: 'idle'},
+      climb:  {frames: ['walk0', 'stand', 'walk1', 'stand'], ft: .14, move: 'climb', rot: -.25, vy: 7, enter: 'antic', on: {top: 'walk'}},
+      sneeze: {frames: ['sneeze0', 'sneeze0', 'sneeze0', 'sneeze1', 'sneeze1', 'stand'], ft: .16, once: 1, enter: 'antic', tick: 'spray', next: 'idle'},
       bleat:  {frames: ['yawn'], move: 'air', jump: 300, enter: 'baa', on: {land: 'idle'}},
       held:   {frames: ['fall0', 'fall1'], ft: .1, move: 'held', on: {drop: 'fall', grab: 0}},
       // a finger on the glass: it stops and looks that way for a moment
@@ -570,8 +563,10 @@
     },
     acts: {
       flip(c) { c.dir = -c.dir; },
-      absent(c, W) { const a = W.pace.away; c.dur = a[0] + Math.random() * (a[1] - a[0]); },
-      doze(c, W) { if (W.ctx.env.night) c.dur /= W.pace.nap; },
+      absent(c, W) { c.dur = about(W.away); },
+      doze(c, W) { if (W.ctx.env.night) c.dur /= 3; },
+      // that was an antic: when the next one is due. (The yawn on waking at night does not count, or it would never get to anything else.)
+      antic(c, W) { const night = W.ctx.env.night; if (!(night && c.st === 'yawn')) c.next = W.t + about(W.trick) * (night ? 3 : 1); },
       face(c, W) { if (Math.abs(W.look.x - c.x) > 6 * W.S) c.dir = W.look.x < c.x ? -1 : 1; },
       jolt(c, W) { c.dir = W.jolt; },
       love(c, W) {
@@ -580,7 +575,7 @@
       },
       // Now and then, on coming to rest: is somebody of another kind standing near, on this level? Then go and see.
       nosy(c, W) {
-        const sc = W.ctx.scene; if (!sc || Math.random() > W.pace.nosy) return;
+        const sc = W.ctx.scene; if (!sc || Math.random() > .5) return;
         for (const a of sc.actors) if (a.kind !== 'sheep' && Math.abs(a.y - c.y) < 12 && Math.abs(a.x - c.x) < 150 && Math.abs(a.x - c.x) > 14 * W.S) { c.dir = a.x < c.x ? -1 : 1; go(c, 'visit', W); return; }
       },
       // The meteor's target: a spot on a tile top. The first landing comes from the seed, later ones from chance.
@@ -631,10 +626,10 @@
   HP.fx.add('sheep', {
     label: 'Sheep',
     live: true, fps: 12,
-    options: [{key: 'count', label: 'How many', type: 'range', min: 1, max: 5, step: 1, default: 1}, {key: 'sound', label: 'Sound', type: 'bool', default: false}, SIZE, PACE],
+    options: [{key: 'count', label: 'How many', type: 'range', min: 1, max: 5, step: 1, default: 1}, {key: 'sound', label: 'Sound', type: 'bool', default: false}, SIZE, AWAY, TRICK],
     create(ctx) {
       const S = scale(ctx), W = world(ctx, S), r = ctx.rand;
-      W.sh = sheet(SHEEP_ART, S); W.ex = sheet(EXTRA_ART, S); prep(SHEEP, W.sh); W.marks = []; W.grip = null; W.pace = paceOf(SHEEP_PACE, ctx);
+      W.sh = sheet(SHEEP_ART, S); W.ex = sheet(EXTRA_ART, S); prep(SHEEP, W.sh); W.marks = []; W.grip = null; W.away = interval(ctx, AWAY); W.trick = interval(ctx, TRICK);
       // one soft dot for the meteor's glow, stamped rather than a gradient per frame
       W.glow = document.createElement('canvas'); W.glow.width = W.glow.height = 64;
       const d = W.glow.getContext('2d'), gr = d.createRadialGradient(32, 32, 0, 32, 32, 32);
@@ -648,7 +643,7 @@
       const n = U.clamp(Math.round(+ctx.opts.count || 1), 1, 5);
       for (let i = 0; i < n; i++) {
         const c = make(SHEEP, W.sh, 0, -200, 1); c.first = [Math.floor(r() * 1000), r(), r() < .5 ? -1 : 1];
-        go(c, 'away', W); c.dur = .3 + i * (1.2 + r() * 1.5); W.list.push(c);
+        go(c, 'away', W); c.dur = .3 + i * (1.2 + r() * 1.5); c.next = about(W.trick) * .5; W.list.push(c);
       }
       return W;
     },
