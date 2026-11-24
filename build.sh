@@ -1,6 +1,6 @@
 #!/bin/sh
 # Builds HomePanel.app on macOS without an Xcode project: compile, assemble the bundle, ad-hoc sign.
-# Output: build/HomePanel.app.tar.gz (tar, not zip, so the executable bit survives the artifact upload).
+# Output: build/HomePanel.app.tar (plain tar: keeps the executable bit, and the iPads have no gzip).
 set -eu
 APP=build/HomePanel.app
 rm -rf build
@@ -17,4 +17,4 @@ sed -i '' "s/<!--BUILD-->/${GITHUB_SHA:-local}/" "$APP/web/index.html"
 
 # Ad-hoc signature carrying our entitlements; the unlocked iPads accept it.
 codesign -f -s - --entitlements entitlements.plist "$APP"
-tar -czf build/HomePanel.app.tar.gz -C build HomePanel.app
+tar -cf build/HomePanel.app.tar -C build HomePanel.app

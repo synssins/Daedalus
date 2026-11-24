@@ -12,5 +12,5 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: HomePanel
-          path: build/HomePanel.app.tar.gz
+          path: build/HomePanel.app.tar
           retention-days: 7
