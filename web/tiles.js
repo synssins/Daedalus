@@ -22,8 +22,8 @@
     },
   });
 
-  const SKY = {sunny: 'weather-sunny', 'clear-night': 'weather-night', partlycloudy: 'weather-partly-cloudy', cloudy: 'weather-cloudy',
-    rainy: 'weather-rainy', pouring: 'weather-rainy', snowy: 'weather-snowy', fog: 'weather-cloudy', windy: 'weather-cloudy', lightning: 'weather-rainy'};
+  // shortcut: the starter icon set has three sky icons; everything that is not clear shows the cloud until the full set ships.
+  const SKY = {sunny: 'weather-sunny', 'clear-night': 'weather-night'};
   HP.tile('weather', {
     create(t, body, ctx, i) { i.p = U.card(body, 'weather-cloudy'); },
     update(t, body, ctx, i) {
