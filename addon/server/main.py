@@ -343,16 +343,18 @@ async def start_mdns(app: web.Application):
         info = ServiceInfo("_homepanel._tcp.local.", "HomePanel Studio._homepanel._tcp.local.", addresses=[socket.inet_aton(ip)],
                            port=PORT, properties={"v": "1"}, server=f"homepanel-{ip.replace('.', '-')}.local.")
         app["zc"] = AsyncZeroconf()
-        await app["zc"].async_register_service(info)
+        # Another copy on the network (a development server) may hold the name: take a numbered one instead of failing.
+        await app["zc"].async_register_service(info, allow_name_change=True)
         app["zc_info"] = info
         log.info("advertising _homepanel._tcp at %s:%s", ip, PORT)
     except Exception as e:  # discovery is a convenience; the server works without it
-        log.warning("mDNS advertising off: %s", e)
+        log.warning("mDNS advertising off: %r", e)
 
 
 async def stop_mdns(app: web.Application):
     if app.get("zc"):
-        await app["zc"].async_unregister_service(app["zc_info"])
+        if app.get("zc_info"):
+            await app["zc"].async_unregister_service(app["zc_info"])
         await app["zc"].async_close()
 
 
