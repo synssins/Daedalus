@@ -55,7 +55,22 @@ class HA {
 // ---------- live camera over HA's WebRTC signalling (HA hands the stream to its go2rtc) ----------
 function playCamera(ha, entity, video, status) {
   let pc, closed = false;
+  const startHLS = async () => {
+    status('starting video');
+    const hls = await ha.call({type: 'camera/stream', entity_id: entity});
+    if (closed) return;
+    video.srcObject = null;
+    video.src = ha.url.replace(/^ws/, 'http').replace(/\/api\/websocket$/, '') + hls.url;
+    video.onplaying = () => status('');
+    // Seen on Air 2: H.265 level 4.0 (~0.4 Mbit/s) plays, level 5.0 (~4 Mbit/s) fails with MEDIA_ERR_DECODE (3).
+    video.onerror = () => status('stills, video too heavy (error ' + (video.error && video.error.code) + ')');
+    video.play().catch(() => {});
+  };
+  // shortcut: a camera that once needed HLS stays on HLS; clear localStorage if it is later switched to H.264.
+  const hlsKey = 'hls:' + entity;
+  let knownHLS = false; try { knownHLS = !!localStorage.getItem(hlsKey); } catch (e) {}
   (async () => {
+    if (knownHLS) return startHLS();
     const cfg = await ha.call({type: 'camera/webrtc/get_client_config', entity_id: entity}).catch(() => ({}));
     if (closed) return;
     pc = new RTCPeerConnection(cfg.configuration || {});
@@ -80,18 +95,10 @@ function playCamera(ha, entity, video, status) {
       if (frames > 0) return status('');
       // WebRTC here only decodes H.264. An H.265 camera connects but sends nothing: fall back to HLS,
       // which this web view plays natively (slower to start, several seconds behind live).
-      if (++blank < 2) return status('no picture (' + info + ')');
+      if (++blank < 2) return status('starting video');
       clearInterval(watch); pc.close();
-      status('H.265 camera, starting HLS');
-      const hls = await ha.call({type: 'camera/stream', entity_id: entity});
-      if (closed) return;
-      video.srcObject = null;
-      video.src = ha.url.replace(/^ws/, 'http').replace(/\/api\/websocket$/, '') + hls.url;
-      video.onplaying = () => status('');
-      // Seen on Air 2: H.265 level 4.0 (~0.4 Mbit/s) plays, level 5.0 (~4 Mbit/s) fails with MEDIA_ERR_DECODE (3).
-      video.onerror = () => status('stream too heavy for this iPad (code ' + (video.error && video.error.code) +
-        '): turn on a Medium or Low RTSPS channel for this camera in Protect');
-      video.play().catch(() => {});
+      try { localStorage.setItem(hlsKey, '1'); } catch (e) {}
+      startHLS().catch(e => status(e.message));
     }, 4000);
     let blank = 0;
 
@@ -141,15 +148,40 @@ function render(states, only) {
     video.muted = true; video.autoplay = true; video.playsInline = true; video.setAttribute('playsinline', '');
     const label = document.createElement('div'); label.className = 'label';
     const name = (s.attributes.friendly_name || s.entity_id).replace(/ High resolution channel$/i, '');
-    const status = t => { label.textContent = t ? name + ' · ' + t : name; tile.classList.toggle('dead', !!t); };
-    tile.append(video, label);
+    const status = t => { label.textContent = t ? name + ' · ' + t : name; tile.classList.toggle('live', !t); };
+    const img = document.createElement('img');
+    tile.append(img, video, label);
     wall.append(tile);
-    if (s.state === 'unavailable') status('unavailable');
-    else if (!(s.attributes.supported_features & 2)) status('no stream: turn on RTSP for this camera in Protect');
-    else if (live < MAX_LIVE || only) { live++; status('connecting'); stops.push(playCamera(ha, s.entity_id, video, status)); }
-    else status('tap to view');
+    if (s.state === 'unavailable') { tile.classList.add('dead'); status('unavailable'); }
+    else {
+      stops.push(snapshots(s, img, tile));
+      if (!(s.attributes.supported_features & 2)) status('stills, RTSPS off');
+      else if (live < MAX_LIVE || only) { live++; status('connecting'); stops.push(playCamera(ha, s.entity_id, video, status)); }
+      else status('tap for video');
+    }
     tile.onclick = () => load(only ? null : s.entity_id);
   }
+}
+
+/** Refresh a still image about once a second while the tile has no live video. Instant picture at start-up. */
+function snapshots(s, img, tile) {
+  const base = ha.url.replace(/^ws/, 'http').replace(/\/api\/websocket$/, '');
+  let pic = s.attributes.entity_picture, busy = false, stopped = false;
+  const next = () => {
+    if (stopped || busy || !pic || tile.classList.contains('live')) return;
+    busy = true; img.src = base + pic + '&t=' + Date.now();
+  };
+  img.onload = () => { busy = false; };
+  // The picture URL carries a token HA rotates every few minutes: fetch the current one when it stops working.
+  img.onerror = () => {
+    ha.call({type: 'get_states'}).then(st => {
+      const cur = st.find(x => x.entity_id === s.entity_id);
+      if (cur) pic = cur.attributes.entity_picture;
+    }).catch(() => {}).then(() => { busy = false; });
+  };
+  next();
+  const timer = setInterval(next, 1000);
+  return () => { stopped = true; clearInterval(timer); };
 }
 
 function load(only) {
