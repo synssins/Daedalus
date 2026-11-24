@@ -27,7 +27,8 @@ ROOT = Path(__file__).resolve().parents[1]
 PORT = int(os.environ.get("HOMEPANEL_PORT", "8722"))
 DATA = Path(os.environ.get("HOMEPANEL_DATA", "/data" if Path("/data").is_dir() else ROOT / "data"))
 # Renderer files: shipped inside the add-on image, or the repo's web/ folder in development.
-RENDERER = next(p for p in (ROOT / "renderer", ROOT.parent / "web") if p.is_dir())
+# The repo's web/ wins when it is there (development); the add-on image only has the copy in renderer/.
+RENDERER = next(p for p in (ROOT.parent / "web", ROOT / "renderer") if p.is_dir())
 
 SUPERVISOR_TOKEN = os.environ.get("SUPERVISOR_TOKEN")
 if SUPERVISOR_TOKEN:
