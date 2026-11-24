@@ -2,12 +2,19 @@
 
 // ---------- native bridge ----------
 const pending = {}; let seq = 0;
-function native(cmd, extra) {
+function native(cmd, extra, ms) {
+  if (!(window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.native)) {
+    // Not inside the tablet app: this is the Studio's preview pane. Its settings come from the page address.
+    if (cmd !== 'ping') return Promise.reject(new Error('no native bridge'));
+    const q = new URLSearchParams(location.search);
+    return Promise.resolve({config: {server: new URL('..', location.href).href.replace(/\/$/, ''), key: q.get('key'), design: q.get('design'), preview: true},
+      device: {id: 'preview'}});
+  }
   return new Promise((res, rej) => {
     const id = ++seq; pending[id] = res;
     try { window.webkit.messageHandlers.native.postMessage(Object.assign({id, cmd}, extra)); }
     catch (e) { delete pending[id]; rej(e); }
-    setTimeout(() => { if (pending[id]) { delete pending[id]; rej(new Error('native: no reply')); } }, 3000);
+    setTimeout(() => { if (pending[id]) { delete pending[id]; rej(new Error('native: no reply')); } }, ms || 3000);
   });
 }
 window.nativeReply = m => { const f = pending[m.id]; if (f) { delete pending[m.id]; f(m); } };

@@ -27,6 +27,7 @@
 		<key>NSAllowsArbitraryLoads</key><true/>
 		<key>NSAllowsLocalNetworking</key><true/>
 	</dict>
+	<key>NSBonjourServices</key><array><string>_homepanel._tcp</string></array>
 	<key>NSLocalNetworkUsageDescription</key><string>Talks to Home Assistant and cameras on the home network.</string>
 	<key>NSCameraUsageDescription</key><string>Wakes the panel when someone approaches.</string>
 	<key>NSMicrophoneUsageDescription</key><string>Push-to-talk voice assistant.</string>

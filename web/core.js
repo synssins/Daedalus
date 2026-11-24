@@ -5,6 +5,8 @@
 
 const HP = window.HP = {tiles: {}, icons: window.HP_ICONS || {}, S: {states: {}, areas: {}, reg: {}}, design: null, live: [], stack: []};
 HP.tile = (name, def) => { HP.tiles[name] = def; };
+/** Pictures named in a design live on the server; without one, in the app bundle. */
+HP.asset = p => !p || /^(https?:|data:)/.test(p) || !HP.server ? p : HP.server + '/' + p.replace(/^\//, '');
 
 const $ = id => document.getElementById(id);
 const S = HP.S;
@@ -50,7 +52,7 @@ function applyTheme(th) {
   const vars = {'--text': th.text, '--font': th.font, '--fill': t.fill, '--fill-on': t.fillOn, '--text-on': t.textOn,
     '--radius': t.radius != null ? t.radius + 'px' : null, '--border': t.border, '--gap': t.gap != null ? t.gap + 'px' : null, '--glow-on': t.glowOn};
   for (const k in vars) if (vars[k] != null) r.setProperty(k, vars[k]);
-  const bg = th.background || {}, img = bg.image ? `url("${bg.image}")` : 'none';
+  const bg = th.background || {}, img = bg.image ? `url("${HP.asset(bg.image)}")` : 'none';
   $('bg').style.background = `${bg.color || '#101820'} ${img} center / cover no-repeat`;
   $('blur').style.background = $('bg').style.background;
   $('dim').style.background = `rgba(0,0,0,${bg.dim || 0})`;
@@ -99,7 +101,7 @@ function show() {
     if (s.radius != null) el.style.setProperty('--radius', s.radius + 'px');
     if (s.border) el.style.setProperty('--border', s.border);
     if (s.opacity != null) el.style.opacity = s.opacity;
-    el.innerHTML = '<div class="fill"></div>' + (s.image ? `<div class="pic" style="background-image:url('${U.esc(s.image)}')"></div>` : '') + '<div class="body"></div><div class="rim"></div>';
+    el.innerHTML = '<div class="fill"></div>' + (s.image ? `<div class="pic" style="background-image:url('${U.esc(HP.asset(s.image))}')"></div>` : '') + '<div class="body"></div><div class="rim"></div>';
     grid.append(el);
     const inst = {t, el, def, body: el.querySelector('.body')};
     const tap = () => { const a = def.tap ? def.tap(t, ctx, inst) : null; if (a) (t.confirm ? confirmBox(t.confirm, a) : a()); };
@@ -145,6 +147,16 @@ function confirmBox(text, yes) {
 }
 
 // ---------- boot ----------
+const keep = {  // survives restarts, so the panel still draws its last design when the server is away
+  get(k) { try { return JSON.parse(localStorage.getItem('hp:' + k)); } catch (e) { return null; } },
+  set(k, v) { try { localStorage.setItem('hp:' + k, JSON.stringify(v)); } catch (e) {} },
+};
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+function splash(title, text) {
+  $('splash').innerHTML = title ? `<div><div class="st">${U.esc(title)}</div><div class="sx">${U.esc(text || '')}</div></div>` : '';
+  $('splash').className = title ? 'open' : '';
+}
+
 async function loadAll() {
   const ha = HP.ha, [areas, devices, ents, states] = await Promise.all([
     ha.call({type: 'config/area_registry/list'}), ha.call({type: 'config/device_registry/list'}),
@@ -158,18 +170,87 @@ async function loadAll() {
     if (d.new_state) S.states[d.entity_id] = d.new_state; else delete S.states[d.entity_id];
     dirty();
   });
-  show();
+  HP.ready = true;
+  if (HP.design) show();
 }
 
-native('ping').then(m => {
-  const cfg = m.config || {}, d = HP.design = window.HP_DESIGN;
-  if (!d) return toast('No design loaded');
-  if (!cfg.ha_url || !cfg.ha_token) return toast('config.json needs ha_url and ha_token');
+/** Put a design on screen. Called at start, when the server says it changed, and by the Studio while editing. */
+HP.setDesign = (d, page) => {
+  HP.design = d;
   applyTheme(d.theme || {});
-  HP.stack = [{page: cfg.start_page || d.start || d.pages[0].id}];
-  HP.ha = new HA(cfg.ha_url, cfg.ha_token);
+  const keepPage = page || (HP.stack.length && d.pages.some(p => p.id === HP.stack[0].page) ? HP.stack[0].page : null);
+  HP.stack = [{page: keepPage || HP.startPage || d.start || d.pages[0].id}];
+  splash();
+  if (HP.ready) show();
+};
+
+function connectHA(url, token) {
+  HP.ha = new HA(url, token);
   HP.ha.onstate = s => { if (s === 'online') $('bar').textContent = ''; else toast('Home Assistant: ' + s); console.log('HA ' + s); };
   HP.ha.onready = () => loadAll().catch(e => toast('load failed: ' + e.message));
   HP.ha.connect();
+}
+
+/** Normal mode: everything comes from HomePanel Studio (the HA add-on). */
+async function serverMode(server, cfg) {
+  HP.server = server; keep.set('server', server);
+  const auth = () => ({headers: {Authorization: 'Bearer ' + HP.key}});
+  const pull = async () => {
+    const r = await fetch(server + '/api/design' + (cfg.design ? '?design=' + encodeURIComponent(cfg.design) : ''), auth());
+    if (r.status === 401) { keep.set('key', null); location.reload(); return; }  // approval was withdrawn: start over
+    const j = await r.json();
+    HP.startPage = j.tablet && j.tablet.start_page;
+    if (!j.design) return splash('No dashboard yet', 'Choose one for "' + ((j.tablet && j.tablet.name) || 'this tablet') + '" in HomePanel Studio.');
+    keep.set('design', j.design);
+    HP.setDesign(j.design);
+  };
+
+  HP.key = cfg.key || null;
+  while (!HP.key) {  // say hello until someone approves this tablet in the Studio
+    try {
+      const dev = Object.assign({width: innerWidth, height: innerHeight, scale: devicePixelRatio}, HP.device);
+      const r = await (await fetch(server + '/api/hello', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(dev)})).json();
+      if (r.status === 'approved') HP.key = r.key;
+      else splash('Waiting for approval', 'Open HomePanel Studio in Home Assistant and approve "' + r.name + '".');
+    } catch (e) {
+      if (keep.get('key')) HP.key = keep.get('key');  // server away: carry on with what we had
+      else splash('Looking for HomePanel Studio', server);
+    }
+    if (!HP.key) await sleep(4000);
+  }
+  keep.set('key', HP.key);
+
+  if (keep.get('design') && !cfg.preview) HP.setDesign(keep.get('design'));  // last known design at once, fresh one right after
+  connectHA(server, HP.key);
+  pull().catch(e => { if (!HP.design) splash('Cannot reach HomePanel Studio', e.message); });
+
+  if (cfg.preview) {  // the Studio sends unsaved edits straight in
+    window.addEventListener('message', ev => { const m = ev.data || {}; if (m.type === 'hp-design') HP.setDesign(m.design, m.page); });
+    if (window.parent !== window) window.parent.postMessage({type: 'hp-ready'}, '*');
+    return;
+  }
+  (function listen() {  // the server says when this tablet's design changed
+    const ws = new WebSocket(server.replace(/^http/, 'ws') + '/api/events?key=' + encodeURIComponent(HP.key));
+    ws.onmessage = () => pull().catch(() => {});
+    ws.onclose = () => setTimeout(listen, 5000);
+  })();
+}
+
+native('ping').then(async m => {
+  const cfg = m.config || {};
+  HP.device = m.device || {};
   setInterval(dirty, 20000);  // keeps clocks current
-}).catch(e => toast('native bridge failed: ' + e.message));
+  let server = cfg.server;
+  if (!server) {
+    try { const s = ((await native('discover', {}, 6000)).servers || [])[0]; if (s) server = 'http://' + s.host + ':' + s.port; } catch (e) { console.log('discover: ' + e.message); }
+  }
+  server = server || keep.get('server');
+  if (server) return serverMode(server.replace(/\/$/, ''), cfg);
+
+  // No server known: draw the design bundled with the app and talk to Home Assistant directly.
+  if (!window.HP_DESIGN) return splash('Looking for HomePanel Studio', 'No server found on the network yet.');
+  if (!cfg.ha_url || !cfg.ha_token) return splash('Not set up', 'No HomePanel Studio found and no Home Assistant address in config.json.');
+  HP.startPage = cfg.start_page;
+  HP.setDesign(window.HP_DESIGN);
+  connectHA(cfg.ha_url, cfg.ha_token);
+}).catch(e => splash('Cannot start', e.message));
