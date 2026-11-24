@@ -168,6 +168,13 @@ components:
 
 # Design System: HomePanel
 
+> **Changed 2026-11-24 (owner's decision).** HomePanel Studio no longer has a look of its own. It takes every colour,
+> the font and the corner radius from the active Home Assistant theme (`addon/studio/studio.css` reads HA's theme
+> variables; `haTheme()` in `studio.js` copies them from the page around it). The "lighting plot" palette described
+> below for the Studio is retired; only the selection colour rule survives, now using HA's accent colour.
+> The tablet renderer sections still apply. Words on screen: Panel, Dashboard, Button, Device, Theme.
+
+
 ## Overview
 
 **Creative North Star: "The Lighting Plot"**
