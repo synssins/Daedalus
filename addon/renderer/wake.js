@@ -55,6 +55,7 @@
   document.createElement = function (tag) { const el = make.apply(null, arguments); if (String(tag).toLowerCase() === 'script') el.crossOrigin = 'anonymous'; return el; };
   async function load() {
     const base = HP.server + '/wake/';
+    window.exports = window.exports || {};  // the runtime's last line assumes a module loader is present
     if (!window.tfweb) { await script(base + 'tflite_web_api_client.js'); tfweb.tflite_web_api.setWasmPath(base); }
     const open = async name => tfweb.TFLiteWebModelRunner.create(await (await fetch(base + name + '.tflite')).arrayBuffer(), {numThreads: 1});
     const r = rt || {embed: await open('embedding_model'), words: {}};
@@ -109,8 +110,16 @@
       if (loading) return;
       loading = true;
       try {
+        const t0 = performance.now();
         await load();
-        if (!listening) { await HP.mic.on(feed); listening = true; }
+        HP.report('wake: models ready in ' + Math.round(performance.now() - t0) + ' ms: ' + Object.keys(rt.words).join(', '));
+        if (!listening) {
+          // the first time, iOS asks on the tablet's screen whether the app may use the microphone, and waits for an answer
+          const nag = setTimeout(() => HP.report('wake: waiting for the microphone; answer the question on the device screen'), 20000);
+          try { await HP.mic.on(feed); } finally { clearTimeout(nag); }
+          listening = true;
+          HP.report('wake: microphone open (' + (HP.mic.native ? 'app' : 'browser') + ')');
+        }
       } catch (e) { HP.report('wake: not listening: ' + e.message); }
       loading = false;
     },

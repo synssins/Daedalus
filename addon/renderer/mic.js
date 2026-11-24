@@ -35,8 +35,8 @@
   }
   function start() {
     if (starting) return starting;
-    starting = native('mic', {on: true}, 15000).then(r => { if (r.error) throw new Error(r.error === 'denied' ? 'The microphone is not allowed on this device' : r.error); HP.mic.native = true; },
-      () => startWeb()).catch(e => { starting = null; throw e; });
+    starting = native('mic', {on: true}, 3600000).then(r => { if (r.error) throw new Error(r.error === 'denied' ? 'The microphone is not allowed on this device' : r.error); HP.mic.native = true; },
+      e => { if (/no native bridge/.test(e.message)) return startWeb(); throw e; }).catch(e => { starting = null; throw e; });
     return starting;
   }
   function stop() {
