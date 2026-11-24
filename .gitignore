@@ -1,0 +1,7 @@
+build/
+dist/
+config.json
+.env
+CLAUDE.md
+AGENTS.md
+.claude/

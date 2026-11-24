@@ -1,0 +1,92 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>HomePanel loop test</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #101418; color: #e8edf2;
+    font: 22px -apple-system, Helvetica, sans-serif; -webkit-user-select: none; }
+  main { padding: 40px 56px; }
+  h1 { font-size: 34px; margin: 0 0 6px; }
+  .sub { color: #8a97a5; margin-bottom: 28px; }
+  .row { display: flex; align-items: baseline; padding: 16px 0; border-top: 1px solid #26303a; }
+  .name { width: 300px; font-weight: 600; }
+  .state { width: 110px; font-weight: 700; }
+  .wait { color: #d9a441; } .ok { color: #4cc38a; } .fail { color: #f0616d; }
+  .detail { flex: 1; color: #a9b6c3; font-size: 18px; word-break: break-word; }
+  button { font: inherit; margin: 26px 14px 0 0; padding: 14px 26px; border: 0; border-radius: 10px;
+    background: #2f6fed; color: #fff; }
+</style>
+</head>
+<body>
+<main>
+  <h1>HomePanel loop test</h1>
+  <div class="sub" id="sub">build <!--BUILD--></div>
+  <div class="row"><div class="name">Native bridge</div><div class="state wait" id="s-bridge">wait</div><div class="detail" id="d-bridge"></div></div>
+  <div class="row"><div class="name">Home Assistant socket</div><div class="state wait" id="s-ha">wait</div><div class="detail" id="d-ha"></div></div>
+  <div class="row"><div class="name">WebRTC receive (H.264)</div><div class="state wait" id="s-rtc">wait</div><div class="detail" id="d-rtc"></div></div>
+  <button onclick="dim(0.1)">Brightness 10%</button>
+  <button onclick="dim(0.8)">Brightness 80%</button>
+</main>
+<script>
+function set(id, ok, detail) {
+  const s = document.getElementById('s-' + id);
+  s.textContent = ok ? 'OK' : 'FAIL'; s.className = 'state ' + (ok ? 'ok' : 'fail');
+  document.getElementById('d-' + id).textContent = detail;
+  console.log('CHECK ' + id + ' ' + (ok ? 'OK' : 'FAIL') + ' ' + detail);
+}
+
+// --- native bridge ---
+const pending = {}; let seq = 0;
+function native(cmd, extra) {
+  return new Promise((res, rej) => {
+    const id = ++seq; pending[id] = res;
+    try { window.webkit.messageHandlers.native.postMessage(Object.assign({id, cmd}, extra)); }
+    catch (e) { delete pending[id]; rej(e); }
+    setTimeout(() => { if (pending[id]) { delete pending[id]; rej(new Error('no reply in 3 s')); } }, 3000);
+  });
+}
+window.nativeReply = m => { const f = pending[m.id]; if (f) { delete pending[m.id]; f(m); } };
+function dim(v) { native('brightness', {value: v}).then(m => console.log('brightness now ' + m.brightness)); }
+
+// --- Home Assistant websocket: reaching auth_required proves the path; a token in config.json goes further ---
+function checkHA(cfg) {
+  if (!cfg.ha_url) return set('ha', false, 'no ha_url in config.json');
+  const url = cfg.ha_url.replace(/^http/, 'ws') + '/api/websocket';
+  let done = false; const finish = (ok, d) => { if (!done) { done = true; set('ha', ok, d); } };
+  let ws; try { ws = new WebSocket(url); } catch (e) { return finish(false, String(e)); }
+  setTimeout(() => finish(false, 'timeout connecting to ' + url), 8000);
+  ws.onerror = () => finish(false, 'socket error for ' + url);
+  ws.onmessage = ev => {
+    const m = JSON.parse(ev.data);
+    if (m.type === 'auth_required') {
+      if (cfg.ha_token) ws.send(JSON.stringify({type: 'auth', access_token: cfg.ha_token}));
+      else { finish(true, 'reached HA ' + m.ha_version + ' (no token set, stopped at auth)'); ws.close(); }
+    } else if (m.type === 'auth_ok') { finish(true, 'authenticated, HA ' + m.ha_version); ws.close(); }
+    else if (m.type === 'auth_invalid') finish(false, 'token rejected: ' + m.message);
+  };
+}
+
+// --- WebRTC: can this web view build a receive-only H.264 offer? (No stream yet; that needs go2rtc.) ---
+async function checkRTC() {
+  try {
+    if (typeof RTCPeerConnection === 'undefined') return set('rtc', false, 'RTCPeerConnection missing in this web view');
+    const pc = new RTCPeerConnection();
+    pc.addTransceiver('video', {direction: 'recvonly'});
+    pc.addTransceiver('audio', {direction: 'recvonly'});
+    const offer = await pc.createOffer();
+    const h264 = /a=rtpmap:\d+ H264\//.test(offer.sdp);
+    pc.close();
+    set('rtc', h264, h264 ? 'offer created with H.264' : 'offer created but no H.264 codec');
+  } catch (e) { set('rtc', false, String(e)); }
+}
+
+native('ping').then(m => {
+  set('bridge', true, m.model + ' ' + m.os + ', brightness ' + Number(m.brightness).toFixed(2));
+  checkHA(m.config || {});
+}).catch(e => { set('bridge', false, String(e)); set('ha', false, 'skipped, needs bridge for config'); });
+checkRTC();
+</script>
+</body>
+</html>
