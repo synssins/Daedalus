@@ -34,11 +34,11 @@ function h(tag, attrs, ...kids) {
   return el;
 }
 const btn = (label, ic, onclick, cls) => h('button', {class: 'btn ' + (cls || ''), onclick, html: (ic ? icon(ic) : '') + (label ? `<span>${esc(label)}</span>` : ''), type: 'button'});
-function toast(text) { const t = $('#toast'); t.textContent = text; t.className = 'show'; clearTimeout(toast.t); toast.t = setTimeout(() => { t.className = ''; }, 2600); }
+function toast(text, bad) { const t = $('#toast'); t.textContent = text; t.className = 'show' + (bad ? ' bad' : ''); clearTimeout(toast.t); toast.t = setTimeout(() => { t.className = ''; }, 2600); }
 
 const api = (path, opt) => fetch('admin/api/' + path, opt).then(async r => { if (!r.ok) throw new Error((await r.text()) || r.statusText); return r.json(); });
 const send = (method, path, body) => api(path, {method, headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body || {})});
-const fail = e => toast(e.message);
+const fail = e => toast(e.message, true);
 
 const A = {state: {tablets: [], designs: [], assets: []}, view: 'tablets', ed: null, ents: [], areas: []};
 const setState = s => { A.state = s; rail(); if (A.view === 'tablets') viewTablets(); else if (A.view === 'designs') viewDesigns(); };
@@ -55,7 +55,7 @@ function rail() {
 }
 function go(view) {
   if (A.ed && A.ed.dirty && !confirm('Leave without saving? Changes to "' + A.ed.name + '" will be lost.')) return;
-  A.ed = null; A.view = view; rail();
+  A.ed = null; A.view = view; rail(); history.replaceState(null, '', '#' + view);
   view === 'tablets' ? viewTablets() : viewDesigns();
 }
 
@@ -138,7 +138,7 @@ async function openDesign(id) {
     const t = A.state.tablets.find(x => x.design === id && x.width) || A.state.tablets.find(x => x.width);
     A.ed = {id, name: rec.name, design: rec.design, page: rec.design.start || rec.design.pages[0].id, sel: -1, dirty: false, hist: [], redo: [],
       screen: t ? {w: t.width, h: t.height} : {w: 1024, h: 768}, tab: 'tile', use: false, open: false};
-    A.view = 'editor'; rail(); viewEditor();
+    A.view = 'editor'; rail(); viewEditor(); history.replaceState(null, '', '#design=' + id);  // a refresh comes back to the same design
   } catch (e) { fail(e); }
 }
 
@@ -234,10 +234,11 @@ window.addEventListener('message', ev => { if (ev.data && ev.data.type === 'hp-r
 function boxes() {
   const e = ed(), over = $('.over'); if (!over) return;
   over.replaceChildren(...page().tiles.map((t, i) => {
-    const b = h('div', {class: 'box' + (i === e.sel ? ' sel' : ''), style: `left:${t.x * e.cw}px;top:${t.y * e.ch}px;width:${t.w * e.cw}px;height:${t.h * e.ch}px`, title: (TYPES[t.type] || {}).label || t.type},
+    const b = h('div', {class: 'box' + (i === e.sel ? ' sel' : ''), tabIndex: 0, role: 'button', 'aria-label': `Tile ${i + 1}, ${(TYPES[t.type] || {}).label || t.type}`, 'aria-pressed': i === e.sel, style: `left:${t.x * e.cw}px;top:${t.y * e.ch}px;width:${t.w * e.cw}px;height:${t.h * e.ch}px`, title: (TYPES[t.type] || {}).label || t.type},
       h('span', {class: 'tag'}, String(i + 1)), h('span', {class: 'dim'}, `${t.w} × ${t.h} at ${t.x}, ${t.y}`),
       ...['nw', 'ne', 'sw', 'se'].map(c => h('span', {class: 'hd ' + c, 'data-c': c})));
     b.addEventListener('pointerdown', ev => drag(ev, i, b));
+    b.addEventListener('focus', () => { if (e.sel !== i) { e.sel = i; e.tab = 'tile'; boxes(); inspector(); $('.over').children[i].focus(); } });
     return b;
   }));
 }
@@ -415,7 +416,11 @@ window.addEventListener('keyup', settle);
 window.addEventListener('beforeunload', ev => { if (A.ed && A.ed.dirty) { ev.preventDefault(); ev.returnValue = ''; } });
 
 // ---------- start ----------
-api('state').then(s => { setState(s); if (s.tablets.some(t => t.status === 'pending') || !s.designs.length) go('tablets'); }, fail);
+api('state').then(s => {
+  setState(s);
+  const want = /^#design=(.+)/.exec(location.hash);
+  if (want && s.designs.some(d => d.id === want[1])) openDesign(want[1]); else if (location.hash === '#designs') go('designs');
+}, fail);
 (function live() {  // tablets that say hello appear without a refresh
   const ws = new WebSocket(new URL('admin/api/live', location.href).href.replace(/^http/, 'ws'));
   ws.onmessage = ev => { const m = JSON.parse(ev.data); if (m.type === 'state') { A.state = m.state; rail(); if (A.view !== 'editor') setState(m.state); } };

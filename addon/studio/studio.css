@@ -22,7 +22,7 @@ svg.i { width: 18px; height: 18px; fill: currentColor; flex: none; }
 #rail .brand span { color: var(--chalk-3); font-weight: 400; }
 #rail button { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; border: 0; border-radius: var(--r); background: none; color: var(--chalk-2); text-align: left; cursor: pointer; }
 #rail button:hover { background: var(--panel); color: var(--chalk); }
-#rail button[aria-current="page"] { background: var(--panel-2); color: var(--chalk); }
+#rail button[aria-current="page"] { background: var(--panel-2); color: var(--chalk); font-weight: 600; box-shadow: inset 0 0 0 1px var(--seam); }
 #rail button.sub { padding-left: 38px; }
 #rail button .n { margin-left: auto; color: var(--chalk-3); font-size: 12px; }
 #rail button .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--go); margin-left: auto; }
@@ -54,6 +54,7 @@ input[type=color] { width: 32px; height: 32px; padding: 2px; border: 1px solid v
 .empty b { display: block; color: var(--chalk); font-size: 16px; font-weight: 600; margin-bottom: 6px; }
 #toast { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); padding: 9px 16px; border-radius: var(--r); background: var(--chalk); color: var(--rail); font-weight: 600; opacity: 0; pointer-events: none; transition: opacity .2s; }
 #toast.show { opacity: 1; }
+#toast.bad { background: var(--stop); color: #2a0500; }
 
 /* ---- tables ---- */
 table { width: 100%; border-collapse: collapse; }
@@ -97,7 +98,8 @@ td input[type=text]:hover, td input[type=text]:focus { background: var(--rail); 
 .over { position: absolute; left: 0; top: 0; right: 0; bottom: 0; }
 .over.grid { background-image: linear-gradient(to right, rgba(255,255,255,.10) 1px, transparent 1px), linear-gradient(to bottom, rgba(255,255,255,.10) 1px, transparent 1px); }
 .box { position: absolute; border: 1px solid transparent; border-radius: 3px; cursor: grab; touch-action: none; }
-.box:hover { border-color: rgba(255,255,255,.7); }
+.box:hover, .box:focus-visible { border-color: rgba(255,255,255,.7); }
+.box:focus-visible { outline: 2px solid var(--chalk); outline-offset: 1px; }
 .box .tag { position: absolute; left: 3px; top: 3px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: rgba(13,19,38,.82); color: var(--chalk-2); font-size: 10px; line-height: 16px; text-align: center; opacity: 0; }
 .over:hover .tag, .box.sel .tag { opacity: 1; }
 .box.sel { border: 2px solid var(--edit); cursor: move; z-index: 2; }
