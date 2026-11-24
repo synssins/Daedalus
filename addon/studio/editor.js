@@ -3,23 +3,23 @@
 // layer on top for selecting, dragging and right-clicking. Uses the helpers in studio.js.
 
 // ---------- what each kind of button is, and which fields it has ----------
-const ORBS = [['ribbons', 'Glass ball with ribbons'], ['ring', 'Ring of light'], ['veil', 'Veil']];
+const ORBS = [['ribbons', 'Orb'], ['ring', 'Ring'], ['veil', 'Veil']];
 const TYPES = {
   button: {label: 'Button', icon: 'gesture-tap', w: 14, h: 10, fields: []},
-  entity: {label: 'Light or switch', icon: 'lightbulb', w: 10, h: 8, fields: [['entity', 'Entity', 'entity'], ['name', 'Name', 'text'], ['icon', 'Icon', 'icon'], ['confirm', 'Ask first', 'text', 'Question to confirm, or leave empty']]},
-  action: {label: 'Scene or script', icon: 'star', w: 12, h: 6, fields: [['entity', 'Run', 'entity', ['scene', 'script', 'button']], ['name', 'Name', 'text'], ['label', 'Small text', 'text'], ['icon', 'Icon', 'icon'], ['confirm', 'Ask first', 'text', 'Question to confirm, or leave empty']]},
+  entity: {label: 'Light or switch', icon: 'lightbulb', w: 10, h: 8, fields: [['entity', 'Entity', 'entity', ['light', 'switch']], ['name', 'Name', 'text'], ['icon', 'Icon', 'icon'], ['confirm', 'Confirmation', 'text', 'Question to ask before acting']]},
+  action: {label: 'Scene or script', icon: 'star', w: 12, h: 6, fields: [['entity', 'Entity', 'entity', ['scene', 'script', 'button']], ['name', 'Name', 'text'], ['label', 'Subtitle', 'text'], ['icon', 'Icon', 'icon'], ['confirm', 'Confirmation', 'text', 'Question to ask before acting']]},
   room: {label: 'Room', icon: 'home', w: 12, h: 8, fields: [['area', 'Room', 'area'], ['name', 'Name', 'text', 'Room name'], ['icon', 'Icon', 'icon']]},
-  camera: {label: 'Camera', icon: 'video', w: 18, h: 12, fields: [['entity', 'Camera', 'entity', ['camera']], ['name', 'Name', 'text'], ['video', 'Live video', 'bool'], ['page', 'Tap opens', 'page']]},
-  media: {label: 'Media player', icon: 'play', w: 24, h: 8, fields: [['entity', 'Player', 'entity', ['media_player']], ['name', 'Name', 'text']]},
-  assistant: {label: 'Assistant', icon: 'microphone', w: 12, h: 8, fields: [['name', 'Name', 'text', 'Assistant'], ['label', 'Small text', 'text', 'Tap to talk'],
-    ['mode', 'Answers from', 'select', () => [['', 'Home Assistant'], ['llm', 'Direct LLM']]],
-    ['pipeline', 'Voice assistant', 'select', () => [['', 'The preferred one'], ...A.pipelines.map(p => [p.id, p.name])]],
-    ['speaker', 'Speaks on', 'select', () => [['', 'This device'], ...A.ents.filter(n => n.id.startsWith('media_player.')).map(n => [n.id, n.name])]],
+  camera: {label: 'Camera', icon: 'video', w: 18, h: 12, fields: [['entity', 'Entity', 'entity', ['camera']], ['name', 'Name', 'text'], ['video', 'Live video', 'bool'], ['page', 'Opens', 'page']]},
+  media: {label: 'Media player', icon: 'play', w: 24, h: 8, fields: [['entity', 'Entity', 'entity', ['media_player']], ['name', 'Name', 'text']]},
+  assistant: {label: 'Assistant', icon: 'microphone', w: 12, h: 8, fields: [['name', 'Name', 'text', 'Assistant'], ['label', 'Subtitle', 'text', 'Tap to talk'],
+    ['mode', 'Source', 'select', () => [['', 'Home Assistant'], ['llm', 'Direct LLM']]],
+    ['pipeline', 'Voice assistant', 'select', () => [['', 'Default'], ...A.pipelines.map(p => [p.id, p.name])]],
+    ['speaker', 'Speaker', 'select', () => [['', 'This device'], ...A.ents.filter(n => n.id.startsWith('media_player.')).map(n => [n.id, n.name])]],
     ['orb', 'Animation', 'select', () => ORBS]]},
-  weather: {label: 'Weather', icon: 'weather-sunny', w: 14, h: 6, fields: [['entity', 'Source', 'entity', ['weather']]]},
+  weather: {label: 'Weather', icon: 'weather-sunny', w: 14, h: 6, fields: [['entity', 'Entity', 'entity', ['weather']]]},
   clock: {label: 'Clock', icon: 'clock', w: 24, h: 13, flat: true, fields: []},
-  people: {label: 'Who is home', icon: 'account-multiple', w: 18, h: 6, fields: [['entities', 'People', 'entities', ['person']]]},
-  alerts: {label: 'Alerts', icon: 'alert', w: 18, h: 6, fields: [], note: 'Shows only while something is wrong. Its list of things to watch is not editable here yet.'},
+  people: {label: 'People', icon: 'account-multiple', w: 18, h: 6, fields: [['entities', 'People', 'entities', ['person']]]},
+  alerts: {label: 'Alerts', icon: 'alert', w: 18, h: 6, fields: []},
   nav: {label: 'Dashboard link', icon: 'chevron-right', w: 10, h: 5, fields: [['page', 'Opens', 'page'], ['name', 'Name', 'text'], ['icon', 'Icon', 'icon']]},
   label: {label: 'Text', icon: 'text', w: 20, h: 5, flat: true, fields: [['text', 'Text', 'text'], ['size', 'Size', 'range', [0.2, 1, 0.02]]]},
   image: {label: 'Picture', icon: 'image', w: 12, h: 8, fields: []},
@@ -71,7 +71,7 @@ function travel(from, to) {
 }
 async function save() {
   const e = ed();
-  try { await send('PUT', 'designs/' + e.id, {name: e.name, design: e.design}); e.dirty = false; saveLabel(); toast('Saved. Devices using it update now.'); api('state').then(s => { A.state = s; rail(); }); }
+  try { await send('PUT', 'designs/' + e.id, {name: e.name, design: e.design}); e.dirty = false; saveLabel(); toast('Saved.'); api('state').then(s => { A.state = s; rail(); }); }
   catch (err) { toast('Not saved: ' + err.message, true); }
 }
 /** Toolbar state: the saved/unsaved note, and buttons that have nothing to do right now are disabled. */
@@ -94,7 +94,7 @@ function viewEditor(keepFrame) {
     h('input', {type: 'text', class: 'name', value: e.name, 'aria-label': 'Panel name', oninput: ev => { e.name = ev.target.value; e.dirty = true; saveLabel(); }}),
     h('span', {class: 'sep'}), tabs, addPage, h('span', {class: 'sep'}),
     screenPick(e.screen, s => { e.screen = s; viewEditor(); }),
-    btn(e.use ? 'Back to editing' : 'Preview', null, () => { e.use = !e.use; viewEditor(true); if (e.use) toast('Buttons on the sheet now control the house.'); }, e.use ? 'on' : ''),
+    btn(e.use ? 'Back to editing' : 'Preview', null, () => { e.use = !e.use; viewEditor(true); }, e.use ? 'on' : ''),
     h('span', {class: 'sep'}), undo, redo, h('span', {class: 'saved'}), saveB);
 
   const th = edTheme();
@@ -273,6 +273,7 @@ function inspector() {
   sliderValues(box); box.scrollTop = keep;
 }
 const textIn = (val, set, ph) => h('input', {type: 'text', value: val == null ? '' : val, placeholder: ph || '', oninput: ev => set(ev.target.value), onchange: settle});
+const HIDDEN_DOMAINS = ['update', 'event', 'zone', 'sun', 'tts', 'stt', 'conversation', 'automation', 'device_tracker', 'persistent_notification', 'number', 'select', 'text', 'time', 'date', 'datetime', 'image', 'todo', 'calendar', 'assist_satellite', 'wake_word', 'ai_task', 'notify'];
 const entName = id => { const x = A.ents.find(n => n.id === id); return x ? x.name : id || ''; };
 const itemName = it => it.label || entName(it.entity);
 
@@ -301,7 +302,7 @@ function searchPick(shown, list, onPick, ph, label) {
   return h('div', {class: 'pick'}, input, out);
 }
 const entityPick = (val, set, domains, many) => searchPick(many ? '' : entName(val),
-  () => A.ents.filter(n => !domains || domains.includes(n.id.split('.')[0])).map(n => ({id: n.id, name: n.name, sub: n.id})),
+  () => A.ents.filter(n => domains ? domains.includes(n.id.split('.')[0]) : !n.cat && !HIDDEN_DOMAINS.includes(n.id.split('.')[0])).map(n => ({id: n.id, name: n.name, sub: n.id})),
   id => { set(id); settle(); inspector(); }, many ? 'Add' : 'Search by name', 'Entity');
 
 function setAuto(t, on) {
@@ -346,15 +347,13 @@ function buttonFields(t) {
       h('span', null, entName(id)), id === d.primary ? h('small', null, 'main') : null))));
   }
   out.push(row('Entity', entityPick(null, id => change(() => addItem(t, id), {keepBoxes: true}), null, true)),
-    h('h2', null, 'On this button'));
-  if (!items.length) out.push(h('p', {class: 'note'}, 'Nothing yet. Add a device above.'));
+    h('h2', null, 'Entities'));
   items.forEach((it, k) => out.push(h('div', {class: 'item'},
     h('input', {type: 'text', value: it.label || '', placeholder: entName(it.entity), 'aria-label': 'Name shown for ' + entName(it.entity), title: it.entity,
       oninput: ev => change(() => { if (ev.target.value.trim()) it.label = ev.target.value; else delete it.label; }, {live: true, keepBoxes: true}), onchange: settle}),
     btn('', 'trash', () => { change(() => t.items.splice(k, 1), {inspect: true}); settle(); }, 'icon mini'))));
-  if (items.length) out.push(h('p', {class: 'note'}, 'These names are for the panel only. Nothing is renamed in Home Assistant.'));
-  out.push(h('h2', null, 'Arrangement'),
-    row('Automatic', h('input', {type: 'checkbox', checked: t.auto !== false, 'aria-label': 'Arrange automatically', onchange: ev => setAuto(t, ev.target.checked)}), h('span', {class: 'note'}, t.auto !== false ? 'Reshuffles when the button is resized' : 'Drag the items on the sheet')));
+  out.push(h('h2', null, 'Layout'),
+    row('Auto-arrange', h('input', {type: 'checkbox', checked: t.auto !== false, 'aria-label': 'Arrange automatically', onchange: ev => setAuto(t, ev.target.checked)})));
   if (t.auto === false && t.grid) out.push(h('div', {class: 'f4'}, ...['cols', 'rows'].map(k => h('div', null, h('label', null, k === 'cols' ? 'Columns' : 'Rows'), h('input', {type: 'number', min: 1, max: 24, value: t.grid[k], 'aria-label': 'Button grid ' + k,
     onchange: ev => { const v = Math.max(1, Math.min(24, Math.round(+ev.target.value || t.grid[k]))), f = v / t.grid[k], p = k === 'cols' ? ['x', 'w'] : ['y', 'h'];
       change(() => { t.items.forEach(it => { it[p[0]] = Math.min(v - 1, Math.round(it[p[0]] * f)); it[p[1]] = Math.max(1, Math.min(v - it[p[0]], Math.round(it[p[1]] * f))); }); t.grid[k] = v; }, {inspect: true}); settle(); }})))));
@@ -363,7 +362,7 @@ function buttonFields(t) {
 
 function tileFields() {
   const e = ed(), t = tile(), d = e.design, th = edTheme();
-  if (!t) return [h('p', {class: 'note', style: 'margin-top:16px'}, 'Select a button on the sheet, or add one from the list on the left. Right-click the sheet or a button for more.')];
+  if (!t) return [h('p', {class: 'note', style: 'margin-top:16px'}, 'No button selected.')];
   const def = TYPES[t.type] || {label: t.type, fields: []}, live = {live: true, keepBoxes: true};
   const setp = (k, v, o) => change(() => { if (v == null || v === '') delete t[k]; else t[k] = v; }, o || live);
   const num = (k, min, max) => h('div', null, h('label', null, k.toUpperCase()), h('input', {type: 'number', min, max, value: t[k], 'aria-label': k,
@@ -387,20 +386,18 @@ function tileFields() {
     else if (kind === 'icon') out.push(h('h2', null, label), h('div', {class: 'icons'}, ...Object.keys(window.HP_ICONS).filter(n => n !== 'lightbulb-group').map(n =>
       h('button', {type: 'button', title: n, 'aria-label': n, 'aria-pressed': t[k] === n, html: icon(n), onclick: () => { setp(k, n, {keepBoxes: true, inspect: true}); settle(); }}))));
   }
-  if (t.type === 'assistant' && t.mode === 'llm') out.push(h('p', {class: 'note'}, 'The LLM address is in Settings. Home Assistant still does the listening and the speaking.'));
-  if (def.note) out.push(h('p', {class: 'note'}, def.note));
 
   out.push(h('h2', null, 'Appearance'));
   if (th) out.push(row('Design', h('select', {'aria-label': 'Button design', onchange: ev => { setp('look', ev.target.value, {keepBoxes: true, inspect: true}); settle(); }},
     h('option', {value: ''}, 'Theme default'), ...th.buttons.map(b => h('option', {value: b.name, selected: t.look === b.name}, b.name)))));
-  out.push(row('Background', h('input', {type: 'checkbox', checked: !t.flat, 'aria-label': 'Show the button background', onchange: ev => { setp('flat', ev.target.checked ? null : true, {keepBoxes: true, inspect: true}); settle(); }}), h('span', {class: 'note'}, t.flat ? 'None, content only' : 'Shown')));
+  out.push(row('Background', h('input', {type: 'checkbox', checked: !t.flat, 'aria-label': 'Show the button background', onchange: ev => { setp('flat', ev.target.checked ? null : true, {keepBoxes: true, inspect: true}); settle(); }})));
   if (!t.flat) {
     // This one button's own changes, on top of its design. Each can be dropped to go back to the design's value.
     const s = t.style || {}, base = (th && ((th.buttons.find(b => b.name === t.look) || th.buttons.find(b => b.id === th.button) || {}).style)) || (d.theme || {}).tile || {};
     const set = (k, v, re) => { change(() => { t.style = t.style || {}; if (v == null || v === '') delete t.style[k]; else t.style[k] = v; if (!Object.keys(t.style).length) delete t.style; }, re ? {keepBoxes: true, inspect: true} : live); if (re) settle(); };
-    const own = h('details', {open: e.ownOpen || !!t.style, ontoggle: ev => { e.ownOpen = ev.target.open; }}, h('summary', null, 'Change this button only'), ...lookFields(Object.assign({}, s), set, {clear: true, base}).filter(Boolean));
+    const own = h('details', {open: e.ownOpen || !!t.style, ontoggle: ev => { e.ownOpen = ev.target.open; }}, h('summary', null, 'Override design'), ...lookFields(Object.assign({}, s), set, {clear: true, base}).filter(Boolean));
     own.addEventListener('change', settle);
-    out.push(own, t.style ? h('p', {class: 'note'}, btn('Back to the design', 'undo', () => { change(() => { delete t.style; }, {inspect: true}); settle(); })) : null);
+    out.push(own, t.style ? h('p', {class: 'note'}, btn('Reset to design', 'undo', () => { change(() => { delete t.style; }, {inspect: true}); settle(); })) : null);
   }
   out.push(h('div', {class: 'apart'}, btn('Duplicate', 'copy', duplicateTile), btn('Delete', 'trash', removeTile, 'stop')));
   return out;
@@ -413,51 +410,44 @@ function panelLook() {
   const set = (o, k, v, re) => { change(() => { if (v == null || v === '') delete o[k]; else o[k] = v; }, re ? {keepBoxes: true, inspect: true} : live); if (re) settle(); };
   const bgSelect = (val, onset, none) => h('select', {'aria-label': 'Background', onchange: ev => onset(ev.target.value || null)}, none ? h('option', {value: ''}, none) : null, ...th.backgrounds.map(b => h('option', {value: b.id, selected: val === b.id}, b.name)));
   const out = [h('h2', null, 'Theme'),
-    row('Follows', h('select', {'aria-label': 'Theme', onchange: ev => { change(() => { if (ev.target.value) d.themeId = ev.target.value; else delete d.themeId; delete d.bg; }, {inspect: true}); settle(); viewEditor(true); }},
-      h('option', {value: ''}, 'Its own look'), ...themes().map(t => h('option', {value: t.id, selected: t.id === d.themeId}, t.name))))];
-  if (th) out.push(row('Background', bgSelect(d.bg || th.background, v => { change(() => { d.bg = v; }, {inspect: true}); settle(); })),
-    h('p', {class: 'note'}, 'Backgrounds and button designs come from the theme. Changing the theme here, or editing it under Themes, restyles every button at once.'));
+    row('Theme', h('select', {'aria-label': 'Theme', onchange: ev => { change(() => { if (ev.target.value) d.themeId = ev.target.value; else delete d.themeId; delete d.bg; }, {inspect: true}); settle(); viewEditor(true); }},
+      h('option', {value: ''}, 'None'), ...themes().map(t => h('option', {value: t.id, selected: t.id === d.themeId}, t.name))))];
+  if (th) out.push(row('Background', bgSelect(d.bg || th.background, v => { change(() => { d.bg = v; }, {inspect: true}); settle(); })));
   else {
-    out.push(themes().length ? null : h('p', {class: 'note'}, 'Make a theme under Themes to share one look between panels.'),
-      h('h2', null, 'Background'), picture(bg.image, v => set(bg, 'image', v, true)),
+    out.push(h('h2', null, 'Background'), picture(bg.image, v => set(bg, 'image', v, true)),
       row('Colour', h('input', {type: 'color', value: (rgba(bg.color) || {hex: '#141a5c'}).hex, 'aria-label': 'Background colour', oninput: ev => set(bg, 'color', ev.target.value), onchange: settle})),
       row('Darken', h('input', {type: 'range', min: 0, max: 0.8, step: 0.01, value: bg.dim || 0, oninput: ev => set(bg, 'dim', +ev.target.value), onchange: settle})),
-      row('Movement', h('select', {'aria-label': 'Movement', onchange: ev => set(bg, 'motion', ev.target.value === 'none' ? null : ev.target.value, true)}, ...MOTION.map(m => h('option', {value: m[0], selected: (bg.motion || 'none') === m[0]}, m[1])))),
+      row('Motion', h('select', {'aria-label': 'Motion', onchange: ev => set(bg, 'motion', ev.target.value === 'none' ? null : ev.target.value, true)}, ...MOTION.map(m => h('option', {value: m[0], selected: (bg.motion || 'none') === m[0]}, m[1])))),
       h('h2', null, 'Buttons'), ...lookFields(tl, (k, v, re) => set(tl, k, v, re)).filter(Boolean));
   }
   out.push(h('h2', null, 'Day and night'),
-    row('Changes', h('select', {'aria-label': 'Day and night', onchange: ev => set(night, 'mode', ev.target.value, true)},
-      ...[['', 'Never'], ['switch', 'Night background after sunset'], ['sun', 'Light follows the sun']].map(m => h('option', {value: m[0], selected: (night.mode || '') === m[0]}, m[1])))));
+    row('Mode', h('select', {'aria-label': 'Day and night', onchange: ev => set(night, 'mode', ev.target.value, true)},
+      ...[['', 'Off'], ['switch', 'Night background'], ['sun', 'Follow the sun']].map(m => h('option', {value: m[0], selected: (night.mode || '') === m[0]}, m[1])))));
   if (night.mode === 'switch') {
-    if (th) out.push(row('At night', bgSelect(night.bg, v => set(night, 'bg', v, true), 'Choose a background')));
+    if (th) out.push(row('Night background', bgSelect(night.bg, v => set(night, 'bg', v, true), 'None')));
     else { const nb = night.background = night.background || {}; out.push(h('h2', null, 'Night background'), picture(nb.image, v => set(nb, 'image', v, true)),
       row('Colour', h('input', {type: 'color', value: (rgba(nb.color) || {hex: '#05071c'}).hex, 'aria-label': 'Night colour', oninput: ev => set(nb, 'color', ev.target.value), onchange: settle})),
       row('Darken', h('input', {type: 'range', min: 0, max: 0.8, step: 0.01, value: nb.dim || 0, oninput: ev => set(nb, 'dim', +ev.target.value), onchange: settle}))); }
   }
   if (night.mode) {
     const mins = (k, label) => row(label, h('input', {type: 'number', min: 0, max: 180, step: 5, value: night[k] || 0, 'aria-label': label, onchange: ev => set(night, k, Math.max(0, Math.min(180, +ev.target.value || 0)) || null, true)}), h('span', {class: 'note'}, 'minutes'));
-    out.push(mins('before', 'Before sunset'), night.mode === 'switch' ? mins('after', 'After sunrise') : null,
-      h('p', {class: 'note'}, night.mode === 'sun' ? 'The screen warms as the sun nears the horizon and deepens to blue after it. The minutes bring dusk forward.'
-        : 'Night starts this long before sunset and ends this long after sunrise, since it is dark before the sun is fully down.'));
+    out.push(mins('before', 'Before sunset'), night.mode === 'switch' ? mins('after', 'After sunrise') : null);
   }
   out.push(h('h2', null, 'Depth'),
-    row('Tilt effect', h('input', {type: 'range', min: 0, max: 1, step: 0.01, value: own.depth || 0, oninput: ev => set(own, 'depth', +ev.target.value || null), onchange: settle})),
-    h('p', {class: 'note'}, 'Tilting the device shifts the buttons against the background. In this preview, the pointer stands in for the tilt. A wall-mounted device does not move, so it shows nothing there.'),
+    row('Tilt', h('input', {type: 'range', min: 0, max: 1, step: 0.01, value: own.depth || 0, oninput: ev => set(own, 'depth', +ev.target.value || null), onchange: settle})),
     h('h2', null, 'Grid'),
     h('div', {class: 'f4'}, ...['cols', 'rows'].map(k => h('div', null, h('label', null, k === 'cols' ? 'Columns' : 'Rows'), h('input', {type: 'number', min: 8, max: 160, value: d.grid[k], 'aria-label': k,
       onchange: ev => { const v = Math.max(8, Math.min(160, Math.round(+ev.target.value || d.grid[k]))), f = v / d.grid[k], pos = k === 'cols' ? ['x', 'w'] : ['y', 'h'];
         // Buttons keep their share of the screen, so a panel moves between device sizes and orientations.
-        change(() => { d.pages.forEach(p => p.tiles.forEach(t => { t[pos[0]] = Math.min(v - 2, Math.round(t[pos[0]] * f)); t[pos[1]] = Math.max(2, Math.min(v - t[pos[0]], Math.round(t[pos[1]] * f))); })); d.grid[k] = v; }); settle(); fit(); }})))),
-    h('p', {class: 'note'}, 'Smaller cells give finer control. Changing the grid keeps every button at its share of the screen.'));
+        change(() => { d.pages.forEach(p => p.tiles.forEach(t => { t[pos[0]] = Math.min(v - 2, Math.round(t[pos[0]] * f)); t[pos[1]] = Math.max(2, Math.min(v - t[pos[0]], Math.round(t[pos[1]] * f))); })); d.grid[k] = v; }); settle(); fit(); }})))));
   return out;
 }
 
 function pageFields() {
   const e = ed(), d = e.design, p = page();
-  return [h('h2', null, 'This dashboard'),
+  return [h('h2', null, 'Dashboard'),
     row('Name', textIn(p.name, v => change(() => { p.name = v; }, {live: true, keepBoxes: true}))),
-    row('Opens first', h('input', {type: 'checkbox', checked: (d.start || d.pages[0].id) === p.id, 'aria-label': 'Open this dashboard first', onchange: () => { change(() => { d.start = p.id; }, {inspect: true}); settle(); }})),
-    row('Swipe', h('input', {type: 'checkbox', checked: !p.noswipe, 'aria-label': 'Reach this dashboard by swiping', onchange: ev => { change(() => { if (ev.target.checked) delete p.noswipe; else p.noswipe = true; }, {inspect: true}); settle(); }}), h('span', {class: 'note'}, p.noswipe ? 'Only by a link button' : 'Reached by swiping sideways')),
+    row('Default', h('input', {type: 'checkbox', checked: (d.start || d.pages[0].id) === p.id, 'aria-label': 'Default dashboard', onchange: () => { change(() => { d.start = p.id; }, {inspect: true}); settle(); }})),
     d.pages.length > 1 ? h('div', {class: 'apart'},
       btn('Move left', null, () => { const i = d.pages.indexOf(p); if (i > 0) { change(() => { d.pages.splice(i, 1); d.pages.splice(i - 1, 0, p); }); settle(); viewEditor(true); } }),
       btn('Move right', null, () => { const i = d.pages.indexOf(p); if (i < d.pages.length - 1) { change(() => { d.pages.splice(i, 1); d.pages.splice(i + 1, 0, p); }); settle(); viewEditor(true); } }),

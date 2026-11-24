@@ -261,7 +261,7 @@ function dirty() { if (!dirty.t) dirty.t = setTimeout(() => { dirty.t = null; up
 // A tap is a touch that barely moved. A swipe is a long, mostly sideways drag, or a quick flick. Anything in
 // between (a hand that slipped on the way to a button) does nothing at all: no button, no page change.
 const swipe = {active: false, s: null, quiet: 0};
-function swipePages() { return HP.design && HP.stack.length === 1 ? HP.design.pages.filter(p => !p.noswipe) : []; }
+function swipePages() { return HP.design && HP.stack.length === 1 ? HP.design.pages : []; }
 function slide(px, ms) {
   const t = ms ? `transform ${ms}ms cubic-bezier(.2,.7,.2,1)` : '';
   $('grid').style.transition = $('blurclip').style.transition = $('blur').style.transition = t;

@@ -166,12 +166,12 @@ function viewGallery() {
     return h('div', {class: 'card pick', tabIndex: 0, role: 'button', 'aria-label': 'Edit ' + d.name, onclick: () => openDesign(d.id), oncontextmenu: ev => panelMenu(ev, d),
       onkeydown: ev => { if (ev.key === 'Enter') openDesign(d.id); }},
       thumb(d.id, 1024, 768, 300),
-      h('div', {class: 'cap'}, h('b', null, d.name), h('span', null, on.length ? on.join(', ') : 'Not on a device')));
+      h('div', {class: 'cap'}, h('b', null, d.name), h('span', null, on.length ? on.join(', ') : 'Unassigned')));
   });
   $('#main').replaceChildren(
     h('div', {class: 'head'}, h('h1', null, 'Editor'), h('span', {class: 'sp'}), btn('Import', 'upload', importPanel), btn('New panel', 'plus', newPanel, 'go')),
     h('div', {class: 'body'}, cards.length ? h('div', {class: 'cards'}, ...cards)
-      : h('div', {class: 'empty', html: '<b>No panels yet</b>A panel is a set of dashboards for a device. Make one, lay out its buttons, then give it to a device.'})));
+      : h('div', {class: 'empty', html: '<b>No panels</b>'})));
 }
 
 // ---------- Devices ----------
@@ -194,8 +194,8 @@ function viewDevices() {
   $('#main').replaceChildren(
     h('div', {class: 'head'}, h('h1', null, 'Devices')),
     h('div', {class: 'body'}, ts.length
-      ? h('div', {class: 'card'}, h('table', null, h('thead', null, h('tr', null, ...['Name', 'Device', 'Status', 'Panel', 'On screen', ''].map(x => h('th', null, x)))), h('tbody', null, ...rows)))
-      : h('div', {class: 'empty', html: '<b>No devices yet</b>Open the HomePanel app on a tablet that is on the same network. It finds this server by itself and appears here for approval.'})));
+      ? h('div', {class: 'card'}, h('table', null, h('thead', null, h('tr', null, ...['Name', 'Model', 'Status', 'Panel', 'Preview', ''].map(x => h('th', null, x)))), h('tbody', null, ...rows)))
+      : h('div', {class: 'empty', html: '<b>No devices</b>Open the HomePanel app on a tablet on this network.'})));
 }
 
 // ---------- Panels: one finished panel, live, at any device's size ----------
@@ -220,8 +220,7 @@ function viewPanel() {
       h('span', {class: 'sp'}), screenPick(sc, s => { A.screen = s; viewPanel(); }),
       btn('Edit', 'pencil', () => openDesign(d.id), 'go'), btn('', 'chevron-down', ev => { ev.stopPropagation(); const r = ev.currentTarget.getBoundingClientRect(); panelMenu({preventDefault() {}, clientX: r.left, clientY: r.bottom + 4}, d); }, 'icon more')),
     h('div', {class: 'body panelview'},
-      h('div', {class: 'side'}, h('h2', null, 'On these devices'), assign.children.length ? assign : h('p', {class: 'note'}, 'No approved devices yet.'),
-        h('p', {class: 'note'}, 'This is the panel itself. Buttons here control the house.')),
+      h('div', {class: 'side'}, h('h2', null, 'Devices'), assign.children.length ? assign : h('p', {class: 'note'}, 'No approved devices yet.')),
       stage));
   $('.more').title = 'More'; $('.more').setAttribute('aria-label', 'More');
   const fitLive = () => { const k = Math.min((stage.clientWidth - 8) / sc.w, (stage.clientHeight - 8) / sc.h, 1); stage.replaceChildren(thumb(d.id, sc.w, sc.h, Math.max(200, Math.floor(sc.w * k)), true)); };
@@ -234,7 +233,7 @@ const STARTER = () => { const b = uid(), g = uid(); return {id: uid(), name: 'My
   buttons: [{id: g, name: 'Glass', style: {fill: 'rgba(255,255,255,.15)', radius: 22, border: 'rgba(255,255,255,.4)', borderWidth: 1, rim: true, glass: true, depth: 1}}]}; };
 const FONTS = [['', 'Tablet default'], ['"Avenir Next", "Segoe UI", sans-serif', 'Avenir'], ['"Helvetica Neue", Arial, sans-serif', 'Helvetica'], ['"SF Pro Rounded", "Arial Rounded MT Bold", sans-serif', 'Rounded'],
   ['Georgia, "Times New Roman", serif', 'Georgia'], ['"Gill Sans", "Trebuchet MS", sans-serif', 'Gill Sans'], ['Futura, "Century Gothic", sans-serif', 'Futura'], ['Menlo, Consolas, monospace', 'Menlo']];
-const MOTION = [['none', 'Still'], ['drift', 'Slow drift'], ['breathe', 'Breathe'], ['pan', 'Pan across']];
+const MOTION = [['none', 'None'], ['drift', 'Drift'], ['breathe', 'Zoom'], ['pan', 'Pan']];
 
 function openTheme(id) {
   const t = themeBy(id) || themes()[0];
@@ -242,7 +241,7 @@ function openTheme(id) {
 }
 async function saveTheme() {
   const th = A.th, list = themes().some(t => t.id === th.id) ? themes().map(t => t.id === th.id ? th.draft : t) : [...themes(), th.draft];
-  try { A.state = await send('PUT', 'library', {themes: list}); th.dirty = false; toast('Saved. Panels following this theme update now.'); redraw(); }
+  try { A.state = await send('PUT', 'library', {themes: list}); th.dirty = false; toast('Saved.'); redraw(); }
   catch (e) { toast('Not saved: ' + e.message, true); }
 }
 async function uploadAsset(file) {
@@ -277,7 +276,7 @@ const importTheme = () => pickFile('.hptheme,application/json', async f => {
 function colourIn(val, set, fallback, clear) {
   const c = rgba(val) || rgba(fallback) || {hex: '#ffffff', a: 0.15};
   const col = h('input', {type: 'color', value: c.hex, 'aria-label': 'Colour', oninput: () => set(toRgba(col.value, +al.value))});
-  const al = h('input', {type: 'range', min: 0, max: 1, step: 0.01, value: c.a, 'aria-label': 'Opacity', title: 'How solid the colour is', oninput: () => set(toRgba(col.value, +al.value))});
+  const al = h('input', {type: 'range', min: 0, max: 1, step: 0.01, value: c.a, 'aria-label': 'Opacity', title: 'Opacity', oninput: () => set(toRgba(col.value, +al.value))});
   return [col, al, clear && val ? h('button', {type: 'button', class: 'btn icon mini', title: clear.title, 'aria-label': clear.title, html: icon('undo'), onclick: clear.fn}) : null];
 }
 /** Every slider shows its measurement: percent for 0-1 amounts, pixels for the rest. */
@@ -300,30 +299,29 @@ function picture(val, set, accept) {
 /** The fields of one button design. Used by the Themes page and by the editor for a single button's own look. */
 function lookFields(s, set, o) {
   o = o || {};
-  const cl = k => o.clear && s[k] != null ? {title: "Use the design's value", fn: () => set(k, null, true)} : null;
+  const cl = k => o.clear && s[k] != null ? {title: 'Reset', fn: () => set(k, null, true)} : null;
   const num = (k, min, max, dflt, unit) => { const r = h('input', {type: 'range', min, max, step: max <= 1 ? 0.01 : 1, value: s[k] == null ? dflt : s[k], oninput: ev => set(k, +ev.target.value)}); if (unit != null) r.dataset.unit = unit; return r; };
   const fade = !!s.fillTo;
   return [
     row('Fill', h('select', {'aria-label': 'Fill kind', onchange: ev => { if (ev.target.value === 'fade') set('fillTo', s.fillTo || 'rgba(255,255,255,0)', true); else set('fillTo', null, true); }},
-      h('option', {value: 'solid', selected: !fade}, 'One colour'), h('option', {value: 'fade', selected: fade}, 'Fade'))),
+      h('option', {value: 'solid', selected: !fade}, 'Solid'), h('option', {value: 'fade', selected: fade}, 'Gradient'))),
     row(fade ? 'From' : 'Colour', ...colourIn(s.fill, v => set('fill', v), o.base && o.base.fill || 'rgba(255,255,255,.15)', cl('fill'))),
     fade ? row('To', ...colourIn(s.fillTo, v => set('fillTo', v))) : null,
-    fade ? row('Direction', h('select', {'aria-label': 'Fade direction', onchange: ev => set('fadeDir', ev.target.value === 'right' ? 'right' : null, true)}, h('option', {value: 'down', selected: s.fadeDir !== 'right'}, 'Top to bottom'), h('option', {value: 'right', selected: s.fadeDir === 'right'}, 'Left to right'))) : null,
-    fade ? row('Fade length', num('fadeLen', 20, 600, 160)) : null,
-    fade ? h('p', {class: 'note'}, 'The fade keeps this length on every button, tall or short, then holds its end colour.') : null,
-    row('When on', ...colourIn(rgba(s.fillOn) ? s.fillOn : null, v => set('fillOn', v), 'rgba(255,170,80,.88)', s.fillOn ? {title: 'Back to the amber glow', fn: () => set('fillOn', null, true)} : null)),
-    row('Text', h('input', {type: 'color', value: (rgba(s.text) || {hex: '#ffffff'}).hex, 'aria-label': 'Text colour', oninput: ev => set('text', ev.target.value)})),
+    fade ? row('Direction', h('select', {'aria-label': 'Gradient direction', onchange: ev => set('fadeDir', ev.target.value === 'right' ? 'right' : null, true)}, h('option', {value: 'down', selected: s.fadeDir !== 'right'}, 'Top to bottom'), h('option', {value: 'right', selected: s.fadeDir === 'right'}, 'Left to right'))) : null,
+    fade ? row('Gradient length', num('fadeLen', 20, 600, 160)) : null,
+    row('On colour', ...colourIn(rgba(s.fillOn) ? s.fillOn : null, v => set('fillOn', v), 'rgba(255,170,80,.88)', s.fillOn ? {title: 'Reset', fn: () => set('fillOn', null, true)} : null)),
+    row('Text colour', h('input', {type: 'color', value: (rgba(s.text) || {hex: '#ffffff'}).hex, 'aria-label': 'Text colour', oninput: ev => set('text', ev.target.value)})),
     row('Font', h('select', {'aria-label': 'Font', onchange: ev => set('font', ev.target.value || null, true)}, ...FONTS.map(f => h('option', {value: f[0], selected: (s.font || '') === f[0]}, f[1])))),
     h('h2', null, 'Shape'),
-    row('Corners', num('radius', 0, 60, o.base && o.base.radius != null ? o.base.radius : 22)),
+    row('Corner radius', num('radius', 0, 60, o.base && o.base.radius != null ? o.base.radius : 22)),
     row('Border', ...colourIn(s.border, v => set('border', v), 'rgba(255,255,255,.4)', cl('border'))),
     row('Border width', num('borderWidth', 0, 8, 1)),
     o.clear ? null : row('Spacing', num('gap', 0, 16, 5)),
     h('h2', null, 'Depth'),
-    row('Lit edge', h('input', {type: 'checkbox', checked: s.rim !== false, 'aria-label': 'Lit edge', onchange: ev => set('rim', ev.target.checked ? (o.clear ? true : null) : false, true)}), h('span', {class: 'note'}, 'Light on a curved edge')),
+    row('Lit edge', h('input', {type: 'checkbox', checked: s.rim !== false, 'aria-label': 'Lit edge', onchange: ev => set('rim', ev.target.checked ? (o.clear ? true : null) : false, true)})),
     row('Shadow', num('depth', 0, 2, 1, '')),
-    row('Frosted', h('input', {type: 'checkbox', checked: s.glass !== false, 'aria-label': 'Frosted glass', onchange: ev => set('glass', ev.target.checked ? null : false, true)}), h('span', {class: 'note'}, 'Blur the background behind')),
-    row('See-through', num('opacity', 0.1, 1, 1)),
+    row('Frosted', h('input', {type: 'checkbox', checked: s.glass !== false, 'aria-label': 'Frosted glass', onchange: ev => set('glass', ev.target.checked ? null : false, true)})),
+    row('Opacity', num('opacity', 0.1, 1, 1)),
     h('h2', null, 'Picture'), picture(s.image, v => set('image', v, true)),
   ];
 }
@@ -345,8 +343,8 @@ function viewTheme() {
   const head = extra => h('div', {class: 'head'}, h('h1', null, kind === 'buttons' ? 'Buttons' : 'Backgrounds'), ...extra);
   if (!A.th) {
     return $('#main').replaceChildren(head([h('span', {class: 'sp'}), btn('Import theme', 'upload', importTheme)]),
-      h('div', {class: 'body'}, h('div', {class: 'empty'}, h('b', null, 'No themes yet'), 'A theme holds backgrounds and button designs. A panel that follows a theme changes with it.',
-        h('p', {style: 'margin-top:16px'}, btn('Start a theme', 'plus', () => { const t = STARTER(); A.th = {id: t.id, draft: t, dirty: true, sel: {}}; saveTheme(); }, 'go')))));
+      h('div', {class: 'body'}, h('div', {class: 'empty'}, h('b', null, 'No themes'),
+        h('p', {style: 'margin-top:16px'}, btn('New theme', 'plus', () => { const t = STARTER(); A.th = {id: t.id, draft: t, dirty: true, sel: {}}; saveTheme(); }, 'go')))));
   }
   const th = A.th, t = th.draft, list = t[kind], touch = () => { th.dirty = true; mark(); demoPush(); };
   if (!list.some(x => x.id === th.sel[kind])) th.sel[kind] = (list.find(x => x.id === (kind === 'buttons' ? t.button : t.background)) || list[0] || {}).id;
@@ -360,7 +358,7 @@ function viewTheme() {
   };
   const itemMenu = (ev, x) => menu(ev, [
     ['Duplicate', () => { const c = clone(x); c.id = uid(); c.name += ' copy'; list.push(c); th.sel[kind] = c.id; th.dirty = true; viewTheme(); }],
-    ['Use as the theme default', () => { t[defKey] = x.id; th.dirty = true; viewTheme(); }], null,
+    ['Set as default', () => { t[defKey] = x.id; th.dirty = true; viewTheme(); }], null,
     ['Delete', () => { if (list.length < 2) return toast('A theme keeps at least one.', true); t[kind] = list.filter(y => y !== x); if (t[defKey] === x.id) t[defKey] = t[kind][0].id; th.dirty = true; viewTheme(); }, 'stop']]);
   const chips = h('div', {class: 'chips'}, ...list.map(x => h('button', {type: 'button', 'aria-pressed': x.id === th.sel[kind], oncontextmenu: ev => itemMenu(ev, x), onclick: () => { th.sel[kind] = x.id; viewTheme(); },
     style: kind === 'backgrounds' ? `background:${x.image ? `url("${x.image}") center/cover, ` : ''}${x.color || '#141a5c'}` : ''},
@@ -374,12 +372,11 @@ function viewTheme() {
     const set = (k, v, re) => { if (v == null || v === '') delete cur[k]; else cur[k] = v; touch(); if (re) viewTheme(); };
     form = [row('Name', h('input', {type: 'text', value: cur.name, 'aria-label': 'Background name', oninput: ev => { cur.name = ev.target.value; touch(); }, onchange: () => viewTheme()})),
       h('h2', null, 'Picture'), picture(cur.image, v => set('image', v, true)),
-      h('p', {class: 'note'}, 'Animated GIF and WebP pictures play as they are.'),
       row('Colour', h('input', {type: 'color', value: (rgba(cur.color) || {hex: '#141a5c'}).hex, 'aria-label': 'Colour behind the picture', oninput: ev => set('color', ev.target.value)})),
       row('Darken', h('input', {type: 'range', min: 0, max: 0.8, step: 0.01, value: cur.dim || 0, oninput: ev => set('dim', +ev.target.value)})),
-      row('Movement', h('select', {'aria-label': 'Movement', onchange: ev => set('motion', ev.target.value === 'none' ? null : ev.target.value)}, ...MOTION.map(m => h('option', {value: m[0], selected: (cur.motion || 'none') === m[0]}, m[1])))),
+      row('Motion', h('select', {'aria-label': 'Motion', onchange: ev => set('motion', ev.target.value === 'none' ? null : ev.target.value)}, ...MOTION.map(m => h('option', {value: m[0], selected: (cur.motion || 'none') === m[0]}, m[1])))),
       h('h2', null, 'Video'), picture(cur.video, v => set('video', v, true), 'video'),
-      h('p', {class: 'note'}, 'A short looping MP4 plays over the picture. Keep it small: the tablets are old.')];
+    ];
   }
   const pickTheme = h('select', {'aria-label': 'Theme', class: 'themepick', onchange: ev => { if (unsaved()) { ev.target.value = th.id; return; } openTheme(ev.target.value); viewTheme(); }},
     ...(themes().some(x => x.id === th.id) ? themes() : [...themes(), t]).map(x => h('option', {value: x.id, selected: x.id === th.id}, x.name)));
@@ -387,7 +384,7 @@ function viewTheme() {
     ['Rename', () => { const n = prompt('Theme name', t.name); if (n && n.trim()) { t.name = n.trim(); th.dirty = true; viewTheme(); } }],
     ['New theme', () => { if (unsaved()) return; const n = STARTER(); n.name = 'Theme ' + (themes().length + 1); A.th = {id: n.id, draft: n, dirty: true, sel: {}}; viewTheme(); }],
     ['Duplicate', () => { if (unsaved()) return; const n = clone(t); n.id = uid(); n.name += ' copy'; A.th = {id: n.id, draft: n, dirty: true, sel: {}}; viewTheme(); }], null,
-    ['Export as a theme pack', () => exportTheme(t)], ['Import a theme pack', importTheme], null,
+    ['Export', () => exportTheme(t)], ['Import', importTheme], null,
     ['Delete theme', async () => { if (!confirm('Delete the theme "' + t.name + '"? Panels following it keep their last look.')) return; try { A.state = await send('PUT', 'library', {themes: themes().filter(x => x.id !== th.id)}); A.th = null; redraw(); } catch (e) { fail(e); } }, 'stop']]); };
   const more = btn('Theme', 'chevron-down', ev => { ev.stopPropagation(); themeMenu(ev); });
   const savebtn = btn('Save', null, saveTheme, 'go'); savebtn.dataset.k = 'savetheme';
@@ -407,8 +404,8 @@ async function viewSettings() {
   if (A.view !== 'settings') return;
   const f = {url: h('input', {type: 'text', value: llm.url || '', placeholder: 'http://192.168.1.10:8080/v1', 'aria-label': 'LLM address'}),
     model: h('input', {type: 'text', value: llm.model || '', placeholder: 'Model name', 'aria-label': 'Model'}),
-    key: h('input', {type: 'password', value: '', placeholder: llm.key ? 'A key is stored. Type to replace it.' : 'Only if the server asks for one', 'aria-label': 'API key', autocomplete: 'off'}),
-    system: h('textarea', {rows: 3, placeholder: 'How the assistant should behave', 'aria-label': 'Instructions'}, llm.system || '')};
+    key: h('input', {type: 'password', value: '', placeholder: llm.key ? 'Stored' : 'Optional', 'aria-label': 'API key', autocomplete: 'off'}),
+    system: h('textarea', {rows: 3, placeholder: '', 'aria-label': 'System prompt'}, llm.system || '')};
   const saveLlm = () => { const body = {url: f.url.value.trim(), model: f.model.value.trim(), system: f.system.value.trim()}; if (f.key.value) body.key = f.key.value; send('PUT', 'settings', {llm: body}).then(() => { toast('Saved.'); viewSettings(); }, fail); };
   const restore = () => pickFile('.hpbackup,application/json', async file => {
     if (!confirm('Restore from "' + file.name + '"? Panels, themes and devices in the file replace the ones here with the same identity.')) return;
@@ -419,11 +416,9 @@ async function viewSettings() {
   $('#main').replaceChildren(h('div', {class: 'head'}, h('h1', null, 'Settings')),
     h('div', {class: 'body narrow'},
       h('div', {class: 'card pad'}, h('h2', null, 'Backup'),
-        h('p', {class: 'note'}, 'One file with every panel, theme, picture and device. Restoring never checks entities: a button whose entity is gone comes back and shows "Not found".'),
-        h('div', {class: 'acts'}, h('a', {class: 'btn go', href: 'admin/api/backup', download: 'homepanel-' + new Date().toISOString().slice(0, 10) + '.hpbackup', html: icon('download') + '<span>Download backup</span>'}), btn('Restore from a file', 'upload', restore))),
-      h('div', {class: 'card pad'}, h('h2', null, 'Assistant: direct LLM'),
-        h('p', {class: 'note'}, 'Used by assistant buttons set to "Direct LLM". Any server that speaks the OpenAI chat format. Assistant buttons set to "Home Assistant" need nothing here.'),
-        row('Address', f.url), row('Model', f.model), row('API key', f.key), row('Instructions', f.system),
+        h('div', {class: 'acts'}, h('a', {class: 'btn go', href: 'admin/api/backup', download: 'homepanel-' + new Date().toISOString().slice(0, 10) + '.hpbackup', html: icon('download') + '<span>Download backup</span>'}), btn('Restore', 'upload', restore))),
+      h('div', {class: 'card pad'}, h('h2', null, 'LLM'),
+        row('Address', f.url), row('Model', f.model), row('API key', f.key), row('System prompt', f.system),
         h('div', {class: 'acts'}, btn('Save', null, saveLlm, 'go')))));
 }
 
