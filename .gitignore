@@ -11,3 +11,6 @@ AGENTS.md
 .impeccable/review/
 design.json
 web/design.js
+addon/data/
+__pycache__/
+config.legacy.json
