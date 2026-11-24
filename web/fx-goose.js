@@ -30,11 +30,21 @@
   const U = HP.fx.util, KEY = 'hp:goose', MAX = 4;
   // milliseconds: how long a tile stays away, when the extra geese leave, an egg's time to hatch, a gosling's to grow up
   let HOLD = 0, RESET = 30 * 60000, EGG = 30000, GROW = 60000;  // HOLD: only the self-check sets it; otherwise the option decides
-  const STICK = [20000, 45000, 60000, 120000];  // with stick figures about: first visit after 20 to 45 s, then every 60 to 120 s
   const hold = () => HOLD || (+(cur && cur.opts.keep) || 60) * 1000;
   const BAN_TYPE = ['camera', 'nav', 'assistant', 'alerts', 'clock', 'weather', 'label', 'image'];
   const BAN_ENTITY = /^(lock|alarm_control_panel|cover|climate|camera)\./;
-  const EVERY = {often: 2, sometimes: 15, rarely: 60};  // minutes between one goose's visits, roughly
+  // The pace of everything this kind does on a timer, from the one option "How often". Tune it here.
+  //   visit: minutes between one goose's visits          stick: seconds before it comes out for stick figures
+  //   again: seconds between such visits while they stay  egg: chance of an egg at each opportunity
+  //   train: chance that a visit goes for a running train idle: how long it dawdles between antics (1 = normal)
+  const PACE = {
+    rarely:     {visit: 60,   stick: 180, again: 600, egg: 0.15, train: 0.125, idle: 1.6},
+    sometimes:  {visit: 15,   stick: 60,  again: 180, egg: 0.35, train: 0.25,  idle: 1.25},
+    often:      {visit: 3,    stick: 15,  again: 60,  egg: 0.6,  train: 0.5,   idle: 1},
+    constantly: {visit: 0.67, stick: 4,   again: 20,  egg: 0.9,  train: 0.95,  idle: 0.6},
+  };
+  const pace = () => PACE[cur && cur.opts.every] || PACE.often;
+  const about = sec => sec * 1000 * (0.7 + 0.6 * Math.random());  // a wait of about so many seconds
 
   // ---------- what the geese are up to (survives dashboard changes and restarts) ----------
   // S = {geese, egg: {page, x, y, at} or null, hatched (when the last egg hatched), stamp (when saved)}
@@ -82,7 +92,7 @@
     return n - away - 1 >= n / 2 ? ok : [];
   }
   function pick(rects, q, page) { const ok = takeable(rects, q, page); return ok.length ? ok[Math.floor(Math.random() * ok.length)] : -1; }
-  const mean = () => (EVERY[cur && cur.opts.every] || 15) * 60000;
+  const mean = () => pace().visit * 60000;
   function schedule(q) { q.next = Date.now() + mean() * (0.6 + 0.8 * Math.random()); }
   function arm(q) { clearTimeout(q._.timer); q._.timer = setTimeout(() => { if (q.taken && Date.now() >= q.due) release(q); }, Math.max(0, q.due - Date.now()) + 60); }
   S.geese.forEach(q => { if (q.taken) arm(q); });  // restarted while a tile was away: the deadline still stands
@@ -232,8 +242,8 @@
   function farFrom(ctx, x, y) { let p; for (let i = 0; i < 40; i++) { p = {x: 70 + Math.random() * (ctx.w - 140), y: 100 + Math.random() * Math.max(1, ctx.h - 130)}; if (Math.hypot(p.x - x, p.y - y) >= 250) break; } return p; }
 
   // ---------- eggs and goslings ----------
-  /** May goose q lay now? One egg at a time, and none once there are four geese. About every other chance. */
-  const canLay = () => !S.egg && S.geese.filter(q => !q.gone).length < MAX && (Math.random() < 0.5 || !!(cur && cur.opts.egg));
+  /** May a goose lay now? One egg at a time, and none once there are four geese. How likely: the pace table. */
+  const canLay = () => !S.egg && S.geese.filter(q => !q.gone).length < MAX && (Math.random() < pace().egg || !!(cur && cur.opts.egg));
   function lay(page, x, y) { S.egg = {page, x: Math.round(x), y: Math.round(y), at: Date.now()}; save(); }
   function hatch() {
     const E = S.egg; S.egg = null;
@@ -297,11 +307,11 @@
     const go = m => { v.mode = m; v.T = 0; }, after = () => go(v.i >= 0 && r && r.el === v.el && allowed(r) ? 'tug' : 'exit');
     let pose = 'glare', honk = false, walk = 0, wig = 0, hiss = false, stamp = false, bt = 0, word = 'HONK!';
     v.T += dt * sp;
-    // about one visit in four, when a train is running, is spent on the train instead (never with a tile in hand)
+    // some visits, when a train is running, are spent on the train instead (how many: the pace table; never with a tile in hand)
     if (!v.trained && !q.taken && !e.tr && /enter|look|honk|exit/.test(v.mode) && v.x > -40 && v.x < ctx.w + 40) {
       const tr = nearest(others(ctx).filter(a => a.kind === 'train'), v.x, v.y, 1e5);
       if (tr) {
-        if (v.keen == null) v.keen = Math.random() < 0.25 || !!ctx.opts.train;
+        if (v.keen == null) v.keen = Math.random() < pace().train || !!ctx.opts.train;
         if (v.keen) { v.trained = true; v.back = {mode: v.mode, T: v.T, x: U.clamp(v.x, 30, ctx.w - 30), y: v.y, f: v.f}; v.tp = {x: tr.x, y: tr.y, dir: tr.dir, a: tr, lost: 0}; v.lunge = 0; go('train-go'); }
       }
     }
@@ -368,7 +378,7 @@
     } else if (v.mode === 'look') {
       pose = foe || v.T % 0.7 >= 0.35 ? 'hiss' : 'glare'; hiss = pose === 'hiss'; stamp = true;
       if (foe && Math.abs(foe.x - v.x) > 6) v.f = foe.x > v.x ? 1 : -1; else v.f = v.d;
-      if (v.T > 0.9) { v.f = v.d; go('honk'); }
+      if (v.T > 0.9 * pace().idle) { v.f = v.d; go('honk'); }
     } else if (v.mode === 'honk') {
       pose = 'honk'; honk = true; bt = v.T;
       if (v.T > 1.1) { if (canLay()) go('lay'); else after(); }
@@ -449,12 +459,12 @@
     g.restore();
   }
   function nest(q, g, ctx, t, dt) {
-    const e = q._, s = lootSize(q), x = q.hx, y = q.hy, top = y - s[1] / 2 + 8, k = Math.floor(t / 4) % 5, u = t % 4;
+    const e = q._, s = lootSize(q), x = q.hx, y = q.hy, top = y - s[1] / 2 + 8, slot = 4 * pace().idle, k = Math.floor(t / slot) % 5, u = t % slot;
     let pose = 'sitglare', f = x < ctx.w / 2 ? 1 : -1, honk = false, wig = 0, hiss = false, lunge = 0;
     const foe = threat(q, ctx, x, top, dt);
     loot(g, q, x, y, 1);
     // once while it sits here it may lay an egg beside itself
-    if (e.layAt == null) { e.layAt = t + (ctx.opts.egg ? 2 : 4 + Math.random() * 8); e.laying = 0; e.tried = false; }
+    if (e.layAt == null) { e.layAt = t + (ctx.opts.egg ? 2 : (4 + Math.random() * 8) * pace().idle); e.laying = 0; e.tried = false; }
     if (!e.tried && t >= e.layAt) { e.tried = true; if (canLay()) e.laying = 1.7; }
     if (e.laying > 0) { e.laying -= dt; wig = 1; pose = 'sit'; if (e.laying <= 0 && !S.egg) lay(ctx.page, x - f * 44, top + 2); }
     else if (foe) { pose = 'sithiss'; hiss = true; if (Math.abs(foe.x - x) > 6) f = foe.x > x ? 1 : -1; lunge = Math.abs(Math.sin(t * 7)) * 10; }  // lunges, but does not leave its loot
@@ -492,7 +502,7 @@
   HP.fx.add('goose', {
     label: 'Goose',
     live: true, fps: 12,
-    options: [{key: 'every', label: 'How often', type: 'select', choices: [['often', 'Often'], ['sometimes', 'Sometimes'], ['rarely', 'Rarely']], default: 'sometimes'},
+    options: [{key: 'every', label: 'How often', type: 'select', choices: [['rarely', 'Rarely'], ['sometimes', 'Sometimes'], ['often', 'Often'], ['constantly', 'Constantly']], default: 'often'},
       {key: 'keep', label: 'Keeps a tile for', type: 'select', choices: [[30, '30 seconds'], [60, '1 minute'], [120, '2 minutes'], [300, '5 minutes'], [600, '10 minutes']], default: 60}],
     create(ctx) {
       cur = ctx;
@@ -544,13 +554,13 @@
         if (q.phase === 'chick' && !e.V) { chick(q, g, ctx, t, dt, now, line++); continue; }
         if (!e.V && q.phase === 'away') {
           if (q.next - now > mean() * 1.4) q.next = now + mean() * 1.4;  // "How often" was turned up meanwhile
-          // stick figures on the dashboard: it does not wait for its usual visit. It is there 20 to 45 seconds after
-          // first noticing them, and again every minute or two for as long as they stay. Entering, it sees them and
-          // the chase comes first; "How often" still decides the visits when nobody is about.
+          // stick figures on the dashboard: it does not wait for its usual visit. It comes out soon after first
+          // noticing them, and again and again for as long as they stay (how soon: the pace table). Entering, it sees
+          // them and the chase comes first.
           if (!sticks) e.sn = null;
-          else if (e.sn == null) e.sn = now + STICK[0] + Math.random() * (STICK[1] - STICK[0]);
+          else if (e.sn == null) e.sn = now + about(pace().stick);
           if (now >= q.next) begin(q, ctx);
-          else if (sticks && now >= e.sn) { e.sn = now + STICK[2] + Math.random() * (STICK[3] - STICK[2]); begin(q, ctx); }
+          else if (sticks && now >= e.sn) { e.sn = now + about(pace().again); begin(q, ctx); }
         }
         if (e.V) act(q, g, ctx, t, dt);
         else if (q.phase === 'hiding' && q.hide === ctx.page && q.hx != null) nest(q, g, ctx, t, dt);
