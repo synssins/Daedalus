@@ -168,8 +168,9 @@
     },
   });
 
+  // The exchange shows inside the button: assist.js puts the orb where the icon is and the words on the two lines.
   HP.tile('assistant', {
-    create(t, body, ctx, i) { i.p = U.card(body, t.icon || 'microphone'); U.set(i.p.n, t.name || 'Assistant'); U.set(i.p.l, t.label || 'Tap to talk'); },
-    tap: t => () => HP.assist.open(t),
+    create(t, body, ctx, i) { i.p = U.card(body, t.icon || 'microphone'); U.set(i.p.n, t.name || 'Assistant'); U.set(i.p.l, t.label || ''); },
+    tap: t => () => HP.assist.start(t),
   });
 })();

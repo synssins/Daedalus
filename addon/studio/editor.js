@@ -11,10 +11,11 @@ const TYPES = {
   room: {label: 'Room', icon: 'home', w: 12, h: 8, fields: [['area', 'Room', 'area'], ['name', 'Name', 'text', 'Room name'], ['icon', 'Icon', 'icon']]},
   camera: {label: 'Camera', icon: 'video', w: 18, h: 12, fields: [['entity', 'Entity', 'entity', ['camera']], ['name', 'Name', 'text'], ['video', 'Live video', 'bool'], ['page', 'Opens', 'page']]},
   media: {label: 'Media player', icon: 'play', w: 24, h: 8, fields: [['entity', 'Entity', 'entity', ['media_player']], ['name', 'Name', 'text']]},
-  assistant: {label: 'Assistant', icon: 'microphone', w: 12, h: 8, fields: [['name', 'Name', 'text', 'Assistant'], ['label', 'Subtitle', 'text', 'Tap to talk'],
+  assistant: {label: 'Assistant', icon: 'microphone', w: 12, h: 8, fields: [['name', 'Name', 'text', 'Assistant'], ['label', 'Subtitle', 'text'],
     ['mode', 'Source', 'select', () => [['', 'Home Assistant'], ['llm', 'Direct LLM']]],
     ['pipeline', 'Voice assistant', 'select', () => [['', 'Default'], ...A.pipelines.map(p => [p.id, p.name])]],
     ['speaker', 'Speaker', 'select', () => [['', 'This device'], ...A.ents.filter(n => n.id.startsWith('media_player.')).map(n => [n.id, n.name])]],
+    ['wake', 'Wake word', 'select', () => [['', 'Off'], ...A.wakewords.map(w => [w.id, w.name])]],
     ['orb', 'Animation', 'select', () => ORBS]]},
   weather: {label: 'Weather', icon: 'weather-sunny', w: 14, h: 6, fields: [['entity', 'Entity', 'entity', ['weather']]]},
   clock: {label: 'Clock', icon: 'clock', w: 24, h: 13, flat: true, fields: []},
@@ -24,14 +25,14 @@ const TYPES = {
   label: {label: 'Text', icon: 'text', w: 20, h: 5, flat: true, fields: [['text', 'Text', 'text'], ['size', 'Size', 'range', [0.2, 1, 0.02]]]},
   image: {label: 'Picture', icon: 'image', w: 12, h: 8, fields: []},
 };
-A.pipelines = [];
+A.pipelines = []; A.wakewords = [];
 
 async function openDesign(id, at) {
   if (!(A.ed && A.ed.id === id) && unsaved()) return;
   try {
     const rec = await api('designs/' + id);
     loadHouse();
-    if (!A.pipelines.length) api('pipelines').then(r => { A.pipelines = r.pipelines || []; }, () => {});
+    if (!A.pipelines.length) api('pipelines').then(r => { A.pipelines = r.pipelines || []; A.wakewords = r.wakewords || []; }, () => {});
     const t = A.state.tablets.find(x => x.design === id && x.width) || A.state.tablets.find(x => x.width);
     A.th = null;
     A.ed = {id, name: rec.name, design: rec.design, page: rec.design.start || rec.design.pages[0].id, sel: -1, dirty: false, hist: [], redo: [],

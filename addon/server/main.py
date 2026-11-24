@@ -122,6 +122,40 @@ async def tablet_engine(request: web.Request):
     return web.json_response(eng)
 
 
+# Wake words are recognised on the tablet. It needs a small runtime and the model files; they are fetched from
+# their publishers the first time a tablet asks and kept in the data folder. Custom words are read from the
+# folder Home Assistant's own openWakeWord uses.
+WAKE_DIR = DATA / "wake"
+WAKE_CUSTOM = Path("/share/openwakeword")
+_TFLITE_WEB = "https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-tflite@0.0.1-alpha.10/wasm/"
+_OWW = "https://raw.githubusercontent.com/rhasspy/pyopen-wakeword/6bc5c5f5c9c71e46a723b6c9277b1d50f2ba13fd/pyopen_wakeword/models/"
+WAKE_SOURCES = {n: _TFLITE_WEB + n for n in ("tflite_web_api_client.js", "tflite_web_api_cc.js", "tflite_web_api_cc.wasm",
+                                             "tflite_web_api_cc_simd.js", "tflite_web_api_cc_simd.wasm")}
+WAKE_SOURCES.update({n + ".tflite": _OWW + n + ".tflite" for n in ("embedding_model", "okay_nabu", "hey_jarvis", "hey_mycroft", "alexa", "hey_rhasspy")})
+
+
+async def wake_file(request: web.Request):
+    name = Path(request.match_info["name"]).name
+    for base in (WAKE_CUSTOM, WAKE_DIR):
+        if (base / name).is_file():
+            return web.FileResponse(base / name, headers={"Cache-Control": "max-age=86400"})
+    if name not in WAKE_SOURCES:
+        raise web.HTTPNotFound()
+    async with request.app["wake_lock"]:
+        if not (WAKE_DIR / name).is_file():
+            WAKE_DIR.mkdir(parents=True, exist_ok=True)
+            try:
+                async with request.app["http"].get(WAKE_SOURCES[name], timeout=120) as up:
+                    up.raise_for_status()
+                    tmp = WAKE_DIR / (name + ".part")
+                    tmp.write_bytes(await up.read())
+                    tmp.replace(WAKE_DIR / name)
+                    log.info("fetched wake word file %s", name)
+            except Exception as e:
+                raise web.HTTPBadGateway(text=f"could not fetch {name}: {e}")
+    return web.FileResponse(WAKE_DIR / name, headers={"Cache-Control": "max-age=86400"})
+
+
 async def tablet_log(request: web.Request):
     """A device reports a script error or a milestone. It goes to the add-on log with the device's name, so a
     panel that misbehaves on the wall can be diagnosed without plugging it in."""
@@ -384,8 +418,14 @@ def primary_entity(mine: list) -> str:
 
 async def admin_pipelines(request: web.Request):
     """The voice assistants set up in Home Assistant, for the assistant button's picker."""
-    res = (await ha_call(request.app, [{"type": "assist_pipeline/pipeline/list"}]))[0] or {}
-    return web.json_response({"pipelines": [{"id": p["id"], "name": p["name"]} for p in res.get("pipelines", [])]})
+    res, states = await ha_call(request.app, [{"type": "assist_pipeline/pipeline/list"}, {"type": "get_states"}])
+    engines = [s["entity_id"] for s in states if s["entity_id"].startswith("wake_word.")]
+    words = {}
+    for info in await ha_call(request.app, [{"type": "wake_word/info", "entity_id": e} for e in engines]) if engines else []:
+        for w in (info or {}).get("wake_words", []):
+            words.setdefault(w["id"], w.get("name") or w["id"])
+    return web.json_response({"pipelines": [{"id": p["id"], "name": p["name"]} for p in (res or {}).get("pipelines", [])],
+                              "wakewords": [{"id": k, "name": v} for k, v in words.items()]})
 
 
 async def admin_library(request: web.Request):
@@ -518,6 +558,7 @@ def build_app() -> web.Application:
     app["store"] = Store(DATA)
     app["tablet_sockets"] = {}
     app["engine"] = build_engine()
+    app["wake_lock"] = asyncio.Lock()
     app["admin_sockets"] = set()
 
     async def http_ctx(app):
@@ -534,6 +575,7 @@ def build_app() -> web.Application:
     r.add_get("/api/design", tablet_design)
     r.add_post("/api/log", tablet_log)
     r.add_get("/api/engine", tablet_engine)
+    r.add_get("/wake/{name}", wake_file)
     r.add_get("/api/events", tablet_events)
     r.add_get("/api/websocket", ha_socket)
     r.add_post("/api/llm", tablet_llm)

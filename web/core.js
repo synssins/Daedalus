@@ -204,6 +204,7 @@ function roomPage(area) {
 }
 
 function show() {
+  if (HP.assist && HP.assist.busy) HP.assist.close();
   const d = HP.design, top = HP.stack[HP.stack.length - 1], grid = $('grid'), looks = (HP.theme && HP.theme.looks) || {};
   HP.live.forEach(i => { if (i.data && i.data.destroy) i.data.destroy(); });
   HP.live = []; grid.innerHTML = '';
@@ -256,6 +257,16 @@ function update() {
 }
 /** State changes arrive in bursts; tiles patch their own text and classes, so this is cheap and never eats a tap. */
 function dirty() { if (!dirty.t) dirty.t = setTimeout(() => { dirty.t = null; update(); }, 250); }
+
+// ---------- wake words ----------
+/** Assistant buttons may name a wake word. The tablet listens for those words itself (wake.js) and starts the
+ *  button that owns the word, whichever dashboard is showing. */
+function wakeSetup() {
+  if (HP.preview || !HP.server || !HP.wake) return;
+  const owners = {};
+  HP.design.pages.forEach(p => p.tiles.forEach(t => { if (t.type === 'assistant' && t.wake && !owners[t.wake]) owners[t.wake] = t; }));
+  HP.wake.listen(Object.keys(owners), id => { if (!HP.assist.busy && owners[id]) HP.assist.start(owners[id]); });
+}
 
 // ---------- swipe between dashboards ----------
 // A tap is a touch that barely moved. A swipe is a long, mostly sideways drag, or a quick flick. Anything in
@@ -355,6 +366,7 @@ HP.setDesign = (d, page, rec) => {
   HP.stack = [{page: keepPage || HP.startPage || d.start || d.pages[0].id}];
   splash();
   show();  // without Home Assistant yet, tiles draw in their offline state rather than leaving the screen blank
+  wakeSetup();
   if (window.HP_ENGINE) HP_ENGINE.ok();
 };
 

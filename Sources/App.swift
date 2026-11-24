@@ -1,3 +1,4 @@
+import AVFoundation
 import CoreMotion
 import UIKit
 import WebKit
@@ -24,6 +25,8 @@ class PanelViewController: UIViewController, WKScriptMessageHandler, WKUIDelegat
     var web: WKWebView!
     let discovery = Discovery()
     let motion = CMMotionManager()
+    let audio = AVAudioEngine()
+    var micOn = false
 
     /// Hardware identifier such as "iPad5,3".
     func machine() -> String {
@@ -106,6 +109,19 @@ class PanelViewController: UIViewController, WKScriptMessageHandler, WKUIDelegat
                     self.web.evaluateJavaScript(String(format: "window.nativeMotion && window.nativeMotion(%.3f,%.3f)", x, y), completionHandler: nil)
                 }
             }
+        case "mic":
+            // The microphone for the wake word and the assistant. Sound goes to the page (window.nativeAudio) and
+            // nowhere else; the page decides what, if anything, is sent on. iOS asks the person once.
+            if (m["on"] as? Bool) != true { stopMic(); out["on"] = false; break }
+            AVAudioSession.sharedInstance().requestRecordPermission { granted in
+                DispatchQueue.main.async {
+                    if !granted { out["error"] = "denied" } else {
+                        do { try self.startMic(); out["on"] = true } catch { out["error"] = "microphone: \(error.localizedDescription)" }
+                    }
+                    self.reply(out)
+                }
+            }
+            return
         case "brightness":
             if let v = m["value"] as? Double { UIScreen.main.brightness = CGFloat(max(0, min(1, v))) }
             out["brightness"] = Double(UIScreen.main.brightness)
@@ -122,6 +138,47 @@ class PanelViewController: UIViewController, WKScriptMessageHandler, WKUIDelegat
               let data = try? Data(contentsOf: url),
               let obj = try? JSONSerialization.jsonObject(with: data) else { return [String: Any]() }
         return obj
+    }
+
+    /// Capture at whatever rate the hardware gives, convert to 16 kHz 16-bit mono, hand each piece to the page as base64.
+    func startMic() throws {
+        if micOn { return }
+        let session = AVAudioSession.sharedInstance()
+        try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetooth])
+        try session.setActive(true)
+        let input = audio.inputNode
+        let inFormat = input.outputFormat(forBus: 0)
+        guard let outFormat = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 16000, channels: 1, interleaved: true),
+              let converter = AVAudioConverter(from: inFormat, to: outFormat) else {
+            throw NSError(domain: "HomePanel", code: 1, userInfo: [NSLocalizedDescriptionKey: "no usable input format"])
+        }
+        input.installTap(onBus: 0, bufferSize: 4096, format: inFormat) { [weak self] buffer, _ in
+            let capacity = AVAudioFrameCount(Double(buffer.frameLength) * 16000.0 / inFormat.sampleRate) + 32
+            guard let out = AVAudioPCMBuffer(pcmFormat: outFormat, frameCapacity: capacity) else { return }
+            var fed = false
+            var failure: NSError?
+            converter.convert(to: out, error: &failure) { _, status in
+                if fed { status.pointee = .noDataNow; return nil }
+                fed = true
+                status.pointee = .haveData
+                return buffer
+            }
+            guard failure == nil, out.frameLength > 0, let samples = out.int16ChannelData else { return }
+            let b64 = Data(bytes: samples[0], count: Int(out.frameLength) * 2).base64EncodedString()
+            DispatchQueue.main.async {
+                self?.web.evaluateJavaScript("window.nativeAudio && window.nativeAudio('\(b64)')", completionHandler: nil)
+            }
+        }
+        audio.prepare()
+        try audio.start()
+        micOn = true
+    }
+
+    func stopMic() {
+        guard micOn else { return }
+        audio.inputNode.removeTap(onBus: 0)
+        audio.stop()
+        micOn = false
     }
 
     /// The assistant button asks for the microphone. iOS asks the person once (its own prompt); after that the
