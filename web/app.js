@@ -65,6 +65,35 @@ function playCamera(ha, entity, video, status) {
     const stream = new MediaStream(); video.srcObject = stream;
     pc.ontrack = e => { stream.addTrack(e.track); video.play().catch(() => {}); };
     pc.onconnectionstatechange = () => status(pc.connectionState === 'connected' ? '' : pc.connectionState);
+    // "connected" only means the network path is up. Say so when no picture is being decoded, and why.
+    const watch = setInterval(async () => {
+      if (closed) return clearInterval(watch);
+      if (pc.connectionState !== 'connected') return;
+      let rtp = null; const codecs = {};
+      (await pc.getStats()).forEach(r => {
+        if (r.type === 'inbound-rtp' && (r.kind === 'video' || r.mediaType === 'video')) rtp = r;
+        if (r.type === 'codec') codecs[r.id] = r.mimeType;
+      });
+      const frames = rtp ? rtp.framesDecoded || 0 : 0;
+      const info = rtp ? (codecs[rtp.codecId] || 'no codec') + ', ' + (rtp.packetsReceived || 0) + ' packets, ' + frames + ' frames' : 'no video track';
+      console.log('stats ' + entity + ': ' + info + ', video ' + video.videoWidth + 'x' + video.videoHeight + ' paused=' + video.paused);
+      if (frames > 0) return status('');
+      // WebRTC here only decodes H.264. An H.265 camera connects but sends nothing: fall back to HLS,
+      // which this web view plays natively (slower to start, several seconds behind live).
+      if (++blank < 2) return status('no picture (' + info + ')');
+      clearInterval(watch); pc.close();
+      status('H.265 camera, starting HLS');
+      const hls = await ha.call({type: 'camera/stream', entity_id: entity});
+      if (closed) return;
+      video.srcObject = null;
+      video.src = ha.url.replace(/^ws/, 'http').replace(/\/api\/websocket$/, '') + hls.url;
+      video.onplaying = () => status('');
+      // Air 2 cannot decode high-resolution H.265 (seen: MEDIA_ERR_DECODE, code 3). Only fix is at the camera.
+      video.onerror = () => status('H.265 not playable here (code ' + (video.error && video.error.code) +
+        '): set this camera to Standard (H.264) encoding in Protect');
+      video.play().catch(() => {});
+    }, 4000);
+    let blank = 0;
 
     let session = null; const queued = [];
     const sendCand = c => ha.call({type: 'camera/webrtc/candidate', entity_id: entity, session_id: session, candidate: c}).catch(() => {});
@@ -87,7 +116,7 @@ function playCamera(ha, entity, video, status) {
       } else if (ev.type === 'error') status(ev.message || ev.code || 'stream error');
     });
   })().catch(e => { console.error('camera ' + entity + ': ' + e.message); status(e.message); });
-  return () => { closed = true; if (pc) pc.close(); video.srcObject = null; };
+  return () => { closed = true; if (pc) pc.close(); video.srcObject = null; video.removeAttribute('src'); video.load(); };
 }
 
 // ---------- camera wall ----------
@@ -116,6 +145,7 @@ function render(states, only) {
     tile.append(video, label);
     wall.append(tile);
     if (s.state === 'unavailable') status('unavailable');
+    else if (!(s.attributes.supported_features & 2)) status('no stream: turn on RTSP for this camera in Protect');
     else if (live < MAX_LIVE || only) { live++; status('connecting'); stops.push(playCamera(ha, s.entity_id, video, status)); }
     else status('tap to view');
     tile.onclick = () => load(only ? null : s.entity_id);
