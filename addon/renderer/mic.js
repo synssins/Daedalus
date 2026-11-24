@@ -7,7 +7,11 @@
   const subs = new Set();
   let web = null, starting = null;
 
-  const emit = pcm => { subs.forEach(fn => { try { fn(pcm); } catch (e) { console.error('mic listener: ' + e.message); } }); };
+  let told = 0, chunks = 0;
+  const emit = pcm => {
+    if (++chunks === 1) HP.report('mic: sound is arriving, ' + pcm.length + ' samples a piece');
+    subs.forEach(fn => { try { fn(pcm); } catch (e) { console.error('mic listener: ' + e.message); if (told++ < 3) HP.report('mic listener failed: ' + e.message); } });
+  };
   /** The native shell calls this with base64 of little-endian 16-bit samples. */
   window.nativeAudio = b64 => {
     if (!subs.size) return;
@@ -40,7 +44,7 @@
     return starting;
   }
   function stop() {
-    starting = null;
+    starting = null; chunks = 0;
     if (HP.mic.native) native('mic', {on: false}).catch(() => {});
     if (web) { web.proc.disconnect(); web.proc.onaudioprocess = null; web.stream.getTracks().forEach(t => t.stop()); web.ac.close().catch(() => {}); web = null; }
   }
