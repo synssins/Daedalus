@@ -46,7 +46,7 @@ const setState = s => { A.state = s; rail(); if (A.view === 'tablets') viewTable
 // ---------- rail ----------
 function rail() {
   const r = $('#rail'), pending = A.state.tablets.some(t => t.status === 'pending');
-  const item = (label, ic, cur, onclick, extra, cls) => h('button', {type: 'button', class: cls || '', 'aria-current': cur ? 'page' : null, onclick, html: (ic ? icon(ic) : '') + `<span>${esc(label)}</span>` + (extra || '')});
+  const item = (label, ic, cur, onclick, extra, cls) => h('button', {type: 'button', title: label, class: cls || '', 'aria-current': cur ? 'page' : null, onclick, html: (ic ? icon(ic) : '') + `<span>${esc(label)}</span>` + (extra || '')});
   r.replaceChildren(
     h('div', {class: 'brand', html: 'HomePanel <span>Studio</span>'}),
     item('Tablets', 'tablet', A.view === 'tablets', () => go('tablets'), pending ? '<span class="dot" title="A tablet is waiting for approval"></span>' : `<span class="n">${A.state.tablets.length}</span>`),
@@ -130,14 +130,16 @@ const rgba = s => { const m = /rgba?\(([\d.\s]+),([\d.\s]+),([\d.\s]+)(?:,([\d.\
   return m ? {hex: '#' + x(m[1]) + x(m[2]) + x(m[3]), a: m[4] == null ? 1 : +m[4]} : /^#[0-9a-f]{6}$/i.test(s || '') ? {hex: s, a: 1} : null; };
 const toRgba = (hex, a) => `rgba(${parseInt(hex.slice(1, 3), 16)},${parseInt(hex.slice(3, 5), 16)},${parseInt(hex.slice(5, 7), 16)},${a})`;
 
-async function openDesign(id) {
+async function openDesign(id, at) {
   if (A.ed && A.ed.dirty && A.ed.id !== id && !confirm('Leave without saving? Changes to "' + A.ed.name + '" will be lost.')) return;
   try {
     const rec = await api('designs/' + id);
-    if (!A.ents.length) api('entities').then(r => { A.ents = r.entities; A.areas = r.areas; }, fail);
+    if (!A.ents.length) api('entities').then(r => { A.ents = r.entities; A.areas = r.areas; if (A.view === 'editor') inspector(); }, fail);  // redraw: names and rooms have arrived
     const t = A.state.tablets.find(x => x.design === id && x.width) || A.state.tablets.find(x => x.width);
     A.ed = {id, name: rec.name, design: rec.design, page: rec.design.start || rec.design.pages[0].id, sel: -1, dirty: false, hist: [], redo: [],
       screen: t ? {w: t.width, h: t.height} : {w: 1024, h: 768}, tab: 'tile', use: false, open: false};
+    if (at && A.ed.design.pages.some(p => p.id === at.page)) A.ed.page = at.page;
+    if (at && at.tile >= 0 && at.tile < page().tiles.length) A.ed.sel = at.tile;
     A.view = 'editor'; rail(); viewEditor(); history.replaceState(null, '', '#design=' + id);  // a refresh comes back to the same design
   } catch (e) { fail(e); }
 }
@@ -167,14 +169,20 @@ function travel(from, to) {
   to.push(JSON.stringify(e.design)); e.design = JSON.parse(from.pop());
   if (!e.design.pages.some(p => p.id === e.page)) e.page = e.design.pages[0].id;
   e.sel = Math.min(e.sel, page().tiles.length - 1); e.dirty = true; e.open = false;
-  viewEditor(true);
+  viewEditor(true); fit();  // fit: an undone grid change alters cell size
 }
 async function save() {
   const e = ed();
   try { await send('PUT', 'designs/' + e.id, {name: e.name, design: e.design}); e.dirty = false; saveLabel(); toast('Saved. Tablets using it update now.'); api('state').then(s => { A.state = s; rail(); }); }
   catch (err) { toast('Not saved: ' + err.message); }
 }
-function saveLabel() { const s = $('.saved'); if (s) { s.textContent = ed().dirty ? 'Unsaved changes' : 'Saved'; s.className = 'saved' + (ed().dirty ? ' dirty' : ''); } }
+/** Toolbar state: the saved/unsaved note, and buttons that have nothing to do right now are disabled. */
+function saveLabel() {
+  const e = ed(), s = $('.saved'); if (!s) return;
+  s.textContent = e.dirty ? 'Unsaved changes' : 'Saved'; s.className = 'saved' + (e.dirty ? ' dirty' : '');
+  const set = (k, off) => { const b = $('.bar [data-k=' + k + ']'); if (b) b.disabled = off; };
+  set('undo', !e.hist.length); set('redo', !e.redo.length); set('save', !e.dirty);
+}
 
 function viewEditor(keepFrame) {
   const e = ed(), d = e.design;
@@ -193,15 +201,24 @@ function viewEditor(keepFrame) {
     h('span', {class: 'sep'}),
     btn('', 'undo', () => travel(e.hist, e.redo), 'icon'), btn('', 'redo', () => travel(e.redo, e.hist), 'icon'),
     h('span', {class: 'saved'}), btn('Save', null, save, 'go'));
-  bar.querySelectorAll('.btn.icon')[0].title = 'Add a page'; bar.querySelectorAll('.btn.icon')[1].title = 'Undo (Ctrl+Z)'; bar.querySelectorAll('.btn.icon')[2].title = 'Redo (Ctrl+Y)';
+  const ic = bar.querySelectorAll('.btn.icon');
+  [['Add a page'], ['Undo (Ctrl+Z)', 'undo'], ['Redo (Ctrl+Y)', 'redo']].forEach(([title, k], i) => { ic[i].title = title; ic[i].setAttribute('aria-label', title); if (k) ic[i].dataset.k = k; });
+  bar.lastChild.dataset.k = 'save';
 
   const palette = h('div', {class: 'palette'}, h('h2', null, 'Add a tile'),
-    ...Object.keys(TYPES).map(k => h('button', {type: 'button', onclick: () => addTile(k), html: icon(TYPES[k].icon) + `<span>${esc(TYPES[k].label)}</span>`})));
+    ...Object.keys(TYPES).map(k => h('button', {type: 'button', title: 'Add: ' + TYPES[k].label, onclick: () => addTile(k), html: icon(TYPES[k].icon) + `<span>${esc(TYPES[k].label)}</span>`})));
 
-  let frame = keepFrame && $('.stage iframe');
-  if (!frame) { e.ready = false; frame = h('iframe', {title: 'Dashboard preview', src: 'renderer/index.html?preview=1&key=studio-preview&design=' + encodeURIComponent(e.id)}); }
+  if (keepFrame && $('.ed')) {
+    // Same design, same sheet: swap the toolbar and redraw the edit layer only. Re-inserting the preview
+    // frame would make the browser reload it and reconnect to the house on every page switch or undo.
+    $('.bar').replaceWith(bar); $('.stage').classList.toggle('use', e.use);
+    saveLabel(); boxes(); inspector(); push();
+    return;
+  }
+  e.ready = false;
+  const frame = h('iframe', {title: 'Dashboard preview', src: 'renderer/index.html?preview=1&key=studio-preview&design=' + encodeURIComponent(e.id)});
   const over = h('div', {class: 'over grid'});
-  const stage = h('div', {class: 'stage' + (e.use ? ' use' : '')}, frame, over);
+  const stage = h('div', {class: 'stage' + (e.use ? ' use' : '')}, h('div', {class: 'frame'}, frame), over);
   const sheet = h('div', {class: 'sheet'}, h('div', {class: 'ruler top'}), h('div', {class: 'ruler left'}), stage);
   const wrap = h('div', {class: 'sheetwrap'}, sheet);
   over.addEventListener('pointerdown', ev => { if (ev.target === over) { e.sel = -1; boxes(); inspector(); } });
@@ -235,7 +252,7 @@ function boxes() {
   const e = ed(), over = $('.over'); if (!over) return;
   over.replaceChildren(...page().tiles.map((t, i) => {
     const b = h('div', {class: 'box' + (i === e.sel ? ' sel' : ''), tabIndex: 0, role: 'button', 'aria-label': `Tile ${i + 1}, ${(TYPES[t.type] || {}).label || t.type}`, 'aria-pressed': i === e.sel, style: `left:${t.x * e.cw}px;top:${t.y * e.ch}px;width:${t.w * e.cw}px;height:${t.h * e.ch}px`, title: (TYPES[t.type] || {}).label || t.type},
-      h('span', {class: 'tag'}, String(i + 1)), h('span', {class: 'dim'}, `${t.w} × ${t.h} at ${t.x}, ${t.y}`),
+      h('span', {class: 'tag'}, String(i + 1)), h('span', {class: 'dim' + (t.y + t.h > e.design.grid.rows - 3 ? ' up' : '')}, `${t.w} × ${t.h} at ${t.x}, ${t.y}`),
       ...['nw', 'ne', 'sw', 'se'].map(c => h('span', {class: 'hd ' + c, 'data-c': c})));
     b.addEventListener('pointerdown', ev => drag(ev, i, b));
     b.addEventListener('focus', () => { if (e.sel !== i) { e.sel = i; e.tab = 'tile'; boxes(); inspector(); $('.over').children[i].focus(); } });
@@ -262,6 +279,7 @@ function drag(ev, i, b) {
     moved = true;
     change(() => Object.assign(t, {x, y, w, h: hh}), {live: true, keepBoxes: true});
     Object.assign(b.style, {left: x * e.cw + 'px', top: y * e.ch + 'px', width: w * e.cw + 'px', height: hh * e.ch + 'px'});
+    b.querySelector('.dim').classList.toggle('up', y + hh > g.rows - 3);  // no room below the last rows: show it above
     b.querySelector('.dim').textContent = `${w} × ${hh} at ${x}, ${y}`;
   };
   const up = () => { b.removeEventListener('pointermove', move); b.removeEventListener('pointerup', up); settle(); if (moved) inspector(); };
@@ -284,6 +302,11 @@ function inspector() {
   const tab = (id, label) => h('button', {type: 'button', role: 'tab', 'aria-selected': e.tab === id, onclick: () => { e.tab = id; inspector(); }}, label);
   box.replaceChildren(h('div', {class: 'tabs', role: 'tablist', 'aria-label': 'Properties'}, tab('tile', 'Tile'), tab('look', 'Look'), tab('page', 'Page')),
     ...(e.tab === 'look' ? lookFields() : e.tab === 'page' ? pageFields() : tileFields()));
+  // Every slider shows its measurement: percent for 0-1 amounts (opacity, darken, text size), pixels for the rest.
+  box.querySelectorAll('input[type=range]').forEach(r => {
+    const out = h('output', {class: 'val'}), show = () => { out.textContent = +r.max <= 1 ? Math.round(r.value * 100) + '%' : r.value + ' px'; };
+    r.addEventListener('input', show); show(); r.after(out);
+  });
 }
 const row = (label, ...ctl) => h('div', {class: 'f'}, h('label', null, label), h('div', {class: 'w'}, ...ctl));
 const textIn = (val, set, ph) => h('input', {type: 'text', value: val == null ? '' : val, placeholder: ph || '', oninput: ev => set(ev.target.value), onchange: settle});
@@ -306,6 +329,16 @@ function entityPick(val, set, domains, many) {
     list.hidden = false;
   };
   input.addEventListener('focus', () => { input.select(); fill(); }); input.addEventListener('input', fill);
+  // Type, arrow down, Enter: with thousands of entities the keyboard is the main route.
+  input.addEventListener('keydown', ev => {
+    const items = [...list.querySelectorAll('button')], at = items.findIndex(b => b.classList.contains('hi'));
+    if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
+      ev.preventDefault(); if (!items.length) return;
+      const next = (at + (ev.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+      items.forEach((b, i) => b.classList.toggle('hi', i === next)); items[next].scrollIntoView({block: 'nearest'});
+    } else if (ev.key === 'Enter' && items.length) { ev.preventDefault(); (items[at] || items[0]).dispatchEvent(new MouseEvent('mousedown', {cancelable: true})); }
+    else if (ev.key === 'Escape') input.blur();
+  });
   input.addEventListener('blur', () => { list.hidden = true; if (!many) input.value = name(val); });
   return h('div', {class: 'pick'}, input, list);
 }
@@ -419,11 +452,17 @@ window.addEventListener('keyup', settle);
 window.addEventListener('beforeunload', ev => { if (A.ed && A.ed.dirty) { ev.preventDefault(); ev.returnValue = ''; } });
 
 // ---------- start ----------
-api('state').then(s => {
-  setState(s);
-  const want = /^#design=(.+)/.exec(location.hash);
-  if (want && s.designs.some(d => d.id === want[1])) openDesign(want[1]); else if (location.hash === '#designs') go('designs');
-}, fail);
+(function start() {
+  api('state').then(s => {
+    setState(s);
+    // #design=<id>, optionally &page=<id>&tile=<number>, so a link or a refresh lands on the same spot
+    const q = new URLSearchParams(location.hash.slice(1).replace(/,/g, '&')), want = q.get('design');
+    if (want && s.designs.some(d => d.id === want)) openDesign(want, {page: q.get('page'), tile: q.has('tile') ? q.get('tile') - 1 : -1}); else if (location.hash === '#designs') go('designs');
+  }, err => {  // nothing loaded: say so on the page, with a way to try again, instead of a blank screen
+    $('#main').replaceChildren(h('div', {class: 'body'}, h('div', {class: 'empty'}, h('b', null, 'HomePanel Studio did not answer'),
+      'The add-on may still be starting. ' + err.message, h('p', {style: 'margin-top:16px'}, btn('Try again', null, start, 'go')))));
+  });
+})();
 (function live() {  // tablets that say hello appear without a refresh
   const ws = new WebSocket(new URL('admin/api/live', location.href).href.replace(/^http/, 'ws'));
   ws.onmessage = ev => { const m = JSON.parse(ev.data); if (m.type === 'state') { A.state = m.state; rail(); if (A.view !== 'editor') setState(m.state); } };

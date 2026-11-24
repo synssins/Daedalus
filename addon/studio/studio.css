@@ -3,6 +3,7 @@
 :root { --ground: #18233f; --rail: #0d1326; --panel: #1f2c4d; --panel-2: #263660; --seam: #35447a; --seam-soft: #2a3862;
   --chalk: #e9edf7; --chalk-2: #a9b8dc; --chalk-3: #8496c2;
   --edit: #ff5fa8; --go: #ffb547; --go-ink: #2a1a00; --live: #57d49b; --stop: #ff7466;
+  color-scheme: dark; accent-color: var(--edit);
   --r: 7px; --font: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif; }
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; }
@@ -40,7 +41,7 @@ svg.i { width: 18px; height: 18px; fill: currentColor; flex: none; }
 .btn.stop { color: var(--stop); }
 .btn.stop:hover { border-color: var(--stop); }
 .btn.icon { width: 32px; padding: 0; justify-content: center; }
-.btn.on { border-color: var(--edit); color: var(--edit); }
+.btn.on { border-color: var(--live); color: var(--live); }  /* live mode, not editing */
 input[type=text], input[type=number], select, textarea { height: 32px; padding: 0 9px; border: 1px solid var(--seam); border-radius: var(--r); background: var(--rail); min-width: 0; }
 textarea { height: auto; padding: 7px 9px; resize: vertical; }
 input::placeholder { color: var(--chalk-3); }
@@ -65,7 +66,7 @@ td.act { text-align: right; white-space: nowrap; }
 td.act .btn + .btn { margin-left: 6px; }
 td.act .btn.stop { margin-left: 22px; }  /* removal sits apart from its neighbours */
 td .sub { color: var(--chalk-3); font-size: 12.5px; }
-td input[type=text] { width: 100%; max-width: 260px; background: transparent; border-color: transparent; }
+td input[type=text] { width: 100%; max-width: 260px; margin-left: -10px; background: transparent; border-color: transparent; }
 td input[type=text]:hover, td input[type=text]:focus { background: var(--rail); border-color: var(--seam); }
 
 /* ---- editor ---- */
@@ -73,6 +74,8 @@ td input[type=text]:hover, td input[type=text]:focus { background: var(--rail); 
 .bar .name { width: 200px; font-weight: 600; }
 .bar .sep { width: 1px; height: 20px; background: var(--seam); margin: 0 4px; }
 .bar .sp { flex: 1; }
+.bar .tabs { min-width: 0; overflow-x: auto; }
+.bar > * { flex: none; } .bar > .tabs { flex: 0 1 auto; }
 .bar .saved { color: var(--chalk-3); font-size: 12.5px; }
 .bar .saved.dirty { color: var(--go); }
 .tabs { display: flex; gap: 2px; }
@@ -91,7 +94,9 @@ td input[type=text]:hover, td input[type=text]:focus { background: var(--rail); 
 .ruler i { position: absolute; font-style: normal; }
 .ruler.top i { top: 0; border-left: 1px solid var(--seam); padding-left: 3px; height: 18px; line-height: 14px; }
 .ruler.left i { left: 0; border-top: 1px solid var(--seam); width: 18px; padding-top: 1px; text-align: center; line-height: 12px; }
-.stage { position: absolute; left: 22px; top: 22px; background: #000; border-radius: 4px; overflow: hidden; box-shadow: 0 0 0 1px var(--seam); }
+.stage { position: absolute; left: 22px; top: 22px; box-shadow: 0 0 0 1px var(--seam); border-radius: 4px; }
+/* Only the preview is clipped; handles and the measurement callout may hang over the sheet's edge. */
+.frame { position: absolute; left: 0; top: 0; right: 0; bottom: 0; overflow: hidden; border-radius: 4px; background: #000; }
 .stage iframe { border: 0; transform-origin: 0 0; display: block; pointer-events: none; }
 .stage.use iframe { pointer-events: auto; }
 .stage.use .over { display: none; }
@@ -100,12 +105,13 @@ td input[type=text]:hover, td input[type=text]:focus { background: var(--rail); 
 .box { position: absolute; border: 1px solid transparent; border-radius: 3px; cursor: grab; touch-action: none; }
 .box:hover, .box:focus-visible { border-color: rgba(255,255,255,.7); }
 .box:focus-visible { outline: 2px solid var(--chalk); outline-offset: 1px; }
-.box .tag { position: absolute; left: 3px; top: 3px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: rgba(13,19,38,.82); color: var(--chalk-2); font-size: 10px; line-height: 16px; text-align: center; opacity: 0; }
+.box .tag { position: absolute; left: 3px; top: 3px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: rgba(13,19,38,.82); color: var(--chalk-2); font-size: 10px; line-height: 16px; text-align: center; opacity: .78; }
 .over:hover .tag, .box.sel .tag { opacity: 1; }
 .box.sel { border: 2px solid var(--edit); cursor: move; z-index: 2; }
 .box.sel .tag { background: var(--edit); color: #1a0010; font-weight: 700; }
 .box .dim { display: none; position: absolute; left: 50%; bottom: -22px; transform: translateX(-50%); padding: 1px 7px; border-radius: 4px; background: var(--edit); color: #1a0010; font-size: 11px; font-weight: 700; white-space: nowrap; }
 .box.sel .dim { display: block; }
+.box .dim.up { bottom: auto; top: -22px; }
 .box .hd { display: none; position: absolute; width: 12px; height: 12px; background: var(--edit); border: 2px solid #1a0010; border-radius: 50%; }
 .box.sel .hd { display: block; }
 .hd.nw { left: -7px; top: -7px; cursor: nwse-resize; } .hd.ne { right: -7px; top: -7px; cursor: nesw-resize; }
@@ -135,4 +141,19 @@ td input[type=text]:hover, td input[type=text]:focus { background: var(--rail); 
 .pics button[aria-pressed=true] { border: 2px solid var(--edit); }
 .note { color: var(--chalk-3); font-size: 12.5px; margin: 6px 0 0; }
 .apart { margin-top: 30px; padding-top: 14px; border-top: 1px solid var(--seam-soft); display: flex; gap: 8px; }
+.apart .btn.stop { margin-left: auto; }
+.val { flex: none; width: 44px; text-align: right; color: var(--chalk-2); font-size: 12.5px; }
+.f > .w > input[type=range] { flex: 1; min-width: 0; }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+/* Narrow windows (the HA sidebar takes its share): the rail and the tile list fold to icons so the sheet keeps its size. */
+@media (max-width: 1500px) {
+  #rail { width: 58px; padding: 18px 8px; }
+  #rail .brand, #rail button span:not(.dot), #rail button.sub { display: none; }
+  #rail button { justify-content: center; padding: 9px 0; position: relative; }
+  #rail button .dot { position: absolute; right: 8px; top: 6px; margin: 0; }
+  .palette { width: 52px; padding: 12px 8px; }
+  .palette h2, .palette button span { display: none; }
+  .palette button { justify-content: center; padding: 8px 0; }
+  .insp { width: 272px; }
+}

@@ -52,8 +52,10 @@ function applyTheme(th) {
   const vars = {'--text': th.text, '--font': th.font, '--fill': t.fill, '--fill-on': t.fillOn, '--text-on': t.textOn,
     '--radius': t.radius != null ? t.radius + 'px' : null, '--border': t.border, '--gap': t.gap != null ? t.gap + 'px' : null, '--glow-on': t.glowOn};
   for (const k in vars) if (vars[k] != null) r.setProperty(k, vars[k]);
-  const bg = th.background || {}, img = bg.image ? `url("${HP.asset(bg.image)}")` : 'none';
-  $('bg').style.background = `${bg.color || '#101820'} ${img} center / cover no-repeat`;
+  const bg = th.background || {}, pos = ' center / cover no-repeat';
+  // Server copy first; the copy bundled with the app sits underneath in case the server is away.
+  const layers = !bg.image ? [] : HP.asset(bg.image) === bg.image ? [bg.image] : [HP.asset(bg.image), bg.image];
+  $('bg').style.background = layers.map(u => `url("${u}")` + pos + ', ').join('') + (bg.color || '#101820');
   $('blur').style.background = $('bg').style.background;
   $('dim').style.background = `rgba(0,0,0,${bg.dim || 0})`;
   document.body.classList.toggle('noglass', t.glass === false);
@@ -163,6 +165,7 @@ async function loadAll() {
     ha.call({type: 'config/area_registry/list'}), ha.call({type: 'config/device_registry/list'}),
     ha.call({type: 'config/entity_registry/list'}), ha.call({type: 'get_states'})]);
   S.areas = {}; areas.forEach(a => { S.areas[a.area_id] = a.name; });
+  keep.set('areas', S.areas);  // room names for the next start, in case Home Assistant is away then
   const dev = {}; devices.forEach(d => { dev[d.id] = d.area_id; });
   S.reg = {}; ents.forEach(e => { S.reg[e.entity_id] = {area: e.area_id || dev[e.device_id] || null, skip: !!(e.hidden_by || e.entity_category || e.disabled_by)}; });
   S.states = {}; states.forEach(s => { S.states[s.entity_id] = s; });
@@ -182,12 +185,12 @@ HP.setDesign = (d, page) => {
   const keepPage = page || (HP.stack.length && d.pages.some(p => p.id === HP.stack[0].page) ? HP.stack[0].page : null);
   HP.stack = [{page: keepPage || HP.startPage || d.start || d.pages[0].id}];
   splash();
-  if (HP.ready) show();
+  show();  // without Home Assistant yet, tiles draw in their offline state rather than leaving the screen blank
 };
 
 function connectHA(url, token) {
   HP.ha = new HA(url, token);
-  HP.ha.onstate = s => { if (s === 'online') $('bar').textContent = ''; else toast('Home Assistant: ' + s); console.log('HA ' + s); };
+  HP.ha.onstate = s => { if (s === 'online') $('bar').textContent = ''; else toast((HP.server ? 'HomePanel Studio: ' : 'Home Assistant: ') + s); console.log('HA ' + s); };
   HP.ha.onready = () => loadAll().catch(e => toast('load failed: ' + e.message));
   HP.ha.connect();
 }
@@ -232,7 +235,7 @@ async function serverMode(server, cfg) {
   }
   (function listen() {  // the server says when this tablet's design changed
     const ws = new WebSocket(server.replace(/^http/, 'ws') + '/api/events?key=' + encodeURIComponent(HP.key));
-    ws.onmessage = () => pull().catch(() => {});
+    ws.onopen = ws.onmessage = () => pull().catch(() => {});  // on connect too: catches changes made while the server was away
     ws.onclose = () => setTimeout(listen, 5000);
   })();
 }
@@ -240,6 +243,7 @@ async function serverMode(server, cfg) {
 native('ping').then(async m => {
   const cfg = m.config || {};
   HP.device = m.device || {};
+  S.areas = keep.get('areas') || {};
   setInterval(dirty, 20000);  // keeps clocks current
   let server = cfg.server;
   if (!server) {

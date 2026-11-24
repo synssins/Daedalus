@@ -8,7 +8,7 @@ web
 
 ## Stack
 
-Static HTML/CSS/JS bundled inside a native Swift shell (WKWebView). No framework, no build step for the UI, no network fonts or CDNs: the tablets have no internet access.
+Two parts. Tablet app: static HTML/CSS/JS renderer bundled inside a native Swift shell (WKWebView). HomePanel Studio: a Home Assistant add-on (Python, aiohttp) with a plain HTML/CSS/JS page in the HA sidebar. No framework, no build step for either UI, no network fonts or CDNs: the tablets have no internet access and the Studio is served through HA ingress.
 
 ## Users
 
@@ -20,7 +20,7 @@ Turn retired iPad Air 2 tablets into purpose-built home control panels, replacin
 
 ## Positioning
 
-Built for one specific house and one specific tablet, so nothing is generic: fixed 1024x768 landscape canvas, the house's own rooms and devices, native shell features (brightness, wake, camera, mic) a browser dashboard cannot have.
+The look and layout are designed inside Home Assistant, in the Studio, on a small-cell snap grid, and the tablet app is a placeholder that draws whatever design it is given. The Studio keeps a list of tablets with their resolution and orientation, so one design can be fitted to another screen. The app never opens a hosted page: it downloads the design, keeps a copy, and draws it itself, with native shell features (brightness, wake, camera, mic) a browser dashboard cannot have.
 
 ## Operating Context
 
@@ -32,10 +32,11 @@ Built for one specific house and one specific tablet, so nothing is generic: fix
 
 ## Capabilities and Constraints
 
-- Built: home page, one page per room, camera wall, confirm dialog for whole-house and door actions.
-- Planned, not built: ambient idle face, wake on motion, doorbell and motion camera popups, push-to-talk voice assistant, light brightness and colour control.
+- Built: design-file renderer with tile plugins (clock, weather, people, alerts, light or switch, scene, room, media, camera, page link, text, picture); room pages generated from each room's devices; Studio with tablet approval, designs, grid editor, picture upload and live preview; tablets find the Studio over mDNS and reach Home Assistant only through it.
+- Planned, not built: importing existing HA dashboards, charts, remote-control layouts, media library browsing, animation packs, 3D floor plans, ambient idle face, wake on motion, doorbell and motion camera popups, push-to-talk voice assistant, light brightness and colour control.
 - Hardware: iPad Air 2, A8X, 2 GB RAM, iPadOS 15.8 WebKit. Go easy on blur, large animated layers and simultaneous video.
-- Home-specific content (rooms, entities, people) lives in a per-tablet config file, never in the source repo.
+- Home-specific content (rooms, entities, people) lives in designs stored by the Studio, never in the source repo.
+- The owner wants the tablet look bright, colourful, modern and technical, with imagery or scenery, transparency, shaped corners and borders, and a lit-edge 3D feel on buttons.
 - Lock and alarm are display-only for now.
 
 ## Brand Commitments
