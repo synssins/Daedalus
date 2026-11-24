@@ -144,7 +144,7 @@ function thumb(designId, w, hh, width, live) {
   const s = width / w;
   return h('div', {class: 'thumb' + (live ? ' live' : ''), style: `width:${width}px;height:${Math.round(hh * s)}px`},
     h('iframe', {title: 'Panel preview', loading: designId ? 'lazy' : null, width: w, height: hh, style: `transform:scale(${s})`, tabIndex: live ? 0 : -1,
-      src: 'renderer/index.html?preview=1&key=studio-preview&design=' + encodeURIComponent(designId || '')}));
+      src: 'renderer/engine.html?preview=1&key=studio-preview&design=' + encodeURIComponent(designId || '')}));
 }
 const BLANK = () => ({format: 1, grid: {cols: 64, rows: 48}, start: 'home', rooms: {},
   theme: {background: {image: 'assets/dusk.svg', color: '#141a5c', dim: 0.04}, tile: {fill: 'rgba(255,255,255,.15)', radius: 22, gap: 5, glass: true}},

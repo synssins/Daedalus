@@ -12,9 +12,11 @@ Runs as an HA add-on (Supervisor gives the HA connection) or standalone for deve
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
+import re
 import socket
 from pathlib import Path
 
@@ -88,6 +90,36 @@ async def hello(request: web.Request):
     # shortcut: the tablet id doubles as its claim to the key (ids are random per device and LAN-only);
     # move to a pairing code shown on the tablet if panels are ever exposed beyond the home network.
     return web.json_response({"status": t["status"], "name": t["name"], "key": t["key"] if t["status"] == "approved" else None})
+
+
+def build_engine() -> dict:
+    """The tablet's drawing engine as one self-contained page: engine.html with its stylesheet and scripts
+    written into it. Tablets fetch it, keep it and run their own copy, so updating the add-on updates them."""
+    def read(name: str) -> str | None:
+        f = RENDERER / name
+        return f.read_text(encoding="utf-8") if f.is_file() else None
+
+    def style(m):
+        text = read(m.group(1))
+        return f"<style>\n{text}\n</style>" if text is not None else ""
+
+    def script(m):
+        text = read(m.group(1))
+        if text is None:  # design.js exists only inside the app, as its built-in fallback
+            return ""
+        return "<script>\n" + text.replace("</script", "<\\/script") + f"\n//# sourceURL={m.group(1)}\n</script>"
+
+    html = read("engine.html") or ""
+    html = re.sub(r'<link rel="stylesheet" href="([^"]+)">', style, html)
+    html = re.sub(r'<script src="([^"]+)"></script>', script, html)
+    return {"version": hashlib.sha1(html.encode()).hexdigest()[:12], "html": html}
+
+
+async def tablet_engine(request: web.Request):
+    eng = request.app["engine"]
+    if request.query.get("have") == eng["version"]:
+        return web.Response(status=204)
+    return web.json_response(eng)
 
 
 async def tablet_log(request: web.Request):
@@ -485,6 +517,7 @@ def build_app() -> web.Application:
     app = web.Application(middlewares=[guard], client_max_size=96 * 1024 * 1024)
     app["store"] = Store(DATA)
     app["tablet_sockets"] = {}
+    app["engine"] = build_engine()
     app["admin_sockets"] = set()
 
     async def http_ctx(app):
@@ -500,6 +533,7 @@ def build_app() -> web.Application:
     r.add_post("/api/hello", hello)
     r.add_get("/api/design", tablet_design)
     r.add_post("/api/log", tablet_log)
+    r.add_get("/api/engine", tablet_engine)
     r.add_get("/api/events", tablet_events)
     r.add_get("/api/websocket", ha_socket)
     r.add_post("/api/llm", tablet_llm)
@@ -539,7 +573,9 @@ def build_app() -> web.Application:
 def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     log.info("HomePanel Studio on port %s, data in %s, Home Assistant at %s", PORT, DATA, HA_HTTP)
-    web.run_app(build_app(), port=PORT, access_log=None)
+    app = build_app()
+    log.info("tablet engine %s", app["engine"]["version"])
+    web.run_app(app, port=PORT, access_log=None)
 
 
 if __name__ == "__main__":

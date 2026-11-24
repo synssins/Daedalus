@@ -325,6 +325,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 function splash(title, text) {
   $('splash').innerHTML = title ? `<div><div class="st">${U.esc(title)}</div><div class="sx">${U.esc(text || '')}</div></div>` : '';
   $('splash').className = title ? 'open' : '';
+  if (title && window.HP_ENGINE) HP_ENGINE.ok();  // waiting for approval or for a panel is a working engine too
 }
 
 async function loadAll() {
@@ -354,6 +355,7 @@ HP.setDesign = (d, page, rec) => {
   HP.stack = [{page: keepPage || HP.startPage || d.start || d.pages[0].id}];
   splash();
   show();  // without Home Assistant yet, tiles draw in their offline state rather than leaving the screen blank
+  if (window.HP_ENGINE) HP_ENGINE.ok();
 };
 
 function connectHA(url, token) {
@@ -381,7 +383,7 @@ async function serverMode(server, cfg) {
     if (!j.design) return splash('No panel yet', 'Choose one for "' + ((j.tablet && j.tablet.name) || 'this device') + '" in HomePanel Studio.');
     keep.set('design', j.design); keep.set('theme', j.theme || null);
     HP.setDesign(j.design, null, j.theme);
-    HP.report('drew ' + HP.live.length + ' buttons, ' + innerWidth + 'x' + innerHeight + (HP.orb ? '' : ', orb missing') + (HP.assist ? '' : ', assistant missing'));
+    HP.report('engine ' + (window.HP_ENGINE ? HP_ENGINE.version : 'none') + ', drew ' + HP.live.length + ' buttons, ' + innerWidth + 'x' + innerHeight + (HP.orb ? '' : ', orb missing') + (HP.assist ? '' : ', assistant missing'));
   };
 
   HP.key = cfg.key || null;
@@ -398,6 +400,7 @@ async function serverMode(server, cfg) {
     if (!HP.key) await sleep(4000);
   }
   keep.set('key', HP.key);
+  if (window.HP_ENGINE) HP_ENGINE.check(server);
 
   if (keep.get('design') && !cfg.preview) HP.setDesign(keep.get('design'), null, keep.get('theme'));  // last known design at once, fresh one right after
   connectHA(server, HP.key);
@@ -411,6 +414,7 @@ async function serverMode(server, cfg) {
   (function listen() {  // the server says when this tablet's design changed
     const ws = new WebSocket(server.replace(/^http/, 'ws') + '/api/events?key=' + encodeURIComponent(HP.key));
     ws.onopen = ws.onmessage = () => pull().catch(() => {});  // on connect too: catches changes made while the server was away
+    ws.addEventListener('open', () => HP_ENGINE.check(server));  // the add-on restarts when it is updated: that is when a new engine appears
     ws.onclose = () => setTimeout(listen, 5000);
   })();
 }

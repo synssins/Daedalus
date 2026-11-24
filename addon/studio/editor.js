@@ -113,7 +113,7 @@ function viewEditor(keepFrame) {
     return;
   }
   e.ready = false;
-  const frame = h('iframe', {title: 'Dashboard preview', src: 'renderer/index.html?preview=1&key=studio-preview&design=' + encodeURIComponent(e.id)});
+  const frame = h('iframe', {title: 'Dashboard preview', src: 'renderer/engine.html?preview=1&key=studio-preview&design=' + encodeURIComponent(e.id)});
   const over = h('div', {class: 'over grid'});
   const stage = h('div', {class: 'stage' + (e.use ? ' use' : '')}, h('div', {class: 'frame'}, frame), over);
   const sheet = h('div', {class: 'sheet'}, h('div', {class: 'ruler top'}), h('div', {class: 'ruler left'}), stage);
