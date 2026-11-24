@@ -1,4 +1,4 @@
-# Install HomePanel on one iPad over SSH, then relaunch it over USB.
+# Install HomePanel on one iPad over SSH, then relaunch it (also over SSH, so no USB cable is needed).
 #   .\deploy.ps1            newest GitHub build + local config.json   (needed after Swift/plist changes)
 #   .\deploy.ps1 -WebOnly   just the local web\ folder + config.json  (seconds; no build needed)
 # Per-iPad settings come from config.json beside this script (git-ignored), copied into the app bundle.
@@ -37,4 +37,4 @@ if ($WebOnly) {
 ssh @ssh "$install && if [ -f $tmp/config.json ]; then sudo cp $tmp/config.json $app/config.json; fi && sudo chown -R root:wheel $app && sudo chmod 644 $app/config.json 2>/dev/null; uicache -p $app && rm -rf $tmp && echo INSTALLED"
 if ($LASTEXITCODE) { throw 'install failed' }
 
-& "$env:USERPROFILE\.local\bin\pymobiledevice3.exe" developer dvt launch --kill-existing home.panel.app
+ssh @ssh 'export PATH=/var/jb/usr/bin:$PATH; killall HomePanel 2>/dev/null; sleep 1; uiopen --bundleid home.panel.app && echo LAUNCHED'

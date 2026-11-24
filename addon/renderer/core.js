@@ -1,9 +1,9 @@
 'use strict';
-// HomePanel renderer. The app is a placeholder: everything on screen comes from a design file
-// (window.HP_DESIGN): a theme, and pages of tiles placed on a small-cell grid. Tile types are plugins
-// registered with HP.tile(); see tiles.js. Later the design, icons and plugins come from the HA add-on.
+// HomePanel renderer. The app is a placeholder: everything on screen comes from a design file: a theme, and
+// dashboards (pages) of buttons (tiles) placed on a small-cell grid. Tile types are plugins registered with
+// HP.tile(); see tiles.js. The design, and the theme it follows, come from HomePanel Studio (the HA add-on).
 
-const HP = window.HP = {tiles: {}, icons: window.HP_ICONS || {}, S: {states: {}, areas: {}, reg: {}}, design: null, live: [], stack: []};
+const HP = window.HP = Object.assign(window.HP || {}, {tiles: {}, icons: window.HP_ICONS || {}, S: {states: {}, areas: {}, reg: {}}, design: null, live: [], stack: []});
 HP.tile = (name, def) => { HP.tiles[name] = def; };
 /** Pictures named in a design live on the server; without one, in the app bundle. */
 HP.asset = p => !p || /^(https?:|data:)/.test(p) || !HP.server ? p : HP.server + '/' + p.replace(/^\//, '');
@@ -19,8 +19,11 @@ const U = HP.util = {
   active: e => !!S.states[e] && ['on', 'open', 'opening', 'playing', 'home', 'unlocked'].includes(S.states[e].state),
   stateLabel(e) {
     const s = S.states[e];
-    if (!s || s.state === 'unavailable') return 'Offline';
+    if (!s) return HP.ready ? 'Not found' : '';
+    if (s.state === 'unavailable') return 'Offline';
     if (s.state === 'on' && s.attributes.brightness) return Math.round(s.attributes.brightness / 2.55) + '%';
+    const unit = s.attributes.unit_of_measurement;
+    if (unit && !isNaN(parseFloat(s.state))) return (Math.round(parseFloat(s.state) * 10) / 10) + (unit.length > 2 ? ' ' : '') + unit;
     return U.cap(s.state);
   },
   /** 'Master Bedroom Arc Lamp 2' in Master Bedroom -> 'Arc Lamp 2' */
@@ -44,22 +47,136 @@ const U = HP.util = {
     el.style.fontSize = '';
     if (el.scrollWidth > el.clientWidth) el.style.fontSize = Math.max(70, Math.floor(el.clientWidth / el.scrollWidth * 98)) + '%';
   },
+  /** Type scale for a box of this size: everything inside is sized in multiples of it. */
+  unit: (w, h) => Math.max(11, Math.min(h * 0.2, w * 0.11, 64)),
 };
 
 // ---------- theme ----------
-function applyTheme(th) {
-  const r = document.documentElement.style, t = th.tile || {};
-  const vars = {'--text': th.text, '--font': th.font, '--fill': t.fill, '--fill-on': t.fillOn, '--text-on': t.textOn,
-    '--radius': t.radius != null ? t.radius + 'px' : null, '--border': t.border, '--gap': t.gap != null ? t.gap + 'px' : null, '--glow-on': t.glowOn};
-  for (const k in vars) if (vars[k] != null) r.setProperty(k, vars[k]);
-  const bg = th.background || {}, pos = ' center / cover no-repeat';
+/** A button look (from the theme, a saved button design, or one tile's own overrides) as CSS variables.
+ *  A fade is drawn at a fixed length and then holds its end colour, so a tall button and a short one beside it
+ *  fade over the same distance instead of each stretching the fade to its own size. */
+function lookVars(s) {
+  const v = {};
+  if (!s) return v;
+  if (s.fill) {
+    if (s.fillTo) {
+      const across = s.fadeDir === 'right', len = (s.fadeLen || 160) + 'px';
+      v['--fill'] = `linear-gradient(${across ? 'to right' : 'to bottom'}, ${s.fill}, ${s.fillTo})`;
+      v['--fill-size'] = across ? `${len} 100%` : `100% ${len}`; v['--fill-base'] = s.fillTo;
+    } else { v['--fill'] = s.fill; v['--fill-size'] = 'auto'; v['--fill-base'] = 'transparent'; }
+  }
+  const px = {radius: '--radius', gap: '--gap', borderWidth: '--bw'}, plain = {fillOn: '--fill-on', text: '--text', textOn: '--text-on', border: '--border', glowOn: '--glow-on', font: '--font', depth: '--depth'};
+  for (const k in px) if (s[k] != null) v[px[k]] = s[k] + 'px';
+  for (const k in plain) if (s[k] != null && s[k] !== '') v[plain[k]] = String(s[k]);
+  return v;
+}
+const LOOK_VARS = ['--fill', '--fill-size', '--fill-base', '--radius', '--gap', '--bw', '--fill-on', '--text', '--text-on', '--border', '--glow-on', '--font', '--depth'];
+
+/** A panel either carries its own look, or follows a theme from the Studio's library. The theme arrives beside
+ *  the design and is folded in here, so changing a theme changes every panel that follows it. */
+function resolveTheme(d, rec) {
+  const own = d.theme || {};
+  if (!rec) return Object.assign({looks: {}}, own);
+  const bgs = rec.backgrounds || [], btns = rec.buttons || [], bg = id => bgs.find(b => b.id === id);
+  const looks = {}; btns.forEach(b => { looks[b.name] = b.style || {}; looks[b.id] = b.style || {}; });
+  const night = Object.assign({}, own.night);
+  if (night.bg && bg(night.bg)) night.background = bg(night.bg);
+  return {background: bg(d.bg) || bg(rec.background) || bgs[0] || own.background || {}, tile: (btns.find(b => b.id === rec.button) || btns[0] || {}).style || own.tile || {},
+    looks, night, depth: own.depth, text: own.text, font: own.font};
+}
+
+function paint(bg) {
+  const pos = ' center / cover no-repeat';
   // Server copy first; the copy bundled with the app sits underneath in case the server is away.
   const layers = !bg.image ? [] : HP.asset(bg.image) === bg.image ? [bg.image] : [HP.asset(bg.image), bg.image];
-  $('bg').style.background = layers.map(u => `url("${u}")` + pos + ', ').join('') + (bg.color || '#141a5c');
-  $('blur').style.background = $('bg').style.background;
-  $('dim').style.background = `rgba(0,0,0,${bg.dim || 0})`;
+  return layers.map(u => `url("${u}")` + pos + ', ').join('') + (bg.color || '#141a5c');
+}
+
+function applyTheme(th) {
+  HP.theme = th;
+  th.background = th.background || {};  // one object for the life of the theme: daylight() compares by identity
+  const r = document.documentElement.style, t = th.tile || {};
+  LOOK_VARS.forEach(k => r.removeProperty(k));
+  const vars = lookVars(Object.assign({text: th.text, font: th.font}, t));
+  for (const k in vars) r.setProperty(k, vars[k]);
   document.body.classList.toggle('noglass', t.glass === false);
   document.body.classList.toggle('norim', t.rim === false);
+  HP.night = null;  // forces the backdrop to be drawn
+  daylight();
+  tiltSetup();
+}
+
+/** Day or night backdrop, and the light that follows the sun. Runs whenever the house state changes. */
+function daylight() {
+  const th = HP.theme; if (!th) return;
+  const n = th.night || {}, sun = S.states['sun.sun'], now = Date.now();
+  let night = false, elev = null;
+  if (n.mode === 'switch' || n.mode === 'sun') {
+    if (sun) {
+      const set = Date.parse(sun.attributes.next_setting), rise = Date.parse(sun.attributes.next_rising), DAY = 864e5;
+      elev = sun.attributes.elevation;
+      // Night can begin before the sun is down, and end after it is up: it is dark well inside those margins.
+      night = sun.state === 'below_horizon' ? true : now >= set - (n.before || 0) * 6e4;
+      if (sun.state === 'above_horizon' && now < rise - DAY + (n.after || 0) * 6e4) night = true;
+    } else { const h = new Date().getHours(); night = h >= 19 || h < 7; }  // no sun entity yet: by the clock
+  }
+  const useNight = n.mode === 'switch' && night && n.background;
+  const bg = useNight ? n.background : th.background || {};
+  if (HP.night !== !!useNight || HP.bgShown !== bg) {
+    const first = HP.night == null;
+    HP.night = !!useNight; HP.bgShown = bg;
+    const layer = $('bgi'), paintNow = () => {
+      layer.style.background = paint(bg); $('blur').style.background = layer.style.background;
+      layer.className = bg.motion && bg.motion !== 'none' ? 'm-' + bg.motion : '';
+      const v = layer.querySelector('video');
+      if (v && (!bg.video || v.dataset.src !== bg.video)) v.remove();
+      if (bg.video && !layer.querySelector('video')) {
+        const nv = document.createElement('video'); nv.muted = true; nv.loop = true; nv.autoplay = true; nv.playsInline = true; nv.setAttribute('playsinline', '');
+        nv.dataset.src = bg.video; nv.src = HP.asset(bg.video); layer.append(nv); nv.play().catch(() => {});
+      }
+    };
+    if (first) paintNow(); else { layer.style.opacity = 0; setTimeout(() => { paintNow(); layer.style.opacity = 1; }, 900); }  // fade through dark, not a hard cut
+  }
+  let dim = `rgba(0,0,0,${bg.dim || 0})`;
+  if (n.mode === 'sun') {
+    // Light that follows the sun: clear by day, warm as it nears the horizon, deep blue once it is down.
+    const e = elev == null ? (night ? -12 : 30) : elev - (night && elev > 0 ? 8 : 0);  // the "before sunset" margin pulls dusk earlier
+    const low = Math.max(0, Math.min(1, (12 - e) / 12)), down = Math.max(0, Math.min(1, -e / 8)), warm = low * (1 - down);
+    const a = (bg.dim || 0) + warm * 0.22 + down * 0.5;
+    dim = `rgba(${Math.round(120 * warm + 6 * down)},${Math.round(50 * warm + 10 * down)},${Math.round(10 * warm + 40 * down)},${Math.min(0.85, a).toFixed(3)})`;
+  }
+  if ($('dim').style.background !== dim) $('dim').style.background = dim;
+}
+
+// ---------- depth: the tablet's tilt moves the buttons a little against the backdrop ----------
+const tilt = {on: false, x: 0, y: 0, bx: null, by: null};
+function tiltApply(x, y) {  // x, y in -1..1
+  const d = (HP.theme && HP.theme.depth) || 0, px = 16 * d;
+  tilt.x += (x - tilt.x) * 0.25; tilt.y += (y - tilt.y) * 0.25;
+  const bx = (-tilt.x * px).toFixed(1), by = (-tilt.y * px).toFixed(1), gx = (tilt.x * px * 0.45).toFixed(1), gy = (tilt.y * px * 0.45).toFixed(1);
+  $('bg').style.transform = `translate3d(${bx}px,${by}px,0) scale(1.06)`;
+  if (!swipe.active) { $('grid').style.transform = `translate3d(${gx}px,${gy}px,0)`; $('blurclip').style.transform = `translate3d(${gx}px,${gy}px,0)`; }
+}
+/** Gravity from the tablet (native shell) or the browser. A slowly following average is "level", so a tablet
+ *  that rests at an angle on a stand sits still and only a change of angle moves things. */
+window.nativeMotion = (gx, gy) => {
+  if (!tilt.on) return;
+  if (tilt.bx == null) { tilt.bx = gx; tilt.by = gy; }
+  tilt.bx += (gx - tilt.bx) * 0.01; tilt.by += (gy - tilt.by) * 0.01;
+  const c = v => Math.max(-1, Math.min(1, v * 3.2));
+  tiltApply(c(gx - tilt.bx), c(gy - tilt.by));
+};
+function tiltSetup() {
+  const want = !!(HP.theme && HP.theme.depth > 0) && !matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (want === tilt.on) return;
+  tilt.on = want;
+  native('motion', {on: want}).catch(() => {});
+  if (!want) { ['bg', 'grid', 'blurclip'].forEach(id => { $(id).style.transform = ''; }); return; }
+  if (tiltSetup.bound) return;
+  tiltSetup.bound = true;
+  window.addEventListener('deviceorientation', e => { if (e.gamma != null) window.nativeMotion(e.gamma / 90, e.beta / 90); });
+  // In the Studio's preview there is no tablet to tilt: the pointer stands in for it.
+  if (HP.preview) window.addEventListener('pointermove', e => { if (tilt.on) tiltApply(e.clientX / innerWidth * 2 - 1, e.clientY / innerHeight * 2 - 1); });
 }
 
 // ---------- pages ----------
@@ -87,7 +204,7 @@ function roomPage(area) {
 }
 
 function show() {
-  const d = HP.design, top = HP.stack[HP.stack.length - 1], grid = $('grid');
+  const d = HP.design, top = HP.stack[HP.stack.length - 1], grid = $('grid'), looks = (HP.theme && HP.theme.looks) || {};
   HP.live.forEach(i => { if (i.data && i.data.destroy) i.data.destroy(); });
   HP.live = []; grid.innerHTML = '';
   const page = top.page === '@room' ? roomPage(top.param) : d.pages.find(p => p.id === top.page) || d.pages[0];
@@ -95,15 +212,13 @@ function show() {
   grid.style.gridTemplateRows = `repeat(${d.grid.rows}, 1fr)`;
   for (const t of page.tiles) {
     const def = HP.tiles[t.type] || HP.tiles.label, el = document.createElement('div');
-    el.className = 'tile t-' + t.type + (t.flat ? ' flat' : '');
+    // The tile's look: a saved button design by name (from the theme), then this tile's own overrides.
+    const s = Object.assign({}, looks[t.look], t.style), vars = lookVars(s);
+    el.className = 'tile t-' + t.type + (t.flat ? ' flat' : '') + (s.rim === false ? ' norim' : s.rim === true ? ' rim-on' : '') + (s.glass === false ? ' solid' : '');
     el.style.gridArea = `${t.y + 1} / ${t.x + 1} / span ${t.h} / span ${t.w}`;
-    const s = t.style || {};  // per-tile look overrides from the design
-    if (s.fill) el.style.setProperty('--fill', s.fill);
-    if (s.fillOn) el.style.setProperty('--fill-on', s.fillOn);
-    if (s.text) el.style.setProperty('--text', s.text);
-    if (s.radius != null) el.style.setProperty('--radius', s.radius + 'px');
-    if (s.border) el.style.setProperty('--border', s.border);
+    for (const k in vars) el.style.setProperty(k, vars[k]);
     if (s.opacity != null) el.style.opacity = s.opacity;
+    if (t.demoOn) el.classList.add('on');  // the Studio's sample buttons: show the lit state without a real entity
     el.innerHTML = '<div class="fill"></div>' + (s.image ? `<div class="pic" style="background-image:url('${U.esc(HP.asset(s.image))}')"></div>` : '') + '<div class="body"></div><div class="rim"></div>';
     grid.append(el);
     const inst = {t, el, def, body: el.querySelector('.body')};
@@ -120,27 +235,79 @@ function show() {
 /** Size each tile's type scale from its pixels, and cut the blurred backdrop to the tile shapes (cheap glass:
  *  one blurred layer for the whole screen instead of a backdrop filter per tile, which the Air 2 cannot afford). */
 function layout() {
-  const radius = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--radius')) || 0;
+  const radius = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--radius')) || 0, off = $('grid').getBoundingClientRect();
   let path = '';
   for (const i of HP.live) {
     const r = i.el.getBoundingClientRect();
-    i.el.style.setProperty('--u', Math.max(11, Math.min(r.height * 0.2, r.width * 0.11, 64)).toFixed(1) + 'px');
+    i.w = r.width; i.h = r.height;
+    i.el.style.setProperty('--u', U.unit(r.width, r.height).toFixed(1) + 'px');
     i.el.classList.toggle('wide', r.width / r.height > 2.4);
-    if (i.el.classList.contains('flat') || i.el.hidden || !r.width) continue;
-    const rr = Math.min(parseFloat(getComputedStyle(i.el).borderTopLeftRadius) || radius, r.width / 2, r.height / 2), x = r.left, y = r.top, w = r.width, h = r.height;
+    if (i.el.classList.contains('flat') || i.el.classList.contains('solid') || i.el.hidden || !r.width) continue;
+    // measured relative to the grid, so the cut stays right while the grid is shifted by a swipe or by tilt
+    const rr = Math.min(parseFloat(getComputedStyle(i.el).borderTopLeftRadius) || radius, r.width / 2, r.height / 2), x = r.left - off.left, y = r.top - off.top, w = r.width, h = r.height;
     path += `M${x + rr},${y}h${w - 2 * rr}a${rr},${rr} 0 0 1 ${rr},${rr}v${h - 2 * rr}a${rr},${rr} 0 0 1 ${-rr},${rr}h${-(w - 2 * rr)}a${rr},${rr} 0 0 1 ${-rr},${-rr}v${-(h - 2 * rr)}a${rr},${rr} 0 0 1 ${rr},${-rr}z`;
   }
   $('blurclip').style.clipPath = $('blurclip').style.webkitClipPath = path ? `path('${path}')` : 'inset(50%)';
 }
 
 function update() {
+  daylight();
   for (const i of HP.live) if (i.def.update) { try { i.def.update(i.t, i.body, ctx, i); } catch (e) { console.error('tile ' + i.t.type + ': ' + e.message); } }
 }
 /** State changes arrive in bursts; tiles patch their own text and classes, so this is cheap and never eats a tap. */
 function dirty() { if (!dirty.t) dirty.t = setTimeout(() => { dirty.t = null; update(); }, 250); }
 
+// ---------- swipe between dashboards ----------
+// A tap is a touch that barely moved. A swipe is a long, mostly sideways drag, or a quick flick. Anything in
+// between (a hand that slipped on the way to a button) does nothing at all: no button, no page change.
+const swipe = {active: false, s: null, quiet: 0};
+function swipePages() { return HP.design && HP.stack.length === 1 ? HP.design.pages.filter(p => !p.noswipe) : []; }
+function slide(px, ms) {
+  const t = ms ? `transform ${ms}ms cubic-bezier(.2,.7,.2,1)` : '';
+  $('grid').style.transition = $('blurclip').style.transition = $('blur').style.transition = t;
+  $('grid').style.transform = $('blurclip').style.transform = px ? `translate3d(${px}px,0,0)` : '';
+  $('blur').style.transform = `translate3d(${-px}px,0,0) scale(1.1)`;  // the frosted backdrop stays put while its cut-outs travel
+}
+function swipeSetup() {
+  const g = $('grid');
+  g.addEventListener('pointerdown', e => { if (e.isPrimary && !swipe.turning) swipe.s = {x: e.clientX, y: e.clientY, t: performance.now(), moved: 0}; });
+  window.addEventListener('pointermove', e => {
+    const s = swipe.s; if (!s) return;
+    const dx = e.clientX - s.x, dy = e.clientY - s.y;
+    s.moved = Math.max(s.moved, Math.abs(dx), Math.abs(dy)); s.dx = dx;
+    if (!swipe.active && Math.abs(dx) > 26 && Math.abs(dx) > Math.abs(dy) * 1.8 && swipePages().length > 1) { swipe.active = true; document.body.classList.add('swiping'); }
+    if (swipe.active) slide(dx * 0.92);
+  });
+  const end = () => {
+    const s = swipe.s; if (!s) return;
+    swipe.s = null;
+    if (s.moved > 10) swipe.quiet = performance.now() + 400;  // this touch was not a tap
+    if (!swipe.active) return;
+    const dx = s.dx || 0, fast = Math.abs(dx) / (performance.now() - s.t) > 0.55 && Math.abs(dx) > 70;
+    const pages = swipePages(), at = pages.findIndex(p => p.id === HP.stack[0].page), next = pages[at + (dx < 0 ? 1 : -1)];
+    if (next && (Math.abs(dx) > innerWidth * 0.25 || fast)) {
+      swipe.turning = true;
+      const dir = dx < 0 ? -1 : 1;
+      slide(dir * innerWidth, 180);
+      setTimeout(() => {
+        HP.stack = [{page: next.id}]; show();
+        slide(-dir * innerWidth); void $('grid').offsetWidth;  // start the new dashboard off-screen on the other side
+        slide(0, 240);
+        setTimeout(() => { swipe.turning = swipe.active = false; document.body.classList.remove('swiping'); slide(0); }, 260);
+      }, 190);
+    } else {
+      slide(0, 200);
+      setTimeout(() => { swipe.active = false; document.body.classList.remove('swiping'); slide(0); }, 210);
+    }
+  };
+  window.addEventListener('pointerup', end); window.addEventListener('pointercancel', end);
+  // Capture phase: a touch that travelled never reaches a button.
+  g.addEventListener('click', e => { if (performance.now() < swipe.quiet) { e.stopPropagation(); e.preventDefault(); } }, true);
+}
+
 // ---------- small UI ----------
 function toast(text) { const b = $('bar'); b.textContent = text; clearTimeout(toast.t); toast.t = setTimeout(() => { b.textContent = ''; }, 5000); }
+HP.toast = toast;
 // Own dialog: the web view has no built-in confirm().
 function confirmBox(text, yes) {
   const m = $('modal');
@@ -178,10 +345,11 @@ async function loadAll() {
   if (HP.design) show();
 }
 
-/** Put a design on screen. Called at start, when the server says it changed, and by the Studio while editing. */
-HP.setDesign = (d, page) => {
+/** Put a design on screen. Called at start, when the server says it changed, and by the Studio while editing.
+ *  rec is the theme the panel follows, if any (see resolveTheme). */
+HP.setDesign = (d, page, rec) => {
   HP.design = d;
-  applyTheme(d.theme || {});
+  applyTheme(resolveTheme(d, rec));
   const keepPage = page || (HP.stack.length && d.pages.some(p => p.id === HP.stack[0].page) ? HP.stack[0].page : null);
   HP.stack = [{page: keepPage || HP.startPage || d.start || d.pages[0].id}];
   splash();
@@ -204,9 +372,10 @@ async function serverMode(server, cfg) {
     if (r.status === 401) { keep.set('key', null); location.reload(); return; }  // approval was withdrawn: start over
     const j = await r.json();
     HP.startPage = j.tablet && j.tablet.start_page;
-    if (!j.design) return splash('No dashboard yet', 'Choose one for "' + ((j.tablet && j.tablet.name) || 'this tablet') + '" in HomePanel Studio.');
-    keep.set('design', j.design);
-    HP.setDesign(j.design);
+    if (!j.design && cfg.preview) return;  // the Studio is about to send one itself
+    if (!j.design) return splash('No panel yet', 'Choose one for "' + ((j.tablet && j.tablet.name) || 'this device') + '" in HomePanel Studio.');
+    keep.set('design', j.design); keep.set('theme', j.theme || null);
+    HP.setDesign(j.design, null, j.theme);
   };
 
   HP.key = cfg.key || null;
@@ -224,12 +393,12 @@ async function serverMode(server, cfg) {
   }
   keep.set('key', HP.key);
 
-  if (keep.get('design') && !cfg.preview) HP.setDesign(keep.get('design'));  // last known design at once, fresh one right after
+  if (keep.get('design') && !cfg.preview) HP.setDesign(keep.get('design'), null, keep.get('theme'));  // last known design at once, fresh one right after
   connectHA(server, HP.key);
   pull().catch(e => { if (!HP.design) splash('Cannot reach HomePanel Studio', e.message); });
 
   if (cfg.preview) {  // the Studio sends unsaved edits straight in
-    window.addEventListener('message', ev => { const m = ev.data || {}; if (m.type === 'hp-design') HP.setDesign(m.design, m.page); });
+    window.addEventListener('message', ev => { const m = ev.data || {}; if (m.type === 'hp-design') HP.setDesign(m.design, m.page, m.theme); });
     if (window.parent !== window) window.parent.postMessage({type: 'hp-ready'}, '*');
     return;
   }
@@ -242,8 +411,9 @@ async function serverMode(server, cfg) {
 
 native('ping').then(async m => {
   const cfg = m.config || {};
-  HP.device = m.device || {};
+  HP.device = m.device || {}; HP.preview = !!cfg.preview;
   S.areas = keep.get('areas') || {};
+  swipeSetup();
   setInterval(dirty, 20000);  // keeps clocks current
   let server = cfg.server;
   if (!server) {

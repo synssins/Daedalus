@@ -2,32 +2,47 @@
    so a different design changes the look without touching this file. */
 :root { --text: #fff; --font: "Avenir Next", "Segoe UI", system-ui, sans-serif;
   --fill: rgba(255,255,255,.15); --fill-on: linear-gradient(155deg, rgba(255,222,140,.92), rgba(255,142,66,.86));
-  --text-on: #2b1400; --glow-on: rgba(255,150,60,.5); --radius: 22px; --border: rgba(255,255,255,.4); --gap: 5px; }
+  --text-on: #2b1400; --glow-on: rgba(255,150,60,.5); --radius: 22px; --border: rgba(255,255,255,.4); --gap: 5px;
+  --bw: 1px; --depth: 1; --fill-size: auto; --fill-base: transparent; }
 html, body { margin: 0; height: 100%; overflow: hidden; background: #000; color: var(--text); font-family: var(--font);
   -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; }
 #bg, #dim, #blurclip, #blur, #grid { position: fixed; left: 0; top: 0; right: 0; bottom: 0; }
+#bgi { position: absolute; left: 0; top: 0; right: 0; bottom: 0; transition: opacity .9s ease; }
+#bgi video { position: absolute; left: 0; top: 0; width: 100%; height: 100%; object-fit: cover; }
+/* Moving backdrops: transform only, so the tablet's graphics chip does the work. */
+#bgi.m-drift { animation: hp-drift 90s ease-in-out infinite alternate; }
+#bgi.m-breathe { animation: hp-breathe 24s ease-in-out infinite alternate; }
+#bgi.m-pan { animation: hp-pan 120s linear infinite alternate; }
+@keyframes hp-drift { from { transform: scale(1.08) translate3d(-2.2%, -1.2%, 0); } to { transform: scale(1.16) translate3d(2.2%, 1.6%, 0); } }
+@keyframes hp-breathe { from { transform: scale(1.02); } to { transform: scale(1.09); } }
+@keyframes hp-pan { from { transform: scale(1.2) translate3d(-7%, 0, 0); } to { transform: scale(1.2) translate3d(7%, 0, 0); } }
+#dim { transition: background 4s linear; }
+#grid { touch-action: none; }
+.swiping .tile.tap:active { transform: none; filter: none; }
 /* The frosted look: one blurred copy of the backdrop, cut to the tile shapes by layout(). */
 #blur { filter: blur(22px) saturate(1.6) brightness(1.1); transform: scale(1.1); }
 .noglass #blurclip { display: none; }
 #grid { display: grid; padding: 0; }
 
 .tile { position: relative; min-width: 0; min-height: 0; margin: var(--gap); border-radius: var(--radius); color: var(--text);
-  box-shadow: 0 12px 26px rgba(0,0,0,.30), 0 2px 5px rgba(0,0,0,.22); transition: transform .12s ease-out, filter .12s ease-out; }
+  box-shadow: 0 calc(12px * var(--depth)) calc(26px * var(--depth)) rgba(0,0,0,.30), 0 calc(2px * var(--depth)) calc(5px * var(--depth)) rgba(0,0,0,.22);
+  transition: transform .12s ease-out, filter .12s ease-out; }
 .tile[hidden] { display: none; }
 .tile > div { position: absolute; left: 0; top: 0; right: 0; bottom: 0; border-radius: inherit; }
-.tile .fill { background: var(--fill); }
+/* A fade keeps its own length (--fill-size) and then holds its end colour, whatever the button's size. */
+.tile .fill { background: var(--fill); background-size: var(--fill-size); background-repeat: no-repeat; background-color: var(--fill-base); }
 .tile .pic { background: center / cover no-repeat; }
 /* Rim light: a bright top edge, a soft sheen falling off down the face, a darker foot. Reads as a curved, wet edge. */
 .tile .rim { pointer-events: none;
   background: radial-gradient(120% 70% at 18% -12%, rgba(255,255,255,.42), rgba(255,255,255,0) 60%),
               linear-gradient(180deg, rgba(255,255,255,.16), rgba(255,255,255,0) 42%, rgba(0,0,0,.14));
   box-shadow: inset 0 1.5px 0 rgba(255,255,255,.85), inset 1.5px 0 0 rgba(255,255,255,.30), inset -1px 0 0 rgba(255,255,255,.14),
-              inset 0 -2px 1px rgba(0,0,0,.30), inset 0 0 0 1px var(--border); }
+              inset 0 -2px 1px rgba(0,0,0,.30), inset 0 0 0 var(--bw) var(--border); }
 .tile.flat { box-shadow: none; }
 .tile.flat .fill, .tile.flat .rim { display: none; }
 .tile.tap:active { transform: scale(.955); filter: brightness(.86); }
 .tile.on { color: var(--text-on); box-shadow: 0 12px 30px var(--glow-on), 0 2px 5px rgba(0,0,0,.22); }
-.tile.on .fill { background: var(--fill-on); }
+.tile.on .fill { background: var(--fill-on); background-size: auto; }
 .tile.off { opacity: .55; }
 .tile.warn .fill { background: linear-gradient(155deg, rgba(255,176,64,.80), rgba(232,104,40,.74)); }
 .tile.alert .fill { background: linear-gradient(155deg, rgba(255,110,96,.90), rgba(206,40,58,.84)); }
@@ -78,4 +93,36 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #000; color:
 .sx { margin-top: 12px; font-size: 19px; opacity: .8; max-width: 620px; }
 
 /* Theme option: flat edges instead of the lit rim. The outline stays. */
-.norim .tile .rim { background: none; box-shadow: inset 0 0 0 1px var(--border); }
+.norim .tile:not(.rim-on) .rim, .tile.norim .rim { background: none; box-shadow: inset 0 0 0 var(--bw) var(--border); }
+
+/* A button that holds several things: its own small grid of items, each one touchable. */
+.body.multi { padding: calc(var(--u) * .35); display: block; }
+.bt { height: 22%; min-height: 1.3em; display: flex; align-items: center; padding: 0 calc(var(--u) * .4); font-size: calc(var(--u) * .82); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; opacity: .9; }
+.its { position: absolute; left: calc(var(--u) * .35); right: calc(var(--u) * .35); bottom: calc(var(--u) * .35); top: calc(var(--u) * .35); }
+.bt + .its { top: calc(22% + var(--u) * .2); }
+.it { position: absolute; box-sizing: border-box; display: flex; flex-direction: column; justify-content: space-between; padding: calc(var(--iu) * .45) calc(var(--iu) * .55);
+  border-radius: calc(var(--radius) * .6); overflow: hidden; transition: transform .12s ease-out, background .2s; }
+.it .ic { width: calc(var(--iu) * 1.45); height: calc(var(--iu) * 1.45); }
+.it .n { font-size: var(--iu); } .it .l { font-size: calc(var(--iu) * .76); }
+.it.wide { flex-direction: row; align-items: center; justify-content: flex-start; }
+.it.wide .ic { margin-right: calc(var(--iu) * .5); }
+.it.tap:active { transform: scale(.94); }
+.it.on { background: var(--fill-on); color: var(--text-on); }
+.it.on .n { text-shadow: none; }
+.it.off { opacity: .5; }
+.it.only { padding: calc(var(--iu) * .3) calc(var(--iu) * .45); }
+
+/* Assistant: the orb over a darkened screen, what was heard, what was answered. */
+#assist { display: none; position: fixed; left: 0; top: 0; right: 0; bottom: 0; z-index: 9; flex-direction: column; align-items: center; justify-content: center;
+  background: rgba(4,5,14,.9); text-align: center; }
+#assist.open { display: flex; }
+.as-orb { width: 46vmin; height: 46vmin; max-width: 440px; max-height: 440px; }
+.as-heard { margin-top: 2vmin; min-height: 1.4em; font-size: 20px; opacity: .7; max-width: 80%; }
+.as-said { margin-top: 10px; min-height: 2.8em; font-size: 26px; font-weight: 600; max-width: 80%; line-height: 1.3; }
+.as-note { margin-top: 8px; min-height: 1.4em; font-size: 16px; opacity: .6; }
+.as-x { position: absolute; right: 22px; top: 18px; padding: 12px 22px; font-size: 17px; font-weight: 600; border-radius: 14px; background: rgba(255,255,255,.12); }
+.as-type { display: flex; gap: 8px; margin-top: 14px; }
+.as-type input { width: 320px; padding: 11px 14px; font: inherit; font-size: 17px; color: #fff; background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.25); border-radius: 12px;
+  -webkit-user-select: text; user-select: text; }
+.as-type button { padding: 11px 20px; font: inherit; font-size: 17px; font-weight: 600; color: #fff; background: rgba(255,255,255,.16); border: 0; border-radius: 12px; }
+@media (prefers-reduced-motion: reduce) { #bgi { animation: none !important; } }

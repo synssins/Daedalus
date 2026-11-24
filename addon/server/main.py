@@ -97,7 +97,9 @@ async def tablet_design(request: web.Request):
     rec = request.app["store"].get_design(t.get("design"))
     if not rec:
         return web.json_response({"design": None, "tablet": {"name": t["name"]}})
+    # A panel that follows a theme gets the theme as it is now, so editing a theme changes every panel using it.
     return web.json_response({"design": rec["design"], "version": rec["version"], "id": rec["id"],
+                              "theme": request.app["store"].get_theme(rec["design"].get("themeId")),
                               "tablet": {"name": t["name"], "start_page": t.get("start_page")}})
 
 
@@ -117,9 +119,9 @@ async def tablet_events(request: web.Request):
     return ws
 
 
-async def push_design(app: web.Application, design_id: str | None = None, tablet_id: str | None = None):
+async def push_design(app: web.Application, design_id: str | None = None, tablet_id: str | None = None, everyone: bool = False):
     for t in app["store"].tablets.values():
-        if (tablet_id and t["id"] == tablet_id) or (design_id and t.get("design") == design_id):
+        if everyone or (tablet_id and t["id"] == tablet_id) or (design_id and t.get("design") == design_id):
             for ws in list(app["tablet_sockets"].get(t["id"], ())):
                 await ws.send_json({"type": "design"})
 
@@ -170,7 +172,7 @@ async def ha_socket(request: web.Request):
 
 
 async def ha_media(request: web.Request):
-    """Camera stills and HLS video. These HA paths carry their own short-lived tokens in the URL,
+    """Camera stills, HLS video and spoken replies. These HA paths carry their own short-lived tokens in the URL,
     so no tablet key is asked for; the relay only adds the HA token HA wants for the API route."""
     url = HA_HTTP + request.path[len("/api"):]
     async with request.app["http"].get(url, params=request.query, headers={"Authorization": f"Bearer {HA_TOKEN}"}) as up:
@@ -208,7 +210,7 @@ def state(app: web.Application) -> dict:
     s: Store = app["store"]
     online = {tid for tid, socks in app["tablet_sockets"].items() if socks}
     return {"tablets": [dict(t, key=None, online=t["id"] in online) for t in s.tablets.values()],
-            "designs": s.list_designs(), "assets": s.list_assets()}
+            "designs": s.list_designs(), "assets": s.list_assets(), "library": s.get_library()}
 
 
 async def notify_admins(app: web.Application):
@@ -283,8 +285,8 @@ async def admin_asset(request: web.Request):
         if part is None or not part.filename:
             raise web.HTTPBadRequest(text="no file")
         data = await part.read(decode=False)
-        if len(data) > 12 * 1024 * 1024:
-            raise web.HTTPRequestEntityTooLarge(max_size=12 * 1024 * 1024, actual_size=len(data))
+        if len(data) > 64 * 1024 * 1024:  # room for a short background video
+            raise web.HTTPRequestEntityTooLarge(max_size=64 * 1024 * 1024, actual_size=len(data))
         s.save_asset(part.filename, bytes(data))
     await notify_admins(request.app)
     return web.json_response(state(request.app))
@@ -297,14 +299,114 @@ async def admin_entities(request: web.Request):
         {"type": "config/entity_registry/list"}, {"type": "get_states"}])
     dev_area = {d["id"]: d.get("area_id") for d in devices}
     reg = {e["entity_id"]: e for e in ents}
-    out = []
+    out, by_dev = [], {}
     for st in states:
         e = reg.get(st["entity_id"], {})
         if e.get("hidden_by") or e.get("disabled_by"):
             continue
-        out.append({"id": st["entity_id"], "name": st["attributes"].get("friendly_name") or st["entity_id"],
-                    "area": e.get("area_id") or dev_area.get(e.get("device_id")), "state": st["state"]})
-    return web.json_response({"entities": out, "areas": [{"id": a["area_id"], "name": a["name"]} for a in areas]})
+        ent = {"id": st["entity_id"], "name": st["attributes"].get("friendly_name") or st["entity_id"],
+               "area": e.get("area_id") or dev_area.get(e.get("device_id")), "state": st["state"]}
+        if e.get("device_id"):
+            ent["device"] = e["device_id"]
+            by_dev.setdefault(e["device_id"], []).append((e, ent))
+        if e.get("entity_category"):
+            ent["cat"] = e["entity_category"]
+        out.append(ent)
+    devs = []
+    for d in devices:
+        mine = by_dev.get(d["id"])
+        if not mine or d.get("disabled_by"):
+            continue
+        devs.append({"id": d["id"], "name": d.get("name_by_user") or d.get("name") or "Device", "area": d.get("area_id"),
+                     "entities": [x["id"] for _, x in mine], "primary": primary_entity(mine)})
+    devs.sort(key=lambda d: d["name"].lower())
+    return web.json_response({"entities": out, "devices": devs, "areas": [{"id": a["area_id"], "name": a["name"]} for a in areas]})
+
+
+# Which entity stands for a device when it is added to a button: the one a person would operate.
+MAIN_DOMAINS = ["light", "switch", "fan", "cover", "lock", "climate", "media_player", "vacuum", "humidifier", "water_heater",
+                "alarm_control_panel", "camera", "remote", "siren", "valve", "lawn_mower", "scene", "button", "binary_sensor", "sensor"]
+
+
+def primary_entity(mine: list) -> str:
+    def rank(pair):
+        e, ent = pair
+        dom = ent["id"].split(".")[0]
+        return (bool(e.get("entity_category")),  # controls before diagnostics and settings
+                MAIN_DOMAINS.index(dom) if dom in MAIN_DOMAINS else len(MAIN_DOMAINS),
+                e.get("name") is not None or e.get("original_name") is not None,  # the device's own unnamed main feature first
+                ent["id"])
+    return min(mine, key=rank)[1]["id"]
+
+
+async def admin_pipelines(request: web.Request):
+    """The voice assistants set up in Home Assistant, for the assistant button's picker."""
+    res = (await ha_call(request.app, [{"type": "assist_pipeline/pipeline/list"}]))[0] or {}
+    return web.json_response({"pipelines": [{"id": p["id"], "name": p["name"]} for p in res.get("pipelines", [])]})
+
+
+async def admin_library(request: web.Request):
+    s: Store = request.app["store"]
+    if request.method == "PUT":
+        try:
+            s.save_library(await request.json())
+        except (ValueError, json.JSONDecodeError) as e:
+            raise web.HTTPBadRequest(text=str(e))
+        await push_design(request.app, everyone=True)
+        await notify_admins(request.app)
+    return web.json_response(state(request.app))
+
+
+async def admin_settings(request: web.Request):
+    s: Store = request.app["store"]
+    if request.method == "PUT":
+        s.save_settings(await request.json())
+    llm = dict(s.get_settings().get("llm") or {})
+    llm["key"] = bool(llm.get("key"))  # the key is write-only: the page learns only whether one is stored
+    return web.json_response({"llm": llm})
+
+
+async def admin_backup(request: web.Request):
+    s: Store = request.app["store"]
+    if request.method == "GET":
+        return web.json_response(s.backup(), headers={"Content-Disposition": 'attachment; filename="homepanel.hpbackup"'})
+    try:
+        done = s.restore(await request.json())
+    except (ValueError, json.JSONDecodeError) as e:
+        raise web.HTTPBadRequest(text=str(e))
+    await push_design(request.app, everyone=True)
+    await notify_admins(request.app)
+    return web.json_response({"restored": done, "state": state(request.app)})
+
+
+async def tablet_llm(request: web.Request):
+    """Assistant buttons set to a direct LLM send the heard text here. The server holds the address and key
+    (Studio, Assistant settings); the tablet never sees them. Speaks the OpenAI chat-completions format,
+    which local servers (llama.cpp, Ollama, LM Studio) and most hosted ones accept."""
+    if not tablet_for(request):
+        raise web.HTTPUnauthorized()
+    llm = request.app["store"].get_settings().get("llm") or {}
+    if not llm.get("url"):
+        raise web.HTTPBadRequest(text="No LLM address is set in HomePanel Studio")
+    body = await request.json()
+    msgs = [m for m in body.get("messages", []) if m.get("role") in ("user", "assistant") and isinstance(m.get("content"), str)][-20:]
+    if llm.get("system"):
+        msgs.insert(0, {"role": "system", "content": llm["system"]})
+    url = llm["url"].rstrip("/")
+    if not url.endswith("/chat/completions"):
+        url += "/chat/completions"
+    headers = {"Authorization": f"Bearer {llm['key']}"} if llm.get("key") else {}
+    try:
+        async with request.app["http"].post(url, json={"model": llm.get("model") or "default", "messages": msgs},
+                                            headers=headers, timeout=120) as up:
+            data = await up.json(content_type=None)
+            if up.status >= 400:
+                raise web.HTTPBadGateway(text=f"The LLM answered {up.status}: {str(data)[:200]}")
+            return web.json_response({"text": data["choices"][0]["message"]["content"]})
+    except web.HTTPException:
+        raise
+    except Exception as e:
+        raise web.HTTPBadGateway(text=f"The LLM could not be reached: {e}")
 
 
 # ---------------------------------------------------------------- static files
@@ -336,6 +438,8 @@ def lan_ip() -> str:
 
 
 async def start_mdns(app: web.Application):
+    if os.environ.get("HOMEPANEL_MDNS") == "0":  # a development copy must not draw the tablets away from the real one
+        return
     try:
         from zeroconf import ServiceInfo
         from zeroconf.asyncio import AsyncZeroconf
@@ -367,7 +471,7 @@ async def seed(app: web.Application):
 
 
 def build_app() -> web.Application:
-    app = web.Application(middlewares=[guard], client_max_size=16 * 1024 * 1024)
+    app = web.Application(middlewares=[guard], client_max_size=96 * 1024 * 1024)
     app["store"] = Store(DATA)
     app["tablet_sockets"] = {}
     app["admin_sockets"] = set()
@@ -386,7 +490,8 @@ def build_app() -> web.Application:
     r.add_get("/api/design", tablet_design)
     r.add_get("/api/events", tablet_events)
     r.add_get("/api/websocket", ha_socket)
-    for p in ("/api/camera_proxy/{t:.*}", "/api/camera_proxy_stream/{t:.*}", "/api/hls/{t:.*}"):
+    r.add_post("/api/llm", tablet_llm)
+    for p in ("/api/camera_proxy/{t:.*}", "/api/camera_proxy_stream/{t:.*}", "/api/hls/{t:.*}", "/api/tts_proxy/{t:.*}"):
         r.add_get(p, ha_media)
     r.add_route("OPTIONS", "/api/{t:.*}", lambda request: web.Response())
 
@@ -403,6 +508,13 @@ def build_app() -> web.Application:
     r.add_post("/admin/api/designs/{id}/duplicate", admin_design)
     r.add_post("/admin/api/assets", admin_asset)
     r.add_delete("/admin/api/assets/{name}", admin_asset)
+    r.add_get("/admin/api/pipelines", admin_pipelines)
+    r.add_get("/admin/api/library", admin_library)
+    r.add_put("/admin/api/library", admin_library)
+    r.add_get("/admin/api/settings", admin_settings)
+    r.add_put("/admin/api/settings", admin_settings)
+    r.add_get("/admin/api/backup", admin_backup)
+    r.add_post("/admin/api/restore", admin_backup)
 
     r.add_get("/assets/{name}", asset)
     r.add_get("/", studio_index)

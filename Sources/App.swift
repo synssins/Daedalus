@@ -1,3 +1,4 @@
+import CoreMotion
 import UIKit
 import WebKit
 
@@ -19,9 +20,10 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 /// One full-screen web view showing the bundled UI, plus a small JS <-> native bridge.
 /// JS calls:   window.webkit.messageHandlers.native.postMessage({id, cmd, ...})
 /// Native answers: window.nativeReply({id, ...})
-class PanelViewController: UIViewController, WKScriptMessageHandler {
+class PanelViewController: UIViewController, WKScriptMessageHandler, WKUIDelegate {
     var web: WKWebView!
     let discovery = Discovery()
+    let motion = CMMotionManager()
 
     /// Hardware identifier such as "iPad5,3".
     func machine() -> String {
@@ -56,6 +58,7 @@ class PanelViewController: UIViewController, WKScriptMessageHandler {
         web.backgroundColor = .black
         web.scrollView.bounces = false
         web.scrollView.contentInsetAdjustmentBehavior = .never
+        web.uiDelegate = self
         view.addSubview(web)
 
         guard let dir = Bundle.main.resourceURL?.appendingPathComponent("web") else { return }
@@ -84,6 +87,25 @@ class PanelViewController: UIViewController, WKScriptMessageHandler {
                 self.reply(out)
             }
             return
+        case "motion":
+            // The depth effect: send the direction of gravity across the screen about 20 times a second.
+            // The page calls window.nativeMotion(x, y) with values in -1...1 along the screen's own axes.
+            motion.stopDeviceMotionUpdates()
+            if (m["on"] as? Bool) == true && motion.isDeviceMotionAvailable {
+                motion.deviceMotionUpdateInterval = 1.0 / 20.0
+                motion.startDeviceMotionUpdates(to: .main) { [weak self] data, _ in
+                    guard let self = self, let g = data?.gravity else { return }
+                    // Gravity is reported for an upright (portrait) device; turn it to match how the screen is held.
+                    var x = g.x, y = -g.y
+                    switch self.view.window?.windowScene?.interfaceOrientation {
+                    case .landscapeRight?: x = -g.y; y = -g.x
+                    case .landscapeLeft?: x = g.y; y = g.x
+                    case .portraitUpsideDown?: x = -g.x; y = g.y
+                    default: break
+                    }
+                    self.web.evaluateJavaScript(String(format: "window.nativeMotion && window.nativeMotion(%.3f,%.3f)", x, y), completionHandler: nil)
+                }
+            }
         case "brightness":
             if let v = m["value"] as? Double { UIScreen.main.brightness = CGFloat(max(0, min(1, v))) }
             out["brightness"] = Double(UIScreen.main.brightness)
@@ -100,6 +122,14 @@ class PanelViewController: UIViewController, WKScriptMessageHandler {
               let data = try? Data(contentsOf: url),
               let obj = try? JSONSerialization.jsonObject(with: data) else { return [String: Any]() }
         return obj
+    }
+
+    /// The assistant button asks for the microphone. iOS asks the person once (its own prompt); after that the
+    /// page must not ask again on every tap, so the web view's own question is answered here.
+    @available(iOS 15.0, *)
+    func webView(_ webView: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin, initiatedByFrame frame: WKFrameInfo,
+                 type: WKMediaCaptureType, decisionHandler: @escaping (WKPermissionDecision) -> Void) {
+        decisionHandler(.grant)
     }
 
     func reply(_ obj: [String: Any]) {

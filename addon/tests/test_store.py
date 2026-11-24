@@ -57,4 +57,22 @@ with tempfile.TemporaryDirectory() as tmp:
     assert s.save_asset("../../etc/pass wd.png", b"x") == "pass-wd.png"
     assert s.list_assets() == ["pass-wd.png"]
 
-print("store: all checks passed")
+    # backup and restore: round trip, and a damaged entry never blocks the rest
+    b = s.backup()
+    assert b["format"] == "hpbackup" and b["designs"] and "assets" in b
+    b["designs"].append({"id": "broken"})  # no design inside
+    b["designs"][0]["design"]["pages"][0]["tiles"].append({"type": "entity", "entity": "light.gone_forever", "x": 0, "y": 0, "w": 4, "h": 4})
+    with tempfile.TemporaryDirectory() as d2:
+        s2 = Store(Path(d2))
+        done = s2.restore(b)
+        assert done["panels"] == len(b["designs"]) - 1 and done["skipped"] == 1, done
+        assert s2.get_design(b["designs"][0]["id"])["design"]["pages"][0]["tiles"][-1]["entity"] == "light.gone_forever"
+        assert set(s2.tablets) == set(s.tablets)
+    try:
+        s.restore({"format": "something else"})
+        raise AssertionError("a foreign file must be refused")
+    except ValueError:
+        pass
+    lib = s.save_library({"themes": [{"id": "a", "name": "Glass", "buttons": [], "backgrounds": []}]})
+    assert lib["themes"][0]["name"] == "Glass" and s.get_theme("a")["id"] == "a" and s.get_theme("zz") is None
+    print("store: all checks passed")

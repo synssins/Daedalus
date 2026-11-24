@@ -4,9 +4,12 @@ Layout under the data directory:
     tablets.json          every tablet that has ever said hello
     designs/<id>.json     one design per file: {"id", "name", "version", "design": {...}}
     assets/<file>         uploaded images
+    library.json          the theme library: {"themes": [{id, name, backgrounds: [...], buttons: [...], background, button}]}
+    settings.json         server-side settings (the direct LLM connection for assistant buttons)
 """
 from __future__ import annotations
 
+import base64
 import json
 import re
 import secrets
@@ -25,6 +28,8 @@ class Store:
             d.mkdir(parents=True, exist_ok=True)
         self._tablets_file = self.dir / "tablets.json"
         self.tablets: dict[str, dict] = self._read(self._tablets_file, {})
+        self._library_file = self.dir / "library.json"
+        self._settings_file = self.dir / "settings.json"
 
     # ---- files ----
     @staticmethod
@@ -143,3 +148,76 @@ class Store:
 
     def delete_asset(self, name: str) -> None:
         (self.assets_dir / SAFE_NAME.sub("-", Path(name).name)).unlink(missing_ok=True)
+
+    # ---- theme library and settings ----
+    def get_library(self) -> dict:
+        return {"themes": self._read(self._library_file, {}).get("themes") or []}
+
+    def get_theme(self, tid: str | None) -> dict | None:
+        return next((t for t in self.get_library()["themes"] if t.get("id") == tid), None) if tid else None
+
+    def save_library(self, lib: dict) -> dict:
+        themes = lib.get("themes") if isinstance(lib, dict) else None
+        if not isinstance(themes, list) or not all(isinstance(t, dict) and t.get("id") for t in themes):
+            raise ValueError("not a theme library")
+        self._write(self._library_file, {"themes": themes})
+        return self.get_library()
+
+    def get_settings(self) -> dict:
+        return self._read(self._settings_file, {})
+
+    def save_settings(self, changes: dict) -> dict:
+        cur = self.get_settings()
+        llm = dict(cur.get("llm") or {})
+        for k in ("url", "model", "key", "system"):
+            if k in (changes.get("llm") or {}):
+                llm[k] = changes["llm"][k]
+        cur["llm"] = llm
+        self._write(self._settings_file, cur)
+        return cur
+
+    # ---- full backup ----
+    def backup(self) -> dict:
+        """Everything needed to rebuild this server on a fresh install, in one JSON object."""
+        designs = [d for d in (self._read(p, None) for p in sorted(self.designs_dir.glob("*.json"))) if d]
+        assets = {p.name: base64.b64encode(p.read_bytes()).decode() for p in self.assets_dir.iterdir() if p.is_file()}
+        return {"format": "hpbackup", "version": 1, "made": int(time.time()), "tablets": self.tablets, "designs": designs,
+                "library": self.get_library(), "settings": self.get_settings(), "assets": assets}
+
+    def restore(self, data: dict) -> dict:
+        """Put a backup back. Nothing is checked against Home Assistant: a design that names an entity
+        which no longer exists restores as it is and shows that button as not found. Bad items are skipped,
+        never fatal, so one damaged entry cannot block the rest."""
+        if not isinstance(data, dict) or data.get("format") != "hpbackup":
+            raise ValueError("not a HomePanel backup file")
+        done = {"devices": 0, "panels": 0, "pictures": 0, "skipped": 0}
+        for name, b64 in (data.get("assets") or {}).items():
+            try:
+                self.save_asset(name, base64.b64decode(b64))
+                done["pictures"] += 1
+            except Exception:
+                done["skipped"] += 1
+        for rec in data.get("designs") or []:
+            try:
+                did = SAFE_NAME.sub("", str(rec["id"]))
+                if not did or not isinstance(rec["design"].get("pages"), list):
+                    raise ValueError
+                self._write(self._design_path(did), {"id": did, "name": str(rec.get("name") or "Untitled"),
+                                                     "version": int(rec.get("version") or 1), "design": rec["design"]})
+                done["panels"] += 1
+            except Exception:
+                done["skipped"] += 1
+        for tid, t in (data.get("tablets") or {}).items():
+            if isinstance(t, dict) and t.get("id") == tid:
+                self.tablets[tid] = t
+                done["devices"] += 1
+            else:
+                done["skipped"] += 1
+        self._save_tablets()
+        try:
+            self.save_library(data.get("library") or {})
+        except ValueError:
+            done["skipped"] += 1
+        if isinstance(data.get("settings"), dict):
+            self._write(self._settings_file, data["settings"])
+        return done

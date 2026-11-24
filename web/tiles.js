@@ -119,4 +119,57 @@
     },
     tap: (t, ctx) => t.page ? () => ctx.go(t.page) : null,
   });
+  // A button that holds several things from the house, each on the button's own small grid. Items are either
+  // placed by hand in the Studio (x, y, w, h on t.grid) or, while t.auto is not false, arranged to suit the
+  // button's shape, so stretching the button in the editor reshuffles what is on it.
+  const DOMAIN_ICON = {light: 'lightbulb', switch: 'power', fan: 'power', input_boolean: 'power', cover: 'garage', lock: 'lock', media_player: 'play', camera: 'video',
+    scene: 'star', script: 'star', button: 'gesture-tap', input_button: 'gesture-tap', climate: 'thermometer', person: 'account-multiple', weather: 'weather-cloudy'};
+  const press = (it, ctx) => {
+    const e = it.entity, dom = e.split('.')[0], s = st(e);
+    if (dom === 'scene' || dom === 'script') return ctx.service(dom, 'turn_on', e);
+    if (dom === 'button' || dom === 'input_button') return ctx.service(dom, 'press', e);
+    if (dom === 'lock') return ctx.service('lock', s.state === 'locked' ? 'unlock' : 'lock', e);
+    if (dom === 'media_player') return ctx.service('media_player', 'media_play_pause', e);
+    return ctx.service('homeassistant', 'toggle', e);
+  };
+  const READ_ONLY = ['sensor', 'binary_sensor', 'weather', 'person', 'sun', 'device_tracker', 'camera', 'update', 'event', 'zone'];
+  HP.tile('button', {
+    create(t, body, ctx, i) {
+      const items = (t.items || []).filter(it => it && it.entity);
+      body.classList.add('multi');
+      body.innerHTML = (t.name ? '<div class="bt"></div>' : '') + '<div class="its"></div>';
+      if (t.name) body.firstChild.textContent = t.name;
+      const box = body.lastChild, W = box.clientWidth, H = box.clientHeight, n = items.length;
+      // by hand, or the arrangement whose cells come closest to a comfortable card shape for this button
+      const manual = t.auto === false && t.grid && items.every(it => it.w > 0 && it.h > 0);
+      let cols = 1, rows = 1, best = Infinity;
+      if (manual) { cols = t.grid.cols; rows = t.grid.rows; }
+      else for (let c = 1; c <= Math.max(1, n); c++) { const r = Math.ceil(n / c), miss = Math.abs(Math.log((W / c) / (H / r) / 1.5)); if (miss < best) { best = miss; cols = c; rows = r; } }
+      i.cells = items.map((it, k) => {
+        const el = document.createElement('div'), p = manual ? it : {x: k % cols, y: Math.floor(k / cols), w: 1, h: 1};
+        const w = W * p.w / cols, h = H * p.h / rows, readOnly = READ_ONLY.includes(it.entity.split('.')[0]);
+        el.className = 'it' + (w / h > 2.4 ? ' wide' : '') + (n === 1 ? ' only' : '') + (readOnly ? '' : ' tap');
+        el.style.cssText = `left:${p.x / cols * 100}%;top:${p.y / rows * 100}%;width:${p.w / cols * 100}%;height:${p.h / rows * 100}%;--iu:${U.unit(w, h).toFixed(1)}px`;
+        el.innerHTML = '<div class="ic"></div><div class="tx"><div class="n"></div><div class="l"></div></div>';
+        if (!readOnly) el.addEventListener('click', () => { if (U.avail(it.entity)) press(it, ctx); });
+        box.append(el);
+        return {it, el, ic: el.firstChild, n: el.querySelector('.n'), l: el.querySelector('.l')};
+      });
+    },
+    update(t, body, ctx, i) {
+      for (const c of i.cells || []) {
+        const e = c.it.entity, s = st(e), dom = e.split('.')[0];
+        const name = c.it.icon || (dom === 'media_player' && s && s.state === 'playing' ? 'pause' : DOMAIN_ICON[dom] || ''), ic = U.icon(name);
+        if (c.ic.innerHTML !== ic) c.ic.innerHTML = ic;
+        // The label is the Studio's own name for it when one was typed; otherwise Home Assistant's friendly name.
+        U.set(c.n, c.it.label || (s ? U.fname(e) : e)); U.set(c.l, U.stateLabel(e));
+        c.el.classList.toggle('on', U.active(e)); c.el.classList.toggle('off', !U.avail(e));
+      }
+    },
+  });
+
+  HP.tile('assistant', {
+    create(t, body, ctx, i) { i.p = U.card(body, t.icon || 'microphone'); U.set(i.p.n, t.name || 'Assistant'); U.set(i.p.l, t.label || 'Tap to talk'); },
+    tap: t => () => HP.assist.open(t),
+  });
 })();

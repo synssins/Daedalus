@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Orb demo</title>
+<style>
+  html, body { margin: 0; background: #05060f; color: #c9cde0; font: 15px/1.4 -apple-system, "Segoe UI", sans-serif; }
+  body { display: flex; flex-direction: column; align-items: center; padding: 16px; }
+  #orb { width: 420px; height: 420px; display: block; }
+  .row { margin: 8px 0; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: center; }
+  button { background: #141833; color: inherit; border: 1px solid #2a3060; border-radius: 8px; padding: 8px 14px; font: inherit; }
+  button.on { background: #3b3f9c; border-color: #8b5cf6; color: #fff; }
+  input[type=range] { width: 220px; }
+  #fps { font-variant-numeric: tabular-nums; min-width: 190px; }
+</style>
+</head>
+<body>
+<canvas id="orb"></canvas>
+<div class="row" id="states"></div>
+<div class="row" id="styles"></div>
+<div class="row">
+  <label>level <input id="level" type="range" min="0" max="1" step="0.01" value="0"></label>
+  <label><input id="sim" type="checkbox"> simulate speech</label>
+  <span id="fps">fps: --</span>
+</div>
+<script src="orb.js"></script>
+<script>
+'use strict';
+(function () {
+  // ?style=ring&state=speaking&sim=1&size=200 preset, for screenshots
+  var qs = {};
+  location.search.slice(1).split('&').forEach(function (kv) { var a = kv.split('='); if (a[0]) qs[a[0]] = a[1]; });
+  var canvas = document.getElementById('orb');
+  if (qs.size) canvas.style.width = canvas.style.height = (+qs.size || 420) + 'px';
+
+  var frames = 0, msSum = 0;
+  var orb = HP.orb.create(canvas, { style: qs.style || 'ribbons', onFrame: function (ms) { frames++; msSum += ms; } });
+
+  function group(id, names, current, apply) {
+    var box = document.getElementById(id);
+    names.forEach(function (n) {
+      var b = document.createElement('button');
+      b.textContent = n;
+      if (n === current) b.className = 'on';
+      b.onclick = function () {
+        [].forEach.call(box.children, function (c) { c.className = ''; });
+        b.className = 'on';
+        apply(n);
+      };
+      box.appendChild(b);
+    });
+  }
+  var state = qs.state || 'idle';
+  group('states', ['idle', 'listening', 'thinking', 'speaking'], state, function (n) { orb.setState(n); });
+  group('styles', HP.orb.styles, qs.style || 'ribbons', function (n) { orb.setStyle(n); });
+  orb.setState(state);
+
+  var slider = document.getElementById('level'), sim = document.getElementById('sim');
+  slider.oninput = function () { orb.setLevel(+slider.value); };
+  if (qs.sim) sim.checked = true;
+  if (qs.level) { slider.value = qs.level; orb.setLevel(+qs.level); }
+
+  // speech-like envelope: phrases of syllable bursts, then pauses
+  var until = 0, talking = false, env = 0;
+  function tick(ts) {
+    requestAnimationFrame(tick);
+    if (!sim.checked) return;
+    if (ts > until) { talking = !talking; until = ts + (talking ? 700 + Math.random() * 1900 : 250 + Math.random() * 700); }
+    var syl = Math.abs(Math.sin(ts * 0.0145)) * (0.6 + 0.4 * Math.sin(ts * 0.0031));
+    var target = talking ? 0.25 + 0.75 * syl : 0;
+    env += (target - env) * 0.5;
+    slider.value = env;
+    orb.setLevel(env);
+  }
+  requestAnimationFrame(tick);
+
+  var fps = document.getElementById('fps'), last = performance.now();
+  setInterval(function () {
+    var now = performance.now();
+    fps.textContent = 'fps: ' + (frames * 1000 / (now - last)).toFixed(1) +
+      '  draw: ' + (frames ? (msSum / frames).toFixed(2) : '--') + ' ms';
+    frames = 0; msSum = 0; last = now;
+  }, 1000);
+
+  orb.start();
+  window.orb = orb;
+})();
+</script>
+</body>
+</html>
