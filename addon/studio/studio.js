@@ -91,7 +91,7 @@ function viewDesigns() {
   const pick = h('input', {type: 'file', accept: '.json,application/json', hidden: true, onchange: async e => {
     const f = e.target.files[0]; if (!f) return;
     try { const d = JSON.parse(await f.text()); const rec = await send('POST', 'designs', {name: f.name.replace(/\.json$/i, ''), design: d.design || d}); openDesign(rec.id); }
-    catch (err) { toast('That file is not a HomePanel design: ' + err.message); }
+    catch (err) { toast('That file is not a HomePanel design: ' + err.message, true); }
   }});
   const rows = A.state.designs.map(d => h('tr', null,
     h('td', null, h('button', {class: 'btn', type: 'button', onclick: () => openDesign(d.id), html: `<span>${esc(d.name)}</span>` + icon('chevron-right')})),
@@ -174,7 +174,7 @@ function travel(from, to) {
 async function save() {
   const e = ed();
   try { await send('PUT', 'designs/' + e.id, {name: e.name, design: e.design}); e.dirty = false; saveLabel(); toast('Saved. Tablets using it update now.'); api('state').then(s => { A.state = s; rail(); }); }
-  catch (err) { toast('Not saved: ' + err.message); }
+  catch (err) { toast('Not saved: ' + err.message, true); }
 }
 /** Toolbar state: the saved/unsaved note, and buttons that have nothing to do right now are disabled. */
 function saveLabel() {
@@ -352,7 +352,7 @@ function picture(val, set) {
   const up = h('input', {type: 'file', accept: 'image/*', hidden: true, onchange: async ev => {
     const f = ev.target.files[0]; if (!f) return; const fd = new FormData(); fd.append('file', f);
     try { const before = new Set(A.state.assets); A.state = await api('assets', {method: 'POST', body: fd}); const added = A.state.assets.find(a => !before.has(a)) || f.name; set('assets/' + added); settle(); inspector(); }
-    catch (err) { toast('Upload failed: ' + err.message); }
+    catch (err) { toast('Upload failed: ' + err.message, true); }
   }});
   const names = ['dusk.svg', ...A.state.assets.filter(a => a !== 'dusk.svg')];
   return h('div', {class: 'pics'},
@@ -412,7 +412,7 @@ function lookFields() {
     row('Darken', h('input', {type: 'range', min: 0, max: 0.8, step: 0.01, value: bg.dim || 0, oninput: ev => set(bg, 'dim', +ev.target.value), onchange: settle})),
     h('h2', null, 'Tiles'),
     row('Fill', ...colourIn(tl.fill, v => set(tl, 'fill', v), 'rgba(255,255,255,.15)')),
-    row('Lit fill', ...colourIn(rgba(tl.fillOn) ? tl.fillOn : null, v => set(tl, 'fillOn', v), 'rgba(255,170,80,.88)')),
+    row('Lit fill', ...colourIn(rgba(tl.fillOn) ? tl.fillOn : null, v => set(tl, 'fillOn', v), 'rgba(255,170,80,.88)')),  // unset = the renderer's own amber gradient,
     row('Corners', h('input', {type: 'range', min: 0, max: 60, step: 1, value: tl.radius == null ? 22 : tl.radius, oninput: ev => set(tl, 'radius', +ev.target.value), onchange: settle})),
     row('Spacing', h('input', {type: 'range', min: 0, max: 16, step: 1, value: tl.gap == null ? 5 : tl.gap, oninput: ev => set(tl, 'gap', +ev.target.value), onchange: settle})),
     row('Border', ...colourIn(tl.border, v => set(tl, 'border', v), 'rgba(255,255,255,.4)')),

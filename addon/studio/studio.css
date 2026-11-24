@@ -3,12 +3,12 @@
 :root { --ground: #18233f; --rail: #0d1326; --panel: #1f2c4d; --panel-2: #263660; --seam: #35447a; --seam-soft: #2a3862;
   --chalk: #e9edf7; --chalk-2: #a9b8dc; --chalk-3: #8496c2;
   --edit: #ff5fa8; --go: #ffb547; --go-ink: #2a1a00; --live: #57d49b; --stop: #ff7466;
-  color-scheme: dark; accent-color: var(--edit);
+  color-scheme: dark; accent-color: var(--chalk-2);  /* native controls stay neutral: magenta is for the selection only */
   --r: 7px; --font: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif; }
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; }
 body { display: flex; background: var(--ground); color: var(--chalk); font: 14px/1.45 var(--font); font-variant-numeric: tabular-nums; }
-::selection { background: var(--edit); color: #1a0010; }
+::selection { background: var(--seam); color: var(--chalk); }
 * { scrollbar-width: thin; scrollbar-color: var(--seam) transparent; }
 :focus-visible { outline: 2px solid var(--chalk); outline-offset: 2px; }
 button, input, select, textarea { font: inherit; color: inherit; }
@@ -46,7 +46,7 @@ input[type=text], input[type=number], select, textarea { height: 32px; padding: 
 textarea { height: auto; padding: 7px 9px; resize: vertical; }
 input::placeholder { color: var(--chalk-3); }
 input:hover, select:hover { border-color: var(--chalk-3); }
-input[type=range] { accent-color: var(--edit); width: 100%; }
+input[type=range] { width: 100%; }
 input[type=color] { flex: none; width: 32px; height: 32px; padding: 2px; border: 1px solid var(--seam); border-radius: var(--r); background: var(--rail); }
 .chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--chalk-2); }
 .chip::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--chalk-3); }
@@ -135,10 +135,10 @@ td input[type=text]:hover, td input[type=text]:focus { background: var(--rail); 
 .icons { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
 .icons button { aspect-ratio: 1; display: grid; place-items: center; border: 1px solid transparent; border-radius: var(--r); background: none; color: var(--chalk-2); cursor: pointer; }
 .icons button:hover { background: var(--panel); color: var(--chalk); }
-.icons button[aria-pressed=true] { border-color: var(--edit); color: var(--edit); }
+.icons button[aria-pressed=true] { border-color: var(--chalk); color: var(--chalk); background: var(--panel-2); }
 .pics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
 .pics button { aspect-ratio: 4/3; border: 1px solid var(--seam); border-radius: var(--r); background: var(--rail) center / cover no-repeat; cursor: pointer; color: var(--chalk-3); font-size: 12px; }
-.pics button[aria-pressed=true] { border: 2px solid var(--edit); }
+.pics button[aria-pressed=true] { border: 2px solid var(--chalk); }
 .note { color: var(--chalk-3); font-size: 12.5px; margin: 6px 0 0; }
 .apart { margin-top: 30px; padding-top: 14px; border-top: 1px solid var(--seam-soft); display: flex; gap: 8px; }
 .apart .btn.stop { margin-left: auto; }

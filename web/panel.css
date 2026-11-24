@@ -1,7 +1,7 @@
 /* HomePanel look. Everything here reads theme variables that the design file sets (see applyTheme in core.js),
    so a different design changes the look without touching this file. */
 :root { --text: #fff; --font: "Avenir Next", "Segoe UI", system-ui, sans-serif;
-  --fill: rgba(255,255,255,.16); --fill-on: linear-gradient(155deg, rgba(255,222,140,.92), rgba(255,142,66,.86));
+  --fill: rgba(255,255,255,.15); --fill-on: linear-gradient(155deg, rgba(255,222,140,.92), rgba(255,142,66,.86));
   --text-on: #2b1400; --glow-on: rgba(255,150,60,.5); --radius: 22px; --border: rgba(255,255,255,.4); --gap: 5px; }
 html, body { margin: 0; height: 100%; overflow: hidden; background: #000; color: var(--text); font-family: var(--font);
   -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; }

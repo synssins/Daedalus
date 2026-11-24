@@ -55,7 +55,7 @@ function applyTheme(th) {
   const bg = th.background || {}, pos = ' center / cover no-repeat';
   // Server copy first; the copy bundled with the app sits underneath in case the server is away.
   const layers = !bg.image ? [] : HP.asset(bg.image) === bg.image ? [bg.image] : [HP.asset(bg.image), bg.image];
-  $('bg').style.background = layers.map(u => `url("${u}")` + pos + ', ').join('') + (bg.color || '#101820');
+  $('bg').style.background = layers.map(u => `url("${u}")` + pos + ', ').join('') + (bg.color || '#141a5c');
   $('blur').style.background = $('bg').style.background;
   $('dim').style.background = `rgba(0,0,0,${bg.dim || 0})`;
   document.body.classList.toggle('noglass', t.glass === false);
