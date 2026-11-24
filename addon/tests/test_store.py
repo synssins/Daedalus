@@ -57,6 +57,16 @@ with tempfile.TemporaryDirectory() as tmp:
     assert s.save_asset("../../etc/pass wd.png", b"x") == "pass-wd.png"
     assert s.list_assets() == ["pass-wd.png"]
 
+    # several panels per device: ordered, the first is the default; deleting a panel takes it off every device
+    a = s.save_design(None, "A", {"grid": {"cols": 8, "rows": 8}, "pages": []}); b = s.save_design(None, "B", {"grid": {"cols": 8, "rows": 8}, "pages": []})
+    s.update_tablet("ABC-123", {"panels": [b["id"], a["id"], b["id"]]})
+    assert s.panels_of(s.tablets["ABC-123"]) == [b["id"], a["id"]] and s.tablets["ABC-123"]["design"] == b["id"]
+    s.delete_design(b["id"])
+    assert s.panels_of(s.tablets["ABC-123"]) == [a["id"]] and s.tablets["ABC-123"]["design"] == a["id"]
+    s.update_tablet("ABC-123", {"design": None})
+    assert s.panels_of(s.tablets["ABC-123"]) == [] and s.panels_of({"design": "old"}) == ["old"]
+    s.delete_design(a["id"])
+
     # backup and restore: round trip, and a damaged entry never blocks the rest
     b = s.backup()
     assert b["format"] == "hpbackup" and b["designs"] and "assets" in b

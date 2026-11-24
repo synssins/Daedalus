@@ -171,12 +171,14 @@ async def tablet_design(request: web.Request):
     t = tablet_for(request)
     if not t:
         raise web.HTTPUnauthorized()
-    rec = request.app["store"].get_design(t.get("design"))
-    if not rec:
-        return web.json_response({"design": None, "tablet": {"name": t["name"]}})
+    s: Store = request.app["store"]
+    recs = [r for r in (s.get_design(i) for i in s.panels_of(t)) if r]
     # A panel that follows a theme gets the theme as it is now, so editing a theme changes every panel using it.
-    return web.json_response({"design": rec["design"], "version": rec["version"], "id": rec["id"],
-                              "theme": request.app["store"].get_theme(rec["design"].get("themeId")),
+    panels = [{"id": r["id"], "name": r["name"], "design": r["design"], "theme": s.get_theme(r["design"].get("themeId"))} for r in recs]
+    first = panels[0] if panels else {}
+    # "panels" is everything on the device, default first. "design" and "theme" repeat the default for engines
+    # that predate several panels per device.
+    return web.json_response({"panels": panels, "design": first.get("design"), "theme": first.get("theme"), "id": first.get("id"),
                               "tablet": {"name": t["name"], "start_page": t.get("start_page")}})
 
 
@@ -198,7 +200,7 @@ async def tablet_events(request: web.Request):
 
 async def push_design(app: web.Application, design_id: str | None = None, tablet_id: str | None = None, everyone: bool = False):
     for t in app["store"].tablets.values():
-        if everyone or (tablet_id and t["id"] == tablet_id) or (design_id and t.get("design") == design_id):
+        if everyone or (tablet_id and t["id"] == tablet_id) or (design_id and design_id in Store.panels_of(t)):
             for ws in list(app["tablet_sockets"].get(t["id"], ())):
                 await ws.send_json({"type": "design"})
 
@@ -286,7 +288,7 @@ async def ha_call(app: web.Application, msgs: list[dict]) -> list:
 def state(app: web.Application) -> dict:
     s: Store = app["store"]
     online = {tid for tid, socks in app["tablet_sockets"].items() if socks}
-    return {"tablets": [dict(t, key=None, online=t["id"] in online) for t in s.tablets.values()],
+    return {"tablets": [dict(t, key=None, online=t["id"] in online, panels=s.panels_of(t)) for t in s.tablets.values()],
             "designs": s.list_designs(), "assets": s.list_assets(), "library": s.get_library()}
 
 

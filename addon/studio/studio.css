@@ -113,6 +113,13 @@ td .sub { color: var(--ink2); font-size: 12.5px; }
 td input[type=text] { width: 100%; max-width: 260px; margin-left: -9px; background: transparent; border-bottom-color: transparent; }
 td input[type=text]:hover, td input[type=text]:focus { background: var(--field); border-bottom-color: var(--field-line); }
 
+.plist { display: flex; flex-direction: column; gap: 4px; min-width: 240px; }
+.pl { display: flex; align-items: center; gap: 8px; min-height: 30px; }
+.pl .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tagd { font-size: 12px; color: var(--pri); font-weight: 500; }
+.btn.text { background: none; height: 28px; width: auto; padding: 0 8px; font-size: 12.5px; }
+.plist select { margin-top: 2px; }
+
 /* ---- panel pictures ---- */
 .thumb { position: relative; overflow: hidden; border-radius: 8px; background: #000; flex: none; }
 .thumb iframe { border: 0; transform-origin: 0 0; display: block; pointer-events: none; }

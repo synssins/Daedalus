@@ -74,7 +74,7 @@
 
   HP.tile('nav', {
     create(t, body, ctx, i) { i.p = U.card(body, t.icon || 'home'); U.set(i.p.n, t.name || ''); U.set(i.p.l, t.label || ''); },
-    tap: (t, ctx) => () => t.back ? ctx.back() : ctx.go(t.page),
+    tap: (t, ctx) => () => t.back ? ctx.back() : t.panel ? ctx.goPanel(t.panel) : ctx.go(t.page),
   });
 
   HP.tile('room', {

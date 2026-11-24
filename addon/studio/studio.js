@@ -24,6 +24,7 @@ const ICON = Object.assign({}, window.HP_ICONS, {
   'chevron-right': 'M8.59,16.58L13.17,12L8.59,7.41L10,6L16,12L10,18L8.59,16.58Z',
   'chevron-down': 'M7.41,8.58L12,13.17L16.59,8.58L18,10L12,16L6,10L7.41,8.58Z',
   check: 'M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z',
+  close: 'M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z',
 });
 const icon = n => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="${ICON[n] || ''}"/></svg>`;
 const $ = s => document.querySelector(s);
@@ -101,7 +102,8 @@ const A = {state: {tablets: [], designs: [], assets: [], library: {themes: []}},
   open: {panels: true, themes: true}, panel: null, screen: null};
 const themes = () => A.state.library.themes || [];
 const themeBy = id => themes().find(t => t.id === id) || null;
-const usedBy = id => A.state.tablets.filter(t => t.design === id).map(t => t.name);
+const usedBy = id => A.state.tablets.filter(t => (t.panels || []).includes(id)).map(t => t.name);
+const setPanels = (t, ids) => send('PATCH', 'tablets/' + t.id, {panels: ids}).then(setState, fail);
 const VIEWS = {gallery: viewGallery, devices: viewDevices, panel: viewPanel, backgrounds: viewTheme, buttons: viewTheme, settings: viewSettings};
 function redraw() { rail(); if (A.view !== 'editor' && VIEWS[A.view]) VIEWS[A.view](); }
 const setState = s => { A.state = s; redraw(); };
@@ -179,8 +181,15 @@ function viewDevices() {
   const ts = [...A.state.tablets].sort((a, b) => (a.status === 'approved') - (b.status === 'approved') || a.name.localeCompare(b.name));
   const rows = ts.map(t => {
     const pending = t.status === 'pending';
-    const panel = h('select', {'aria-label': 'Panel for ' + t.name, disabled: pending, onchange: e => send('PATCH', 'tablets/' + t.id, {design: e.target.value || null}).then(setState, fail)},
-      h('option', {value: ''}, 'None'), ...A.state.designs.map(d => h('option', {value: d.id, selected: d.id === t.design}, d.name)));
+    // The device's panels in order. The first is its default; the others are reached by swiping or by a link button.
+    const mine = (t.panels || []).map(id => A.state.designs.find(d => d.id === id)).filter(Boolean), ids = mine.map(d => d.id);
+    const rest = A.state.designs.filter(d => !ids.includes(d.id));
+    const panel = h('div', {class: 'plist'},
+      ...mine.map((d, k) => h('div', {class: 'pl'},
+        h('span', {class: 'nm'}, d.name), k === 0 ? h('span', {class: 'tagd'}, 'Default') : btn('Set default', null, () => setPanels(t, [d.id, ...ids.filter(x => x !== d.id)]), 'mini text'),
+        h('button', {type: 'button', class: 'btn icon mini', title: 'Remove', 'aria-label': 'Remove ' + d.name, html: icon('close'), onclick: () => setPanels(t, ids.filter(x => x !== d.id))}))),
+      pending || !rest.length ? null : h('select', {'aria-label': 'Add a panel to ' + t.name, onchange: e => { if (e.target.value) setPanels(t, [...ids, e.target.value]); }},
+        h('option', {value: ''}, mine.length ? 'Add panel' : 'Choose panel'), ...rest.map(d => h('option', {value: d.id}, d.name))));
     return h('tr', null,
       h('td', null, h('input', {type: 'text', value: t.name, 'aria-label': 'Device name', onchange: e => send('PATCH', 'tablets/' + t.id, {name: e.target.value.trim() || t.name}).then(setState, fail)})),
       h('td', null, t.model || 'Unknown', h('div', {class: 'sub'}, t.width ? `${t.width} × ${t.height}, ${t.orientation}` : 'Size not reported')),
@@ -194,7 +203,7 @@ function viewDevices() {
   $('#main').replaceChildren(
     h('div', {class: 'head'}, h('h1', null, 'Devices')),
     h('div', {class: 'body'}, ts.length
-      ? h('div', {class: 'card'}, h('table', null, h('thead', null, h('tr', null, ...['Name', 'Model', 'Status', 'Panel', 'Preview', ''].map(x => h('th', null, x)))), h('tbody', null, ...rows)))
+      ? h('div', {class: 'card'}, h('table', null, h('thead', null, h('tr', null, ...['Name', 'Model', 'Status', 'Panels', 'Preview', ''].map(x => h('th', null, x)))), h('tbody', null, ...rows)))
       : h('div', {class: 'empty', html: '<b>No devices</b>Open the HomePanel app on a tablet on this network.'})));
 }
 
@@ -212,7 +221,7 @@ function viewPanel() {
   if (!d) return go('gallery');
   const t0 = A.state.tablets.find(x => x.design === d.id && x.width), sc = A.screen || (t0 ? {w: t0.width, h: t0.height} : {w: 1024, h: 768});
   const assign = h('div', {class: 'checks'}, ...A.state.tablets.filter(t => t.status === 'approved').map(t => h('label', null,
-    h('input', {type: 'checkbox', checked: t.design === d.id, onchange: e => send('PATCH', 'tablets/' + t.id, {design: e.target.checked ? d.id : null}).then(setState, fail)}), t.name)));
+    h('input', {type: 'checkbox', checked: (t.panels || []).includes(d.id), onchange: e => setPanels(t, e.target.checked ? [...(t.panels || []), d.id] : t.panels.filter(x => x !== d.id))}), t.name)));
   const stage = h('div', {class: 'livewrap'});
   $('#main').replaceChildren(
     h('div', {class: 'head'},

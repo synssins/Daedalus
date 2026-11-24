@@ -183,7 +183,14 @@ function tiltSetup() {
 const ctx = HP.ctx = {
   service: (domain, svc, entity, data) => HP.ha.call({type: 'call_service', domain, service: svc, target: entity ? {entity_id: entity} : undefined, service_data: data || {}})
     .catch(e => toast(e.message)),
-  go: (page, param) => { HP.stack.push({page, param}); show(); },
+  go: (page, param) => { HP.stack.push({panel: HP.cur, page, param}); show(); },
+  /** Open another of this device's panels, on its first dashboard. Back returns to where the button was. */
+  goPanel: id => {
+    const k = HP.panels.findIndex(p => p.id === id);
+    if (k < 0) return toast('That panel is not on this device');
+    const d = HP.panels[k].design;
+    HP.stack.push({panel: k, page: d.start || d.pages[0].id}); show();
+  },
   back: () => { if (HP.stack.length > 1) HP.stack.pop(); show(); },
   relayout: () => { clearTimeout(ctx._rl); ctx._rl = setTimeout(layout, 50); },
 };
@@ -205,7 +212,13 @@ function roomPage(area) {
 
 function show() {
   if (HP.assist && HP.assist.busy) HP.assist.close();
-  const d = HP.design, top = HP.stack[HP.stack.length - 1], grid = $('grid'), looks = (HP.theme && HP.theme.looks) || {};
+  const top = HP.stack[HP.stack.length - 1];
+  if ((top.panel || 0) !== HP.cur) {  // crossing into another panel: its design and its look take over
+    HP.cur = top.panel || 0;
+    const p = HP.panels[HP.cur];
+    HP.design = p.design; applyTheme(resolveTheme(p.design, p.theme));
+  }
+  const d = HP.design, grid = $('grid'), looks = (HP.theme && HP.theme.looks) || {};
   HP.live.forEach(i => { if (i.data && i.data.destroy) i.data.destroy(); });
   HP.live = []; grid.innerHTML = '';
   const page = top.page === '@room' ? roomPage(top.param) : d.pages.find(p => p.id === top.page) || d.pages[0];
@@ -264,7 +277,7 @@ function dirty() { if (!dirty.t) dirty.t = setTimeout(() => { dirty.t = null; up
 function wakeSetup() {
   if (HP.preview || !HP.server || !HP.wake) return;
   const owners = {};
-  HP.design.pages.forEach(p => p.tiles.forEach(t => { if (t.type === 'assistant' && t.wake && !owners[t.wake]) owners[t.wake] = t; }));
+  HP.panels.forEach(pn => pn.design.pages.forEach(p => p.tiles.forEach(t => { if (t.type === 'assistant' && t.wake && !owners[t.wake]) owners[t.wake] = t; })));
   HP.wake.listen(Object.keys(owners), id => { if (!HP.assist.busy && owners[id]) HP.assist.start(owners[id]); });
 }
 
@@ -272,7 +285,13 @@ function wakeSetup() {
 // A tap is a touch that barely moved. A swipe is a long, mostly sideways drag, or a quick flick. Anything in
 // between (a hand that slipped on the way to a button) does nothing at all: no button, no page change.
 const swipe = {active: false, s: null, quiet: 0};
-function swipePages() { return HP.design && HP.stack.length === 1 ? HP.design.pages : []; }
+/** Every dashboard of every panel on this device, in order: swiping past a panel's last dashboard enters the next panel. */
+function swipePages() {
+  if (!HP.design || HP.stack.length !== 1) return [];
+  const out = [];
+  HP.panels.forEach((pn, k) => pn.design.pages.forEach(p => out.push({panel: k, id: p.id})));
+  return out;
+}
 function slide(px, ms) {
   const t = ms ? `transform ${ms}ms cubic-bezier(.2,.7,.2,1)` : '';
   $('grid').style.transition = $('blurclip').style.transition = $('blur').style.transition = t;
@@ -295,13 +314,13 @@ function swipeSetup() {
     if (s.moved > 10) swipe.quiet = performance.now() + 400;  // this touch was not a tap
     if (!swipe.active) return;
     const dx = s.dx || 0, fast = Math.abs(dx) / (performance.now() - s.t) > 0.55 && Math.abs(dx) > 70;
-    const pages = swipePages(), at = pages.findIndex(p => p.id === HP.stack[0].page), next = pages[at + (dx < 0 ? 1 : -1)];
+    const pages = swipePages(), at = pages.findIndex(p => p.panel === HP.cur && p.id === HP.stack[0].page), next = pages[at + (dx < 0 ? 1 : -1)];
     if (next && (Math.abs(dx) > innerWidth * 0.25 || fast)) {
       swipe.turning = true;
       const dir = dx < 0 ? -1 : 1;
       slide(dir * innerWidth, 180);
       setTimeout(() => {
-        HP.stack = [{page: next.id}]; show();
+        HP.stack = [{panel: next.panel, page: next.id}]; show();
         slide(-dir * innerWidth); void $('grid').offsetWidth;  // start the new dashboard off-screen on the other side
         slide(0, 240);
         setTimeout(() => { swipe.turning = swipe.active = false; document.body.classList.remove('swiping'); slide(0); }, 260);
@@ -359,11 +378,16 @@ async function loadAll() {
 
 /** Put a design on screen. Called at start, when the server says it changed, and by the Studio while editing.
  *  rec is the theme the panel follows, if any (see resolveTheme). */
-HP.setDesign = (d, page, rec) => {
-  HP.design = d;
-  applyTheme(resolveTheme(d, rec));
-  const keepPage = page || (HP.stack.length && d.pages.some(p => p.id === HP.stack[0].page) ? HP.stack[0].page : null);
-  HP.stack = [{page: keepPage || HP.startPage || d.start || d.pages[0].id}];
+HP.setDesign = (d, page, rec) => HP.setPanels([{id: '', design: d, theme: rec}], page);
+/** A device holds one or more panels, each {id, design, theme}. The first is its default: where it starts.
+ *  When the list changes while running, the screen stays on the dashboard it was showing if that still exists. */
+HP.setPanels = (list, page) => {
+  const was = HP.panels && HP.stack[0] ? {id: (HP.panels[HP.stack[0].panel || 0] || {}).id, page: HP.stack[0].page} : null;
+  HP.panels = list; HP.cur = -1;
+  let k = 0, pg = page;
+  if (!pg && was) { const i = list.findIndex(p => p.id === was.id); if (i >= 0 && list[i].design.pages.some(x => x.id === was.page)) { k = i; pg = was.page; } }
+  const d = list[k].design;
+  HP.stack = [{panel: k, page: pg || (k === 0 && HP.startPage) || d.start || d.pages[0].id}];
   splash();
   show();  // without Home Assistant yet, tiles draw in their offline state rather than leaving the screen blank
   wakeSetup();
@@ -391,10 +415,11 @@ async function serverMode(server, cfg) {
     if (r.status === 401) { keep.set('key', null); location.reload(); return; }  // approval was withdrawn: start over
     const j = await r.json();
     HP.startPage = j.tablet && j.tablet.start_page;
-    if (!j.design && cfg.preview) return;  // the Studio is about to send one itself
-    if (!j.design) return splash('No panel yet', 'Choose one for "' + ((j.tablet && j.tablet.name) || 'this device') + '" in HomePanel Studio.');
-    keep.set('design', j.design); keep.set('theme', j.theme || null);
-    HP.setDesign(j.design, null, j.theme);
+    const panels = j.panels || (j.design ? [{id: j.id || '', design: j.design, theme: j.theme}] : []);
+    if (!panels.length && cfg.preview) return;  // the Studio is about to send one itself
+    if (!panels.length) return splash('No panel yet', 'Choose one for "' + ((j.tablet && j.tablet.name) || 'this device') + '" in HomePanel Studio.');
+    keep.set('panels', panels);
+    HP.setPanels(panels);
     HP.report('engine ' + (window.HP_ENGINE ? HP_ENGINE.version : 'none') + ', drew ' + HP.live.length + ' buttons, ' + innerWidth + 'x' + innerHeight + (HP.orb ? '' : ', orb missing') + (HP.assist ? '' : ', assistant missing'));
   };
 
@@ -414,7 +439,7 @@ async function serverMode(server, cfg) {
   keep.set('key', HP.key);
   if (window.HP_ENGINE) HP_ENGINE.check(server);
 
-  if (keep.get('design') && !cfg.preview) HP.setDesign(keep.get('design'), null, keep.get('theme'));  // last known design at once, fresh one right after
+  if (keep.get('panels') && !cfg.preview) HP.setPanels(keep.get('panels'));  // last known panels at once, fresh ones right after
   connectHA(server, HP.key);
   pull().catch(e => { if (!HP.design) splash('Cannot reach HomePanel Studio', e.message); });
 

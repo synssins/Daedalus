@@ -21,7 +21,7 @@ const TYPES = {
   clock: {label: 'Clock', icon: 'clock', w: 24, h: 13, flat: true, fields: []},
   people: {label: 'People', icon: 'account-multiple', w: 18, h: 6, fields: [['entities', 'People', 'entities', ['person']]]},
   alerts: {label: 'Alerts', icon: 'alert', w: 18, h: 6, fields: []},
-  nav: {label: 'Dashboard link', icon: 'chevron-right', w: 10, h: 5, fields: [['page', 'Opens', 'page'], ['name', 'Name', 'text'], ['icon', 'Icon', 'icon']]},
+  nav: {label: 'Link', icon: 'chevron-right', w: 10, h: 5, fields: [['page', 'Opens', 'target'], ['name', 'Name', 'text'], ['icon', 'Icon', 'icon']]},
   label: {label: 'Text', icon: 'text', w: 20, h: 5, flat: true, fields: [['text', 'Text', 'text'], ['size', 'Size', 'range', [0.2, 1, 0.02]]]},
   image: {label: 'Picture', icon: 'image', w: 12, h: 8, fields: []},
 };
@@ -381,6 +381,15 @@ function tileFields() {
         btn('', 'trash', () => { change(() => { t[k] = t[k].filter(x => x !== id); }, {inspect: true}); settle(); }, 'icon mini'))));
     else if (kind === 'area') out.push(row(label, h('select', {onchange: ev => { setp(k, ev.target.value, {keepBoxes: true}); settle(); }}, h('option', {value: ''}, 'Choose a room'), ...A.areas.map(a => h('option', {value: a.id, selected: a.id === t[k]}, a.name)))));
     else if (kind === 'page') out.push(row(label, h('select', {onchange: ev => { setp(k, ev.target.value, {keepBoxes: true}); settle(); }}, h('option', {value: ''}, 'Nothing'), ...d.pages.map(p => h('option', {value: p.id, selected: p.id === t[k]}, p.name || p.id)))));
+    else if (kind === 'target') {
+      // where a link button goes: a dashboard of this panel, another panel, or one step back
+      const cur = t.back ? 'back' : t.panel ? 'panel:' + t.panel : t.page || '';
+      out.push(row(label, h('select', {'aria-label': label, onchange: ev => { const v = ev.target.value;
+        change(() => { delete t.back; delete t.panel; delete t.page; if (v === 'back') t.back = true; else if (v.startsWith('panel:')) t.panel = v.slice(6); else if (v) t.page = v; }, {keepBoxes: true}); settle(); }},
+        h('option', {value: ''}, 'Nothing'), h('option', {value: 'back', selected: cur === 'back'}, 'Back'),
+        h('optgroup', {label: 'Dashboards'}, ...d.pages.map(p => h('option', {value: p.id, selected: cur === p.id}, p.name || p.id))),
+        h('optgroup', {label: 'Panels'}, ...A.state.designs.filter(x => x.id !== e.id).map(x => h('option', {value: 'panel:' + x.id, selected: cur === 'panel:' + x.id}, x.name))))));
+    }
     else if (kind === 'select') out.push(row(label, h('select', {'aria-label': label, onchange: ev => { setp(k, ev.target.value, {keepBoxes: true, inspect: true}); settle(); }}, ...opt().map(o => h('option', {value: o[0], selected: (t[k] || '') === o[0]}, o[1])))));
     else if (kind === 'bool') out.push(row(label, h('input', {type: 'checkbox', checked: t[k] !== false, onchange: ev => { setp(k, ev.target.checked ? null : false, {keepBoxes: true}); settle(); }})));
     else if (kind === 'range') out.push(row(label, h('input', {type: 'range', min: opt[0], max: opt[1], step: opt[2], value: t[k] == null ? 0.5 : t[k], oninput: ev => setp(k, +ev.target.value), onchange: settle})));

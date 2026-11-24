@@ -78,11 +78,21 @@ class Store:
 
     def update_tablet(self, tid: str, changes: dict) -> dict:
         t = self.tablets[tid]
-        for k in ("name", "design", "start_page"):
+        for k in ("name", "start_page"):
             if k in changes:
                 t[k] = changes[k]
+        if "panels" in changes:  # ordered; the first is the device's default
+            t["panels"] = [p for p in dict.fromkeys(changes["panels"] or []) if isinstance(p, str)]
+        elif "design" in changes:
+            t["panels"] = [changes["design"]] if changes["design"] else []
+        t["design"] = self.panels_of(t)[0] if self.panels_of(t) else None
         self._save_tablets()
         return t
+
+    @staticmethod
+    def panels_of(t: dict) -> list[str]:
+        """The panels on a device, default first. Devices saved before there could be several have only 'design'."""
+        return t["panels"] if isinstance(t.get("panels"), list) else ([t["design"]] if t.get("design") else [])
 
     def remove_tablet(self, tid: str) -> None:
         self.tablets.pop(tid, None)
@@ -133,8 +143,9 @@ class Store:
     def delete_design(self, did: str) -> None:
         self._design_path(did).unlink(missing_ok=True)
         for t in self.tablets.values():
-            if t.get("design") == did:
-                t["design"] = None
+            if did in self.panels_of(t):
+                t["panels"] = [p for p in self.panels_of(t) if p != did]
+                t["design"] = t["panels"][0] if t["panels"] else None
         self._save_tablets()
 
     # ---- assets ----
