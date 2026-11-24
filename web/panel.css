@@ -95,6 +95,14 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #000; color:
 /* Theme option: flat edges instead of the lit rim. The outline stays. */
 .norim .tile:not(.rim-on) .rim, .tile.norim .rim { background: none; box-shadow: inset 0 0 0 var(--bw) var(--border); }
 
+/* The bar of panels: a row of buttons along the top; the dashboard sits below it. */
+:root { --bar: 62px; }
+#tabs { display: none; position: fixed; left: 0; top: 0; right: 0; height: var(--bar); z-index: 2; padding: 0 2px; box-sizing: border-box; }
+.hasbar #tabs { display: flex; }
+.hasbar #grid, .hasbar #blurclip { top: var(--bar); }
+.tab { flex: 1; --u: 17px; }
+.tabn { display: flex; align-items: center; justify-content: center; padding: 0 12px; box-sizing: border-box; font-size: var(--u); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
 /* A button that holds several things: its own small grid of items, each one touchable. */
 .body.multi { padding: calc(var(--u) * .35); display: block; }
 .bt { height: 22%; min-height: 1.3em; display: flex; align-items: center; padding: 0 calc(var(--u) * .4); font-size: calc(var(--u) * .82); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; opacity: .9; }

@@ -199,7 +199,8 @@ function viewDevices() {
         h('span', {class: 'grip', title: 'Drag to reorder', html: icon('drag')}),
         h('button', {type: 'button', class: 'btn icon mini', title: 'Remove', 'aria-label': 'Remove ' + d.name, html: icon('close'), onclick: () => setPanels(t, ids.filter(x => x !== d.id))}))),
       pending || !rest.length ? null : h('select', {'aria-label': 'Add a panel to ' + t.name, onchange: e => { if (e.target.value) setPanels(t, [...ids, e.target.value]); }},
-        h('option', {value: ''}, mine.length ? 'Add panel' : 'Choose panel'), ...rest.map(d => h('option', {value: d.id}, d.name))));
+        h('option', {value: ''}, mine.length ? 'Add panel' : 'Choose panel'), ...rest.map(d => h('option', {value: d.id}, d.name))),
+      mine.length > 1 ? h('label', {class: 'opt'}, h('input', {type: 'checkbox', checked: !!t.bar, onchange: e => send('PATCH', 'tablets/' + t.id, {bar: e.target.checked}).then(setState, fail)}), 'Panel bar') : null);
     return h('tr', null,
       h('td', null, h('input', {type: 'text', value: t.name, 'aria-label': 'Device name', onchange: e => send('PATCH', 'tablets/' + t.id, {name: e.target.value.trim() || t.name}).then(setState, fail)})),
       h('td', null, t.model || 'Unknown', h('div', {class: 'sub'}, t.width ? `${t.width} × ${t.height}, ${t.orientation}` : 'Size not reported')),

@@ -218,6 +218,7 @@ function show() {
     const p = HP.panels[HP.cur];
     HP.design = p.design; applyTheme(resolveTheme(p.design, p.theme));
   }
+  panelBar();
   const d = HP.design, grid = $('grid'), looks = (HP.theme && HP.theme.looks) || {};
   HP.live.forEach(i => { if (i.data && i.data.destroy) i.data.destroy(); });
   HP.live = []; grid.innerHTML = '';
@@ -271,6 +272,21 @@ function update() {
 /** State changes arrive in bursts; tiles patch their own text and classes, so this is cheap and never eats a tap. */
 function dirty() { if (!dirty.t) dirty.t = setTimeout(() => { dirty.t = null; update(); }, 250); }
 
+// ---------- the bar of panels ----------
+/** Optional, per device: one tab for each of the device's panels along the top, the current one lit. Tabs are drawn
+ *  as buttons, so they take the theme's button design. */
+function panelBar() {
+  const el = $('tabs'), on = !!HP.bar && HP.panels.length > 1;
+  document.body.classList.toggle('hasbar', on);
+  const html = on ? HP.panels.map((p, k) => `<div class="tile tap tab${k === HP.cur ? ' on' : ''}" data-k="${k}"><div class="fill"></div><div class="tabn">${U.esc(p.name || 'Panel ' + (k + 1))}</div><div class="rim"></div></div>`).join('') : '';
+  if (el.innerHTML !== html) el.innerHTML = html;
+  if (!el.onclick) el.onclick = e => {
+    const t = e.target.closest('.tab'); if (!t) return;
+    const k = +t.dataset.k, d = HP.panels[k].design;
+    if (k !== HP.cur || HP.stack.length > 1) { HP.stack = [{panel: k, page: d.start || d.pages[0].id}]; show(); }
+  };
+}
+
 // ---------- wake words ----------
 /** Assistant buttons may name a wake word. The tablet listens for those words itself (wake.js) and starts the
  *  button that owns the word, whichever dashboard is showing. */
@@ -314,7 +330,8 @@ function swipeSetup() {
     if (s.moved > 10) swipe.quiet = performance.now() + 400;  // this touch was not a tap
     if (!swipe.active) return;
     const dx = s.dx || 0, fast = Math.abs(dx) / (performance.now() - s.t) > 0.55 && Math.abs(dx) > 70;
-    const pages = swipePages(), at = pages.findIndex(p => p.panel === HP.cur && p.id === HP.stack[0].page), next = pages[at + (dx < 0 ? 1 : -1)];
+    // round and round: past the last dashboard of the last panel comes the first again
+    const pages = swipePages(), at = pages.findIndex(p => p.panel === HP.cur && p.id === HP.stack[0].page), next = pages[(at + (dx < 0 ? 1 : -1) + pages.length) % pages.length];
     if (next && (Math.abs(dx) > innerWidth * 0.25 || fast)) {
       swipe.turning = true;
       const dir = dx < 0 ? -1 : 1;
@@ -415,7 +432,7 @@ async function serverMode(server, cfg) {
     const r = await fetch(server + '/api/design' + (cfg.design ? '?design=' + encodeURIComponent(cfg.design) : ''), auth());
     if (r.status === 401) { keep.set('key', null); location.reload(); return; }  // approval was withdrawn: start over
     const j = await r.json();
-    HP.startPage = j.tablet && j.tablet.start_page;
+    HP.startPage = j.tablet && j.tablet.start_page; HP.bar = !!(j.tablet && j.tablet.bar);
     const panels = j.panels || (j.design ? [{id: j.id || '', design: j.design, theme: j.theme}] : []);
     if (!panels.length && cfg.preview) return;  // the Studio is about to send one itself
     if (!panels.length) return splash('No panel yet', 'Choose one for "' + ((j.tablet && j.tablet.name) || 'this device') + '" in HomePanel Studio.');

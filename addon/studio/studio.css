@@ -125,6 +125,7 @@ td input[type=text]:hover, td input[type=text]:focus { background: var(--field);
 .pl .grip { display: flex; color: var(--ink2); cursor: grab; }
 .pl input[type=radio] { width: 18px; height: 18px; flex: none; margin: 0; }
 .plist select { margin-top: 4px; }
+.plist .opt { display: flex; align-items: center; gap: 8px; margin-top: 6px; padding-left: 4px; cursor: pointer; }
 
 /* ---- panel pictures ---- */
 .thumb { position: relative; overflow: hidden; border-radius: 8px; background: #000; flex: none; }

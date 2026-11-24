@@ -87,6 +87,8 @@ class Store:
             t["panels"] = [changes["design"]] if changes["design"] else []
         if "default" in changes:
             t["default"] = changes["default"]
+        if "bar" in changes:  # show the row of panel tabs along the top of this device's screen
+            t["bar"] = bool(changes["bar"])
         # "design" is the device's default panel: the chosen one while it is still on the device, else the first.
         mine = self.panels_of(t)
         t["design"] = t.get("default") if t.get("default") in mine else (mine[0] if mine else None)

@@ -179,7 +179,7 @@ async def tablet_design(request: web.Request):
     # "panels" is everything on the device in swipe order; "id" names the default, where the device starts.
     # "design" and "theme" repeat the default for engines that predate several panels per device.
     return web.json_response({"panels": panels, "design": first.get("design"), "theme": first.get("theme"), "id": first.get("id"),
-                              "tablet": {"name": t["name"], "start_page": t.get("start_page")}})
+                              "tablet": {"name": t["name"], "start_page": t.get("start_page"), "bar": bool(t.get("bar"))}})
 
 
 async def tablet_events(request: web.Request):

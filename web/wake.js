@@ -57,7 +57,9 @@
     const base = HP.server + '/wake/';
     window.exports = window.exports || {};  // the runtime's last line assumes a module loader is present
     if (!window.tfweb) { await script(base + 'tflite_web_api_client.js'); tfweb.tflite_web_api.setWasmPath(base); }
-    const open = async name => tfweb.TFLiteWebModelRunner.create(await (await fetch(base + name + '.tflite')).arrayBuffer(), {numThreads: 1});
+    // Each getInputs()/getOutputs() call allocates inside the runtime and is never freed, so asking on every step
+    // (twelve times a second, all day) runs it out of memory. Ask once and keep the handles.
+    const open = async name => { const m = await tfweb.TFLiteWebModelRunner.create(await (await fetch(base + name + '.tflite')).arrayBuffer(), {numThreads: 1}); m.hpIn = m.getInputs()[0]; m.hpOut = m.getOutputs()[0]; return m; };
     const r = rt || {embed: await open('embedding_model'), words: {}};
     for (const id of Object.keys(r.words)) if (!want.includes(id)) { r.words[id].cleanUp(); delete r.words[id]; }
     for (const id of want) if (!r.words[id]) { try { r.words[id] = await open(id); } catch (e) { HP.report('wake: no model for "' + id + '": ' + e.message); } }
@@ -69,22 +71,28 @@
     for (const row of melRows(raw, rawLen - STEP - CONTEXT)) mel.push(row);
     if (mel.length > ROWS) mel = mel.slice(mel.length - ROWS);
     if (mel.length < ROWS) return;
-    const inp = rt.embed.getInputs()[0].data();
+    const inp = rt.embed.hpIn.data();
     for (let i = 0; i < ROWS; i++) inp.set(mel[i], i * 32);
     rt.embed.infer();
-    emb.push(Float32Array.from(rt.embed.getOutputs()[0].data()));
+    emb.push(Float32Array.from(rt.embed.hpOut.data()));
     if (emb.length > EMB) emb.shift();
     if (emb.length === EMB) for (const id in rt.words) {
-      const w = rt.words[id], x = w.getInputs()[0].data();
+      const w = rt.words[id], x = w.hpIn.data();
       for (let i = 0; i < EMB; i++) x.set(emb[i], i * 96);
       w.infer();
-      const score = w.getOutputs()[0].data()[0];
+      const score = w.hpOut.data()[0];
       if (HP.wake.onScore) HP.wake.onScore(id, score);
       if (score >= THRESHOLD && performance.now() > quietUntil) { quietUntil = performance.now() + 2500; HP.report('wake: heard ' + id + ' (' + score.toFixed(2) + ')'); if (onHit) onHit(id); }
     }
     cost += performance.now() - t0;
     // after the first ten seconds, tell the Studio's log how heavy this is on this device and whether sound is arriving
     if (++steps === 125) HP.report('wake: listening for ' + Object.keys(rt.words).join(', ') + '; ' + (cost / 125).toFixed(1) + ' ms of work per 80 ms of sound; microphone level ' + (loud / 125).toFixed(3));
+  }
+  /** If the runtime dies anyway, start a fresh one rather than staying deaf. */
+  function recover(e) {
+    HP.report('wake: runtime failed (' + e.message + '), starting it again');
+    rt = null; mel = []; emb = []; rawLen = 0; feed.fill = 0; steps = 0; cost = 0; loud = 0;
+    load().catch(err => HP.report('wake: could not restart: ' + err.message));
   }
   function feed(pcm) {
     if (!rt || HP.wake.paused) return;
@@ -96,7 +104,7 @@
       if (rawLen + take > raw.length) { raw.copyWithin(0, rawLen - KEEP, rawLen); rawLen = KEEP; }
       raw.set(pcm.subarray(i, i + take), rawLen); rawLen += take; i += take;
       feed.fill = (feed.fill || 0) + take;
-      if (feed.fill === STEP) { feed.fill = 0; if (rawLen >= STEP + CONTEXT) step(); }
+      if (feed.fill === STEP) { feed.fill = 0; if (rawLen >= STEP + CONTEXT) { try { step(); } catch (e) { return recover(e); } } }
     }
   }
 
