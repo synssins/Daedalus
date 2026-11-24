@@ -63,26 +63,29 @@ function lookVars(s) {
       const across = s.fadeDir === 'right', len = (s.fadeLen || 160) + 'px';
       v['--fill'] = `linear-gradient(${across ? 'to right' : 'to bottom'}, ${s.fill}, ${s.fillTo})`;
       v['--fill-size'] = across ? `${len} 100%` : `100% ${len}`; v['--fill-base'] = s.fillTo;
-    } else { v['--fill'] = s.fill; v['--fill-size'] = 'auto'; v['--fill-base'] = 'transparent'; }
+    } else { v['--fill'] = s.fill; v['--fill-size'] = 'auto'; v['--fill-base'] = s.fill; }  // the base colour is what shows for a plain fill
   }
-  const px = {radius: '--radius', gap: '--gap', borderWidth: '--bw'}, plain = {fillOn: '--fill-on', text: '--text', textOn: '--text-on', border: '--border', glowOn: '--glow-on', font: '--font', depth: '--depth'};
+  const px = {radius: '--radius', gap: '--gap', borderWidth: '--bw'}, plain = {fillOn: '--fill-on', text: '--text', textOn: '--text-on', border: '--border', glowOn: '--glow-on', glow: '--glow', font: '--font', depth: '--depth'};
   for (const k in px) if (s[k] != null) v[px[k]] = s[k] + 'px';
   for (const k in plain) if (s[k] != null && s[k] !== '') v[plain[k]] = String(s[k]);
   return v;
 }
-const LOOK_VARS = ['--fill', '--fill-size', '--fill-base', '--radius', '--gap', '--bw', '--fill-on', '--text', '--text-on', '--border', '--glow-on', '--font', '--depth'];
+/** The parts of a look that are not a single value: the kind of shadow, the shape, lit edge and frosting. */
+const lookClasses = s => (s.shadow ? ' sh-' + s.shadow : '') + (s.shape === 'tab' ? ' shape-tab' : '') + (s.rim === false ? ' norim' : s.rim === true ? ' rim-on' : '') + (s.glass === false ? ' solid' : '');
+const LOOK_VARS = ['--glow', '--fill', '--fill-size', '--fill-base', '--radius', '--gap', '--bw', '--fill-on', '--text', '--text-on', '--border', '--glow-on', '--font', '--depth'];
 
 /** A panel either carries its own look, or follows a theme from the Studio's library. The theme arrives beside
  *  the design and is folded in here, so changing a theme changes every panel that follows it. */
 function resolveTheme(d, rec) {
   const own = d.theme || {};
-  if (!rec) return Object.assign({looks: {}}, own);
+  if (!rec) return Object.assign({looks: {}, barStyle: own.tile || {}}, own);
   const bgs = rec.backgrounds || [], btns = rec.buttons || [], bg = id => bgs.find(b => b.id === id);
   const looks = {}; btns.forEach(b => { looks[b.name] = b.style || {}; looks[b.id] = b.style || {}; });
   const night = Object.assign({}, own.night);
   if (night.bg && bg(night.bg)) night.background = bg(night.bg);
   return {background: bg(d.bg) || bg(rec.background) || bgs[0] || own.background || {}, tile: (btns.find(b => b.id === rec.button) || btns[0] || {}).style || own.tile || {},
-    looks, night, depth: own.depth, text: own.text, font: own.font};
+    looks, night, depth: own.depth, text: own.text, font: own.font,
+    barStyle: (btns.find(b => b.id === rec.bar) || btns.find(b => b.id === rec.button) || btns[0] || {}).style || {}};
 }
 
 function paint(bg) {
@@ -228,8 +231,8 @@ function show() {
   for (const t of page.tiles) {
     const def = HP.tiles[t.type] || HP.tiles.label, el = document.createElement('div');
     // The tile's look: a saved button design by name (from the theme), then this tile's own overrides.
-    const s = Object.assign({}, looks[t.look], t.style), vars = lookVars(s);
-    el.className = 'tile t-' + t.type + (t.flat ? ' flat' : '') + (s.rim === false ? ' norim' : s.rim === true ? ' rim-on' : '') + (s.glass === false ? ' solid' : '');
+    const s = Object.assign({}, looks[t.look], t.style), vars = lookVars(s), base = HP.theme.tile || {};
+    el.className = 'tile t-' + t.type + (t.flat ? ' flat' : '') + lookClasses(Object.assign({shadow: base.shadow, shape: base.shape}, s));
     el.style.gridArea = `${t.y + 1} / ${t.x + 1} / span ${t.h} / span ${t.w}`;
     for (const k in vars) el.style.setProperty(k, vars[k]);
     if (s.opacity != null) el.style.opacity = s.opacity;
@@ -278,7 +281,9 @@ function dirty() { if (!dirty.t) dirty.t = setTimeout(() => { dirty.t = null; up
 function panelBar() {
   const el = $('tabs'), on = !!HP.bar && HP.panels.length > 1;
   document.body.classList.toggle('hasbar', on);
-  const html = on ? HP.panels.map((p, k) => `<div class="tile tap tab${k === HP.cur ? ' on' : ''}" data-k="${k}"><div class="fill"></div><div class="tabn">${U.esc(p.name || 'Panel ' + (k + 1))}</div><div class="rim"></div></div>`).join('') : '';
+  // the tabs wear the button design the panel's theme names for the bar
+  const bs = Object.assign({}, HP.theme.tile, HP.theme.barStyle), vars = lookVars(bs), css = Object.keys(vars).map(k => k + ':' + vars[k]).join(';');
+  const html = on ? HP.panels.map((p, k) => `<div class="tile tap tab${lookClasses(bs)}${k === HP.cur ? ' on' : ''}" data-k="${k}" style="${U.esc(css)}"><div class="fill"></div><div class="tabn">${U.esc(p.name || 'Panel ' + (k + 1))}</div><div class="rim"></div></div>`).join('') : '';
   if (el.innerHTML !== html) el.innerHTML = html;
   if (!el.onclick) el.onclick = e => {
     const t = e.target.closest('.tab'); if (!t) return;
@@ -462,7 +467,12 @@ async function serverMode(server, cfg) {
   pull().catch(e => { if (!HP.design) splash('Cannot reach HomePanel Studio', e.message); });
 
   if (cfg.preview) {  // the Studio sends unsaved edits straight in
-    window.addEventListener('message', ev => { const m = ev.data || {}; if (m.type === 'hp-design') HP.setDesign(m.design, m.page, m.theme); });
+    window.addEventListener('message', ev => {
+      const m = ev.data || {}; if (m.type !== 'hp-design') return;
+      // the Studio's theme pages also want to see the panel bar: m.bar is a list of tab names to show over the same design
+      HP.bar = !!m.bar;
+      if (m.bar) HP.setPanels(m.bar.map((name, k) => ({id: 'demo' + k, name, design: m.design, theme: m.theme})), m.page); else HP.setDesign(m.design, m.page, m.theme);
+    });
     if (window.parent !== window) window.parent.postMessage({type: 'hp-ready'}, '*');
     return;
   }

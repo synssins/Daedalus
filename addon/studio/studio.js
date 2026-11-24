@@ -253,6 +253,37 @@ const STARTER = () => { const b = uid(), g = uid(); return {id: uid(), name: 'My
   buttons: [{id: g, name: 'Glass', style: {fill: 'rgba(255,255,255,.15)', radius: 22, border: 'rgba(255,255,255,.4)', borderWidth: 1, rim: true, glass: true, depth: 1}}]}; };
 const FONTS = [['', 'Tablet default'], ['"Avenir Next", "Segoe UI", sans-serif', 'Avenir'], ['"Helvetica Neue", Arial, sans-serif', 'Helvetica'], ['"SF Pro Rounded", "Arial Rounded MT Bold", sans-serif', 'Rounded'],
   ['Georgia, "Times New Roman", serif', 'Georgia'], ['"Gill Sans", "Trebuchet MS", sans-serif', 'Gill Sans'], ['Futura, "Century Gothic", sans-serif', 'Futura'], ['Menlo, Consolas, monospace', 'Menlo']];
+const SHADOWS = [['', 'Drop'], ['soft', 'Soft'], ['clay', 'Clay'], ['hard', 'Hard'], ['glow', 'Glow'], ['none', 'None']];
+// Ready-made button designs, after styles in common use: frosted and liquid glass, the iOS control look,
+// Material tonal surfaces, soft (neumorphic), clay, neon, outline and hard-shadow (neo-brutal) buttons.
+const PRESET_BUTTONS = [
+  ['Glass', {fill: 'rgba(255,255,255,.15)', radius: 22, border: 'rgba(255,255,255,.4)', borderWidth: 1, rim: true, glass: true, depth: 1}],
+  ['Liquid glass', {fill: 'rgba(255,255,255,.08)', radius: 30, border: 'rgba(255,255,255,.6)', borderWidth: 1, rim: true, glass: true, depth: 1.3}],
+  ['Frosted dark', {fill: 'rgba(22,22,30,.55)', fillOn: 'rgba(255,255,255,.95)', textOn: '#111111', radius: 24, border: 'rgba(255,255,255,.08)', borderWidth: 1, rim: false, glass: true, shadow: 'none'}],
+  ['Tonal', {fill: 'rgba(74,68,88,1)', fillOn: 'rgba(208,188,255,1)', text: '#e8def8', textOn: '#381e72', radius: 20, border: 'rgba(0,0,0,0)', borderWidth: 0, rim: false, glass: false, depth: 0.4}],
+  ['Soft', {fill: 'rgba(38,42,54,1)', fillOn: 'rgba(38,42,54,1)', text: '#c9d1e6', textOn: '#7fd4ff', radius: 22, border: 'rgba(0,0,0,0)', borderWidth: 0, rim: false, glass: false, shadow: 'soft', gap: 9}],
+  ['Clay', {fill: 'rgba(165,180,252,1)', fillOn: 'rgba(253,186,116,1)', text: '#1e1b4b', textOn: '#431407', radius: 34, border: 'rgba(0,0,0,0)', borderWidth: 0, glass: false, shadow: 'clay', gap: 8}],
+  ['Neon', {fill: 'rgba(10,12,28,.72)', fillOn: 'rgba(0,229,255,.22)', text: '#9ff3ff', textOn: '#ffffff', radius: 10, border: 'rgba(0,229,255,.9)', borderWidth: 2, glow: 'rgba(0,229,255,.55)', rim: false, glass: false, shadow: 'glow', gap: 8}],
+  ['Outline', {fill: 'rgba(255,255,255,0)', fillOn: 'rgba(255,255,255,.92)', textOn: '#111111', radius: 14, border: 'rgba(255,255,255,.75)', borderWidth: 2, rim: false, glass: false, shadow: 'none'}],
+  ['Hard shadow', {fill: 'rgba(255,221,87,1)', fillOn: 'rgba(255,107,107,1)', text: '#111111', textOn: '#111111', radius: 6, border: 'rgba(17,17,17,1)', borderWidth: 3, rim: false, glass: false, shadow: 'hard', gap: 9}],
+  ['Sunset gradient', {fill: 'rgba(255,94,98,.92)', fillTo: 'rgba(255,153,102,.82)', fadeLen: 180, radius: 22, border: 'rgba(255,255,255,.35)', borderWidth: 1, rim: true, glass: false}],
+];
+const preset = name => clone(PRESET_BUTTONS.find(p => p[0] === name)[1]);
+/** A whole theme from a preset: its background, its buttons, and a tab-shaped copy of the main button for the panel bar. */
+const PRESET_THEMES = [
+  ['Glass', {image: 'assets/dusk.svg', color: '#141a5c', dim: 0.04}, ['Glass', 'Liquid glass']],
+  ['Control', {image: 'assets/dusk.svg', color: '#0b0e22', dim: 0.3}, ['Frosted dark', 'Outline']],
+  ['Tonal', {color: '#141218'}, ['Tonal', 'Outline']],
+  ['Soft', {color: '#262a36'}, ['Soft']],
+  ['Clay', {color: '#e9e4ff'}, ['Clay']],
+  ['Neon', {color: '#05060f'}, ['Neon', 'Outline']],
+  ['Hard shadow', {color: '#f4f0e6'}, ['Hard shadow']],
+];
+function themeFrom(name) {
+  const [, bg, names] = PRESET_THEMES.find(p => p[0] === name), b = uid(), ids = names.map(uid), tab = uid();
+  return {id: uid(), name, background: b, button: ids[0], bar: tab, backgrounds: [Object.assign({id: b, name}, bg)],
+    buttons: [...names.map((n, k) => ({id: ids[k], name: n, style: preset(n)})), {id: tab, name: 'Tab', style: Object.assign(preset(names[0]), {shape: 'tab', gap: 3})}]};
+}
 const MOTION = [['none', 'None'], ['drift', 'Drift'], ['breathe', 'Zoom'], ['pan', 'Pan']];
 
 function openTheme(id) {
@@ -331,15 +362,19 @@ function lookFields(s, set, o) {
     fade ? row('Gradient length', num('fadeLen', 20, 600, 160)) : null,
     row('On colour', ...colourIn(rgba(s.fillOn) ? s.fillOn : null, v => set('fillOn', v), 'rgba(255,170,80,.88)', s.fillOn ? {title: 'Reset', fn: () => set('fillOn', null, true)} : null)),
     row('Text colour', h('input', {type: 'color', value: (rgba(s.text) || {hex: '#ffffff'}).hex, 'aria-label': 'Text colour', oninput: ev => set('text', ev.target.value)})),
+    row('On text colour', h('input', {type: 'color', value: (rgba(s.textOn) || {hex: '#2b1400'}).hex, 'aria-label': 'Text colour when on', oninput: ev => set('textOn', ev.target.value)})),
     row('Font', h('select', {'aria-label': 'Font', onchange: ev => set('font', ev.target.value || null, true)}, ...FONTS.map(f => h('option', {value: f[0], selected: (s.font || '') === f[0]}, f[1])))),
     h('h2', null, 'Shape'),
+    row('Shape', h('select', {'aria-label': 'Shape', onchange: ev => set('shape', ev.target.value || null, true)}, h('option', {value: '', selected: s.shape !== 'tab'}, 'Button'), h('option', {value: 'tab', selected: s.shape === 'tab'}, 'Tab'))),
     row('Corner radius', num('radius', 0, 60, o.base && o.base.radius != null ? o.base.radius : 22)),
     row('Border', ...colourIn(s.border, v => set('border', v), 'rgba(255,255,255,.4)', cl('border'))),
     row('Border width', num('borderWidth', 0, 8, 1)),
     o.clear ? null : row('Spacing', num('gap', 0, 16, 5)),
     h('h2', null, 'Depth'),
     row('Lit edge', h('input', {type: 'checkbox', checked: s.rim !== false, 'aria-label': 'Lit edge', onchange: ev => set('rim', ev.target.checked ? (o.clear ? true : null) : false, true)})),
-    row('Shadow', num('depth', 0, 2, 1, '')),
+    row('Shadow', h('select', {'aria-label': 'Shadow', onchange: ev => set('shadow', ev.target.value || null, true)}, ...SHADOWS.map(x => h('option', {value: x[0], selected: (s.shadow || '') === x[0]}, x[1])))),
+    s.shadow === 'none' ? null : row('Shadow size', num('depth', 0, 2, 1, '')),
+    s.shadow === 'glow' ? row('Glow colour', ...colourIn(s.glow, v => set('glow', v), s.border || 'rgba(0,229,255,.55)')) : null,
     row('Frosted', h('input', {type: 'checkbox', checked: s.glass !== false, 'aria-label': 'Frosted glass', onchange: ev => set('glass', ev.target.checked ? null : false, true)})),
     row('Opacity', num('opacity', 0.1, 1, 1)),
     h('h2', null, 'Picture'), picture(s.image, v => set('image', v, true)),
@@ -355,7 +390,7 @@ function themeDemo() {
       tile(3, 16, 27, 7, 'Wide', 'Scene', 'play'), tile(3, 25, 8, 7, 'Small', '', 'power'), tile(12, 25, 18, 7, 'Door', 'Closed', 'door')]}]},
     theme: Object.assign({}, t, A.view === 'buttons' && th.sel.buttons ? {button: th.sel.buttons} : {})};
 }
-function demoPush() { const f = $('.demo iframe'); if (f && A.th && f.dataset.ready) f.contentWindow.postMessage(Object.assign({type: 'hp-design', page: 'p'}, themeDemo()), '*'); }
+function demoPush() { const f = $('.demo iframe'); if (f && A.th && f.dataset.ready) f.contentWindow.postMessage(Object.assign({type: 'hp-design', page: 'p', bar: A.view === 'buttons' ? ['Home', 'Upstairs', 'Garage'] : null}, themeDemo()), '*'); }
 
 function viewTheme() {
   const kind = A.view;  // 'backgrounds' or 'buttons'
@@ -364,25 +399,31 @@ function viewTheme() {
   if (!A.th) {
     return $('#main').replaceChildren(head([h('span', {class: 'sp'}), btn('Import theme', 'upload', importTheme)]),
       h('div', {class: 'body'}, h('div', {class: 'empty'}, h('b', null, 'No themes'),
-        h('p', {style: 'margin-top:16px'}, btn('New theme', 'plus', () => { const t = STARTER(); A.th = {id: t.id, draft: t, dirty: true, sel: {}}; saveTheme(); }, 'go')))));
+        h('p', {style: 'margin-top:16px'}, btn('New theme', 'plus', ev => { ev.stopPropagation(); const r = ev.currentTarget.getBoundingClientRect(); menu({preventDefault() {}, clientX: r.left, clientY: r.bottom + 4},
+          PRESET_THEMES.map(p => [p[0], () => { const t = themeFrom(p[0]); A.th = {id: t.id, draft: t, dirty: true, sel: {}}; saveTheme(); }])); }, 'go')))));
   }
   const th = A.th, t = th.draft, list = t[kind], touch = () => { th.dirty = true; mark(); demoPush(); };
   if (!list.some(x => x.id === th.sel[kind])) th.sel[kind] = (list.find(x => x.id === (kind === 'buttons' ? t.button : t.background)) || list[0] || {}).id;
   const cur = list.find(x => x.id === th.sel[kind]);
   const mark = () => { const s = $('.saved'); if (s) { s.textContent = th.dirty ? 'Unsaved changes' : 'Saved'; s.className = 'saved' + (th.dirty ? ' dirty' : ''); } const b = $('[data-k=savetheme]'); if (b) b.disabled = !th.dirty; };
   const defKey = kind === 'buttons' ? 'button' : 'background';
-  const add = async () => {
-    if (kind === 'buttons') { const b = {id: uid(), name: 'Button ' + (list.length + 1), style: clone((cur || STARTER().buttons[0]).style)}; list.push(b); th.sel[kind] = b.id; }
-    else { const b = {id: uid(), name: 'Background ' + (list.length + 1), color: '#141a5c', dim: 0}; list.push(b); th.sel[kind] = b.id; }
-    th.dirty = true; viewTheme();
+  const push = b => { list.push(b); th.sel[kind] = b.id; th.dirty = true; viewTheme(); };
+  const free = n => { let name = n, k = 2; while (list.some(x => x.name === name)) name = n + ' ' + k++; return name; };
+  const add = ev => {
+    if (kind !== 'buttons') return push({id: uid(), name: free('Background'), color: '#141a5c', dim: 0});
+    const r = ev.currentTarget.getBoundingClientRect();
+    menu({preventDefault() {}, clientX: r.left, clientY: r.bottom + 4}, [
+      ['Copy of ' + (cur ? cur.name : 'Glass'), () => push({id: uid(), name: free((cur ? cur.name : 'Glass') + ' copy'), style: clone((cur || STARTER().buttons[0]).style)})], null,
+      ...PRESET_BUTTONS.map(p => [p[0], () => push({id: uid(), name: free(p[0]), style: preset(p[0])})])]);
   };
   const itemMenu = (ev, x) => menu(ev, [
     ['Duplicate', () => { const c = clone(x); c.id = uid(); c.name += ' copy'; list.push(c); th.sel[kind] = c.id; th.dirty = true; viewTheme(); }],
-    ['Set as default', () => { t[defKey] = x.id; th.dirty = true; viewTheme(); }], null,
-    ['Delete', () => { if (list.length < 2) return toast('A theme keeps at least one.', true); t[kind] = list.filter(y => y !== x); if (t[defKey] === x.id) t[defKey] = t[kind][0].id; th.dirty = true; viewTheme(); }, 'stop']]);
+    ['Set as default', () => { t[defKey] = x.id; th.dirty = true; viewTheme(); }],
+    kind === 'buttons' ? ['Use for the panel bar', () => { t.bar = x.id; th.dirty = true; viewTheme(); }] : null, null,
+    ['Delete', () => { if (list.length < 2) return toast('A theme keeps at least one.', true); t[kind] = list.filter(y => y !== x); if (t[defKey] === x.id) t[defKey] = t[kind][0].id; th.dirty = true; viewTheme(); }, 'stop']].filter((it, k, arr) => it !== null || arr[k - 1] !== null));
   const chips = h('div', {class: 'chips'}, ...list.map(x => h('button', {type: 'button', 'aria-pressed': x.id === th.sel[kind], oncontextmenu: ev => itemMenu(ev, x), onclick: () => { th.sel[kind] = x.id; viewTheme(); },
     style: kind === 'backgrounds' ? `background:${x.image ? `url("${x.image}") center/cover, ` : ''}${x.color || '#141a5c'}` : ''},
-    h('span', null, x.name), t[defKey] === x.id ? h('small', null, 'Default') : null)), h('button', {type: 'button', class: 'add', title: 'Add', 'aria-label': 'Add', html: icon('plus'), onclick: add}));
+    h('span', null, x.name), h('small', null, [t[defKey] === x.id ? 'Default' : '', kind === 'buttons' && (t.bar || t.button) === x.id ? 'Panel bar' : ''].filter(Boolean).join(', ')))), h('button', {type: 'button', class: 'add', title: 'Add', 'aria-label': 'Add', html: icon('plus'), onclick: ev => { ev.stopPropagation(); add(ev); }}));
 
   let form = [];
   if (cur && kind === 'buttons') {
@@ -402,7 +443,7 @@ function viewTheme() {
     ...(themes().some(x => x.id === th.id) ? themes() : [...themes(), t]).map(x => h('option', {value: x.id, selected: x.id === th.id}, x.name)));
   const themeMenu = ev => { const r = ev.currentTarget.getBoundingClientRect(); menu({preventDefault() {}, clientX: r.left, clientY: r.bottom + 4}, [
     ['Rename', () => { const n = prompt('Theme name', t.name); if (n && n.trim()) { t.name = n.trim(); th.dirty = true; viewTheme(); } }],
-    ['New theme', () => { if (unsaved()) return; const n = STARTER(); n.name = 'Theme ' + (themes().length + 1); A.th = {id: n.id, draft: n, dirty: true, sel: {}}; viewTheme(); }],
+    ['New theme', PRESET_THEMES.map(p => [p[0], () => { if (unsaved()) return; const n = themeFrom(p[0]); if (themes().some(x => x.name === n.name)) n.name += ' ' + (themes().length + 1); A.th = {id: n.id, draft: n, dirty: true, sel: {}}; viewTheme(); }])],
     ['Duplicate', () => { if (unsaved()) return; const n = clone(t); n.id = uid(); n.name += ' copy'; A.th = {id: n.id, draft: n, dirty: true, sel: {}}; viewTheme(); }], null,
     ['Export', () => exportTheme(t)], ['Import', importTheme], null,
     ['Delete theme', async () => { if (!confirm('Delete the theme "' + t.name + '"? Panels following it keep their last look.')) return; try { A.state = await send('PUT', 'library', {themes: themes().filter(x => x.id !== th.id)}); A.th = null; redraw(); } catch (e) { fail(e); } }, 'stop']]); };
