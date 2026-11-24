@@ -88,9 +88,9 @@ function playCamera(ha, entity, video, status) {
       video.srcObject = null;
       video.src = ha.url.replace(/^ws/, 'http').replace(/\/api\/websocket$/, '') + hls.url;
       video.onplaying = () => status('');
-      // Air 2 cannot decode high-resolution H.265 (seen: MEDIA_ERR_DECODE, code 3). Only fix is at the camera.
-      video.onerror = () => status('H.265 not playable here (code ' + (video.error && video.error.code) +
-        '): set this camera to Standard (H.264) encoding in Protect');
+      // Seen on Air 2: H.265 level 4.0 (~0.4 Mbit/s) plays, level 5.0 (~4 Mbit/s) fails with MEDIA_ERR_DECODE (3).
+      video.onerror = () => status('stream too heavy for this iPad (code ' + (video.error && video.error.code) +
+        '): turn on a Medium or Low RTSPS channel for this camera in Protect');
       video.play().catch(() => {});
     }, 4000);
     let blank = 0;
