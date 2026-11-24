@@ -61,7 +61,7 @@ function change(fn, opts) {
 const settle = () => { if (ed()) ed().open = false; };
 function push() {
   if (push.q) return;
-  push.q = requestAnimationFrame(() => { push.q = 0; const f = $('.stage iframe'); if (f && ed() && ed().ready) f.contentWindow.postMessage({type: 'hp-design', design: ed().design, page: ed().page, theme: edTheme()}, '*'); });
+  push.q = requestAnimationFrame(() => { push.q = 0; const f = $('.stage iframe'); if (f && ed() && ed().ready) f.contentWindow.postMessage({type: 'hp-design', design: ed().design, page: ed().page, theme: edTheme(), grow: ed().grow == null ? null : ed().grow}, '*'); });
 }
 function travel(from, to) {
   const e = ed(); if (!from.length) return;
@@ -443,6 +443,7 @@ function panelLook() {
     const mins = (k, label) => row(label, h('input', {type: 'number', min: 0, max: 180, step: 5, value: night[k] || 0, 'aria-label': label, onchange: ev => set(night, k, Math.max(0, Math.min(180, +ev.target.value || 0)) || null, true)}), h('span', {class: 'note'}, 'minutes'));
     out.push(mins('before', 'Before sunset'), night.mode === 'switch' ? mins('after', 'After sunrise') : null);
   }
+  out.push(...overlayFields(d));
   out.push(h('h2', null, 'Depth'),
     row('Tilt', h('input', {type: 'range', min: 0, max: 1, step: 0.01, value: own.depth || 0, oninput: ev => set(own, 'depth', +ev.target.value || null), onchange: settle})),
     h('h2', null, 'Grid'),
@@ -451,6 +452,35 @@ function panelLook() {
         // Buttons keep their share of the screen, so a panel moves between device sizes and orientations.
         change(() => { d.pages.forEach(p => p.tiles.forEach(t => { t[pos[0]] = Math.min(v - 2, Math.round(t[pos[0]] * f)); t[pos[1]] = Math.max(2, Math.min(v - t[pos[0]], Math.round(t[pos[1]] * f))); })); d.grid[k] = v; }); settle(); fit(); }})))));
   return out;
+}
+
+/** Overlays: drawing layers above the buttons. Each kind lists its own options (see the fx-*.js files). */
+function overlayFields(d) {
+  const e = ed(), kinds = (window.HP && HP.fx && HP.fx.kinds) || {}, list = d.fx || [], names = Object.keys(kinds).sort((a, b) => (kinds[a].label || a).localeCompare(kinds[b].label || b));
+  const out = [h('h2', null, 'Overlays')];
+  list.forEach((c, k) => {
+    const def = kinds[c.kind] || {options: []}, set = (key, v, re) => { change(() => { if (v == null || v === '') delete c[key]; else c[key] = v; }, re ? {keepBoxes: true, inspect: true} : {live: true, keepBoxes: true}); if (re) settle(); };
+    out.push(h('div', {class: 'item'},
+      h('select', {'aria-label': 'Overlay', onchange: ev => { change(() => { list[k] = start({kind: ev.target.value}); }, {inspect: true}); settle(); }}, ...names.map(n => h('option', {value: n, selected: n === c.kind}, kinds[n].label || n))),
+      btn('', 'trash', () => { change(() => { list.splice(k, 1); if (!list.length) delete d.fx; }, {inspect: true}); settle(); }, 'icon mini')));
+    for (const o of def.options || []) {
+      const val = c[o.key] == null ? o.default : c[o.key];
+      if (o.type === 'range') { const r = h('input', {type: 'range', min: o.min, max: o.max, step: o.step || (o.max <= 1 ? 0.01 : 1), value: val, oninput: ev => set(o.key, +ev.target.value)}); if (o.max > 1) r.dataset.unit = ''; out.push(row(o.label, r)); }
+      else if (o.type === 'select') out.push(row(o.label, h('select', {'aria-label': o.label, onchange: ev => set(o.key, ev.target.value, true)}, ...o.choices.map(ch => h('option', {value: ch[0], selected: val === ch[0]}, ch[1])))));
+      else if (o.type === 'bool') out.push(row(o.label, h('input', {type: 'checkbox', checked: !!val, 'aria-label': o.label, onchange: ev => set(o.key, ev.target.checked, true)})));
+    }
+    if (def.grows) out.push(
+      row('Cycle', h('input', {type: 'number', min: 1, max: 730, value: c.days || def.days || 7, 'aria-label': 'Cycle length in days', onchange: ev => set('days', Math.max(1, Math.min(730, Math.round(+ev.target.value || 7))), true)}), h('span', {class: 'note'}, 'days')),
+      row('At the end', h('select', {'aria-label': 'At the end', onchange: ev => set('loop', ev.target.value || null, true)}, h('option', {value: '', selected: c.loop !== 'stay'}, 'Start over'), h('option', {value: 'stay', selected: c.loop === 'stay'}, 'Stay'))),
+      row('Started', h('input', {type: 'date', value: (c.start || '').slice(0, 10), 'aria-label': 'Start date', onchange: ev => set('start', ev.target.value || null, true)}), btn('Today', null, () => set('start', new Date().toISOString().slice(0, 10), true), 'mini text')));
+  });
+  const pick = h('select', {'aria-label': 'Add overlay', onchange: ev => { if (!ev.target.value) return; change(() => { d.fx = [...list, start({kind: ev.target.value})]; }, {inspect: true}); settle(); }},
+    h('option', {value: ''}, 'Add overlay'), ...names.map(n => h('option', {value: n}, kinds[n].label || n)));
+  out.push(pick);
+  if (list.some(c => (kinds[c.kind] || {}).grows)) out.push(row('Preview', h('input', {type: 'range', min: 0, max: 1, step: 0.01, value: e.grow == null ? 1 : e.grow, 'aria-label': 'Preview growth', oninput: ev => { e.grow = +ev.target.value; push(); }}),
+    e.grow == null ? null : btn('', 'undo', () => { e.grow = null; push(); inspector(); }, 'icon mini')));
+  return out;
+  function start(c) { if ((kinds[c.kind] || {}).grows) c.start = new Date().toISOString().slice(0, 10); return c; }
 }
 
 function pageFields() {

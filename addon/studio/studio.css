@@ -252,7 +252,9 @@ summary { cursor: pointer; color: var(--pri); font-weight: 500; padding: 6px 0; 
 .dev { cursor: default; user-select: none; } .dev:hover { background: var(--hover); }
 .dev .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
 .dev .tw { color: var(--ink2); }
-.item { margin-bottom: 4px; } .item input { flex: 1; }
+.item { margin-bottom: 4px; } .item input { flex: 1; } .item select { flex: 1; }
+input[type=date] { height: 36px; padding: 0 9px; border: 0; border-bottom: 1px solid var(--field-line); border-radius: 4px 4px 0 0; background: var(--field); color: var(--ink); min-width: 0; flex: 1; }
+.insp > select { width: 100%; margin-bottom: 8px; }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 
 /* Narrow windows (Home Assistant's own sidebar takes its share): while editing, the menu and the add list fold to

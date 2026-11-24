@@ -19,6 +19,8 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #000; color:
 #dim { transition: background 4s linear; }
 #grid { touch-action: none; }
 .swiping .tile.tap:active { transform: none; filter: none; }
+#fx { transition: opacity .2s; }
+.swiping #fx { opacity: 0; }  /* overlays are drawn for where the buttons rest: hide them while the screen slides */
 /* The frosted look: one blurred copy of the backdrop, cut to the tile shapes by layout(). */
 #blur { filter: blur(22px) saturate(1.6) brightness(1.1); transform: scale(1.1); }
 .noglass #blurclip { display: none; }
