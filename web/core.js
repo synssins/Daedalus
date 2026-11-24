@@ -57,6 +57,7 @@ function applyTheme(th) {
   $('blur').style.background = $('bg').style.background;
   $('dim').style.background = `rgba(0,0,0,${bg.dim || 0})`;
   document.body.classList.toggle('noglass', t.glass === false);
+  document.body.classList.toggle('norim', t.rim === false);
 }
 
 // ---------- pages ----------

@@ -68,6 +68,9 @@ async def guard(request: web.Request, handler):
         except web.HTTPException as e:
             resp = e
     if not isinstance(resp, web.WebSocketResponse):
+        if request.path.startswith(("/admin/studio", "/renderer")):
+            # Always revalidate, so an updated add-on is never shown with a stale script from the browser cache.
+            resp.headers["Cache-Control"] = "no-cache"
         resp.headers["Access-Control-Allow-Origin"] = "*"
         resp.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type"
         resp.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS"

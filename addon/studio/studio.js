@@ -353,6 +353,7 @@ function tileFields() {
     row('Background', h('input', {type: 'checkbox', checked: !t.flat, 'aria-label': 'Show tile background', onchange: ev => { setp('flat', ev.target.checked ? null : true, {keepBoxes: true, inspect: true}); settle(); }}), h('span', {class: 'note', style: 'margin:0'}, t.flat ? 'None, content only' : 'Shown')));
   if (!t.flat) out.push(
     row('Fill', ...colourIn(s.fill, v => style('fill', v), th.fill, true)),
+    row('Border', ...colourIn(s.border, v => style('border', v), th.border || 'rgba(255,255,255,.4)', true)),
     row('Corners', h('input', {type: 'range', min: 0, max: 60, step: 1, value: s.radius == null ? th.radius || 22 : s.radius, oninput: ev => style('radius', +ev.target.value), onchange: settle}), s.radius != null ? btn('Theme', null, () => { style('radius', null); settle(); inspector(); }) : null),
     row('Text', h('input', {type: 'color', value: (rgba(s.text) || {hex: '#ffffff'}).hex, 'aria-label': 'Text colour', oninput: ev => style('text', ev.target.value), onchange: settle}), s.text ? btn('Theme', null, () => { style('text', null); settle(); inspector(); }) : null),
     h('h2', null, 'Picture'), picture(s.image, v => style('image', v)));
@@ -375,6 +376,8 @@ function lookFields() {
     row('Lit fill', ...colourIn(rgba(tl.fillOn) ? tl.fillOn : null, v => set(tl, 'fillOn', v), 'rgba(255,170,80,.88)')),
     row('Corners', h('input', {type: 'range', min: 0, max: 60, step: 1, value: tl.radius == null ? 22 : tl.radius, oninput: ev => set(tl, 'radius', +ev.target.value), onchange: settle})),
     row('Spacing', h('input', {type: 'range', min: 0, max: 16, step: 1, value: tl.gap == null ? 5 : tl.gap, oninput: ev => set(tl, 'gap', +ev.target.value), onchange: settle})),
+    row('Border', ...colourIn(tl.border, v => set(tl, 'border', v), 'rgba(255,255,255,.4)')),
+    row('Lit edge', h('input', {type: 'checkbox', checked: tl.rim !== false, 'aria-label': 'Lit edge', onchange: ev => { set(tl, 'rim', ev.target.checked ? null : false); settle(); }}), h('span', {class: 'note', style: 'margin:0'}, 'Light catching the top edge')),
     row('Frosted', h('input', {type: 'checkbox', checked: tl.glass !== false, 'aria-label': 'Frosted glass', onchange: ev => { set(tl, 'glass', ev.target.checked ? null : false); settle(); }}), h('span', {class: 'note', style: 'margin:0'}, 'Blur the backdrop behind tiles')),
     h('h2', null, 'Grid'),
     h('div', {class: 'f4'}, ...['cols', 'rows'].map(k => h('div', null, h('label', null, k === 'cols' ? 'Columns' : 'Rows'), h('input', {type: 'number', min: 8, max: 160, value: d.grid[k], 'aria-label': k,
