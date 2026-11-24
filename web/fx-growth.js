@@ -48,6 +48,13 @@
     return st.cv;
   }
 
+  /** The slow kinds here are drawn only when asked. For a short reaction to a finger the drawing is asked for a few
+   *  times a second until it is over: a handful of extra drawings, then quiet again. */
+  function run(st, c, ms, every) {
+    st.until = Date.now() + ms; c.redraw();
+    if (!st.timer) st.timer = setInterval(() => { c.redraw(); if (Date.now() > st.until) { clearInterval(st.timer); st.timer = 0; } }, every || 130);
+  }
+
   // ---------------------------------------------------------------------------------------------------------------
   // Tendrils: wet black strands that start at one or two buttons, reach across the gaps, stick, thicken, and end up
   // webbing over the buttons' edges. Each strand first reaches out as a pointed feeler, then lands and fattens.
@@ -75,7 +82,7 @@
     if (fat > 3) hl.push(h);
   }
   HP.fx.add('tendrils', {
-    label: 'Tendrils', grows: true, days: 7,
+    label: 'Tendrils', grows: true, days: 7, covers: true,
     options: [amount()],
     create(c) {
       const r = c.rand, amt = c.opts.amount, bs = c.rects.filter(solid), strands = [];
@@ -114,7 +121,15 @@
       }
       return {info, strands};
     },
+    // It does not like to be touched: the strands by the finger snap back to where they came from, then creep out
+    // and take hold again over three seconds.
+    touch(st, x, y, c) {
+      const now = Date.now(); let any = false;
+      for (const s of st.strands) if (c.progress > s.at && Math.hypot((s.x1 + s.x2) / 2 - x, (s.y1 + s.y2) / 2 - y) < 75) { s.rc = now; any = true; }
+      if (any) run(st, c, 3200, 180);
+    },
     draw(g, st, c) {
+      const now = Date.now(), back = s => { const e = (now - s.rc) / 3000; if (e >= 1) { s.rc = 0; return 1; } return 0.25 + 0.75 * e * e; };
       const p = c.progress, hl = [], dots = [], half = (a, b) => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
       g.fillStyle = '#060508';
       for (const f of st.info) {
@@ -129,7 +144,7 @@
         let run = null;
         for (let i = 0; i < n; i++) { const t = f.pts[i], d = inn[i][2]; if (d > 3.5 && t.nx + t.ny < -0.25) { if (!run) hl.push(run = []); run.push(t.x - t.nx * d * 0.45, t.y - t.ny * d * 0.45); } else run = null; }
       }
-      for (const s of st.strands) { const q = (p - s.at) / s.dur; if (q > 0) strand(g, s, Math.min(1, q), hl, dots); }
+      for (const s of st.strands) { const q = (p - s.at) / s.dur; if (q > 0) strand(g, s, Math.min(1, q) * (s.rc ? back(s) : 1), hl, dots); }
       g.beginPath(); for (const d of dots) { g.moveTo(d[0] + d[2], d[1]); g.arc(d[0], d[1], d[2], 0, TAU); } g.fill();
       // the wet look: one thin pale line along the lit side of everything
       g.strokeStyle = 'rgba(214,226,246,.5)'; g.lineWidth = 1; g.lineCap = g.lineJoin = 'round'; g.beginPath();
@@ -180,7 +195,7 @@
     g.fillStyle = 'rgba(190,28,28,.95)'; g.beginPath(); g.arc(x, y + 5.5, 1.3, 0, TAU); g.fill();
   }
   HP.fx.add('cobwebs', {
-    label: 'Cobwebs', grows: true, days: 14, live: true, fps: 12,
+    label: 'Cobwebs', grows: true, days: 14, live: true, fps: 12, covers: true,
     options: [amount(), {key: 'spider', label: 'Spider', type: 'bool', default: true}],
     create(c) {
       const r = c.rand, amt = c.opts.amount, webs = [];
@@ -201,21 +216,54 @@
       const drapes = []; for (let i = 0, n = Math.round(5 * amt); i < n; i++) drapes.push({x: r() * c.w * 0.85, span: 80 + r() * 220, sag: 16 + r() * 34, at: 0.3 + r() * 0.5});
       // the spider comes down a gap that starts near the top, so it hangs between buttons and not over one
       const lanes = c.gaps.filter(q => Math.abs(q.x1 - q.x2) < 1 && Math.min(q.y1, q.y2) < c.h * 0.35).map(q => ({x: q.x1, len: U.clamp((q.y1 + q.y2) / 2, 60, c.h * 0.45)}));
-      return {webs, drapes, lanes, sp: {on: false}};
+      return {webs, drapes, lanes, sp: {on: false}, run: null, shake: -9, now: 0};
     },
-    draw(g, st, c, t) {
-      g.drawImage(still(st, c, gg => paintWebs(gg, st, c.progress)), 0, 0);
+    // A finger on a web: every thread trembles, and a spider runs out from the web's corner to see what it caught,
+    // waits, and walks home again.
+    touch(st, x, y, c) {
+      for (const w of st.webs) {
+        if (!(w.q > 0.3)) continue;
+        const dx = x - w.x, dy = y - w.y, A = w.rad[0], B = w.rad[w.rad.length - 1];
+        if (Math.hypot(dx, dy) > A.len || Math.cos(A.a) * dx + Math.sin(A.a) * dy < -3 || Math.cos(B.a) * dx + Math.sin(B.a) * dy < -3) continue;  // not in this web's quarter
+        st.shake = st.now;
+        if (c.opts.spider && !(st.run && st.run.hang != null)) st.run = {w, x: st.run ? st.run.x : w.x, y: st.run ? st.run.y : w.y, tx: x, ty: y, home: false, wait: 0.9, hang: null};
+        return;
+      }
+    },
+    // a tap on a spider: it lets go and drops on a thread, then climbs back up
+    tap(st, x, y, c) {
+      const s = st.sp, r = st.run;
+      if (r && r.hang == null && Math.hypot(x - r.x, y - r.y - 3) < 16 && !buried(c.rects, r.x, r.y)) { r.hang = st.now; return true; }
+      if (s.on && Math.hypot(x - s.px, y - s.py - 3) < 16 && !buried(c.rects, s.px, s.py)) { s.drop = st.now; return true; }
+    },
+    draw(g, st, c, t, dt) {
+      st.now = t;
+      const sh = t - st.shake < 0.6 ? (1 - (t - st.shake) / 0.6) * 1.7 : 0, fall = e => 70 * U.span(e, 0, 0.3) * (1 - U.span(e, 1.2, 2.6));
+      g.drawImage(still(st, c, gg => paintWebs(gg, st, c.progress)), sh ? Math.sin(t * 61) * sh : 0, sh ? Math.cos(t * 47) * sh : 0);
+      const r = st.run;
+      if (r && r.hang != null) {  // tapped: down on a thread from where it stood, a pause, and up again
+        const e = t - r.hang, y = Math.min(c.h - 14, r.y + fall(e));
+        g.strokeStyle = 'rgba(236,240,250,.6)'; g.lineWidth = 0.7; g.beginPath(); g.moveTo(r.x, r.y); g.lineTo(r.x, y - 4); g.stroke();
+        spider(g, r.x, y, e < 0.3 || e > 1.2 ? t * 7 : t * 0.9);
+        if (e > 2.6) { r.hang = null; r.home = true; }
+      } else if (r) {
+        const tx = r.home ? r.w.x : r.tx, ty = r.home ? r.w.y : r.ty, dx = tx - r.x, dy = ty - r.y, d = Math.hypot(dx, dy), v = (r.home ? 80 : 270) * dt;
+        if (d > v) { r.x += dx / d * v; r.y += dy / d * v; }
+        else { r.x = tx; r.y = ty; if (r.home) st.run = null; else if ((r.wait -= dt) <= 0) r.home = true; }
+        if (st.run) spider(g, r.x, r.y, d > v ? t * (r.home ? 9 : 22) : t * 0.9);
+      }
       if (!c.opts.spider || c.progress < 0.06) return;
       const s = st.sp;
       if (st.next == null) st.next = t + 1.2;
       if (!s.on && t >= st.next) {
         const l = st.lanes.length ? st.lanes[Math.floor(Math.random() * st.lanes.length)] : {x: 60 + Math.random() * (c.w - 120), len: 130};
-        s.on = true; s.t = t; s.x = l.x; s.len = l.len * (0.6 + Math.random() * 0.4);
+        s.on = true; s.t = t; s.x = l.x; s.len = l.len * (0.6 + Math.random() * 0.4); s.drop = null;
       }
       if (!s.on) return;
       const e = t - s.t;
       if (e > 17) { s.on = false; st.next = t + 45 + Math.random() * 30; return; }   // about once a minute
-      const k = e < 5 ? U.span(e, 0, 5) : e < 11 ? 1 : 1 - U.span(e, 11, 17), y = s.len * k, x = s.x + Math.sin(t * 1.1) * 3 * k;
+      const k = e < 5 ? U.span(e, 0, 5) : e < 11 ? 1 : 1 - U.span(e, 11, 17), y = Math.min(c.h - 14, s.len * k + (s.drop != null ? fall(t - s.drop) : 0)), x = s.x + Math.sin(t * 1.1) * 3 * k;
+      s.px = x; s.py = y;  // where a finger finds it
       g.strokeStyle = 'rgba(236,240,250,.6)'; g.lineWidth = 0.7; g.beginPath(); g.moveTo(s.x, 0); g.lineTo(x, y - 4); g.stroke();
       spider(g, x, y, e < 5 || e > 11 ? t * 7 : t * 0.9);
     },
@@ -224,10 +272,20 @@
   // ---------------------------------------------------------------------------------------------------------------
   // Crystals: clusters of hexagonal prisms in the gaps and in the screen's bottom corners. A prism seen from the
   // side shows three long faces and three faces of its point; each gets its own tone of the one hue.
+  /** The grown crystal whose shaft passes within "slack" pixels of the point, if any. */
+  function crystalAt(st, c, x, y, slack) {
+    let best = null, bd = slack;
+    for (const k of st.list) {
+      const q = U.span(c.progress, k.at, k.at + 0.35); if (q < 0.3) continue;
+      const ux = Math.cos(k.a), uy = Math.sin(k.a), s = U.clamp((x - k.x) * ux + (y - k.y) * uy, 0, k.L * q), d = Math.hypot(k.x + ux * s - x, k.y + uy * s - y) - k.w / 2;
+      if (d < bd) { bd = d; best = k; }
+    }
+    return best;
+  }
   const GEMS = {amethyst: [[50, 20, 104], [110, 58, 188], [174, 128, 236], [232, 212, 255]], ice: [[36, 84, 128], [92, 156, 204], [168, 218, 244], [238, 250, 255]],
     emerald: [[8, 70, 50], [22, 136, 92], [84, 206, 148], [212, 255, 230]], rose: [[118, 30, 70], [204, 84, 128], [246, 162, 188], [255, 228, 234]]};
   HP.fx.add('crystals', {
-    label: 'Crystals', grows: true, days: 10,
+    label: 'Crystals', grows: true, days: 10, covers: true,
     options: [{key: 'colour', label: 'Colour', type: 'select', choices: [['amethyst', 'Amethyst'], ['ice', 'Ice'], ['emerald', 'Emerald'], ['rose', 'Rose']], default: 'amethyst'}, amount()],
     create(c) {
       const r = c.rand, amt = c.opts.amount, pal = GEMS[c.opts.colour] || GEMS.amethyst, list = [], seen = {};
@@ -254,10 +312,15 @@
         for (let i = 0, n = Math.round(5 + 6 * amt); i < n; i++) add((side > 0 ? 4 : c.w - 4) + side * r() * 14, c.h - 2, -Math.PI / 2 + side * (-0.2 + r() * 1.7), 50 + r() * 140, 12 + r() * 16, at + r() * 0.35);
       }
       list.sort((a, b) => b.L - a.L);   // tall ones behind, short ones in front
-      return {list};
+      return {list, ring: null};
     },
+    // A finger on or near a crystal rings it: its tip flashes and the flash runs out across its neighbours.
+    // The tap is kept only when the finger is right on a crystal, so the tile beside it is not pressed by mistake.
+    touch(st, x, y, c) { const k = crystalAt(st, c, x, y, 24); if (k) { st.ring = {k, at: Date.now()}; run(st, c, 1000, 110); } },
+    tap(st, x, y, c) { const k = crystalAt(st, c, x, y, 4); if (!k || buried(c.rects, x, y)) return; st.ring = {k, at: Date.now()}; run(st, c, 1000, 110); return true; },
     draw(g, st, c) {
-      const p = c.progress;
+      const p = c.progress, ring = st.ring, re = ring ? (Date.now() - ring.at) / 1000 : 9;
+      const star = (x, y, s) => { const i = s * 0.2; g.fillStyle = 'rgba(255,255,255,.9)'; g.beginPath(); g.moveTo(x - s, y); g.lineTo(x - i, y - i); g.lineTo(x, y - s); g.lineTo(x + i, y - i); g.lineTo(x + s, y); g.lineTo(x + i, y + i); g.lineTo(x, y + s); g.lineTo(x - i, y + i); g.fill(); };
       g.lineJoin = g.lineCap = 'round'; g.lineWidth = 0.8;
       for (const k of st.list) {
         const q = U.span(p, k.at, k.at + 0.35); if (q < 0.03) continue;
@@ -270,7 +333,11 @@
         }
         const b = lit ? 1 : 2;   // the bright edge is the one between the front face and the lit side
         g.strokeStyle = k.col[3]; g.beginPath(); g.moveTo(X(0, e[b]), Y(0, e[b])); g.lineTo(X(S, e[b]), Y(S, e[b])); g.lineTo(ax, ay); g.stroke();
-        if (k.glint && q > 0.9) { const s = 6 * (q - 0.9) * 10, i = s * 0.2; g.fillStyle = 'rgba(255,255,255,.9)'; g.beginPath(); g.moveTo(ax - s, ay); g.lineTo(ax - i, ay - i); g.lineTo(ax, ay - s); g.lineTo(ax + i, ay - i); g.lineTo(ax + s, ay); g.lineTo(ax + i, ay + i); g.lineTo(ax, ay + s); g.lineTo(ax - i, ay + i); g.fill(); }   // a four-point sparkle on the tip
+        if (k.glint && q > 0.9) star(ax, ay, 6 * (q - 0.9) * 10);   // a four-point sparkle on the tip
+        if (re < 1) {   // rung: the same sparkle, passing outward at a walking pace
+          const d = Math.hypot(k.x - ring.k.x, k.y - ring.k.y), e = re - d / 320;
+          if (d < 230 && e > 0 && e < 0.4) star(ax, ay, (k === ring.k ? 12 : 7.5) * Math.sin(e / 0.4 * Math.PI) * (1 - d / 300));
+        }
       }
     },
   });
@@ -306,7 +373,7 @@
     return cv;
   }
   HP.fx.add('moss', {
-    label: 'Moss', grows: true, days: 60,
+    label: 'Moss', grows: true, days: 60, covers: true,
     options: [amount()],
     create(c) {
       const r = c.rand, amt = c.opts.amount, nz = U.noise(c.seed + 5), stamps = [], sprouts = [], seen = {};
@@ -361,10 +428,17 @@
       stamps.sort((a, b) => a.tone - b.tone);   // dark underneath, light on top
       const sr = U.rng(c.seed + 77), dots = [];
       MOSS.forEach((q, i) => { for (let v = 0, n = i < 6 ? 3 : 2; v < n; v++) dots.push(tuft(q, i < 2 ? 0 : i < 4 ? 1 : i < 6 ? 2 : 3, sr)); });
-      return {stamps, sprouts, dots};
+      return {stamps, sprouts, dots, puff: null};
+    },
+    // Pressed, a cushion of moss lets go a few spores that drift up; sometimes a small beetle that was under it runs off.
+    touch(st, x, y, c) {
+      for (const s of st.stamps) if (Math.abs(s.x - x) < 16 && Math.abs(s.y - y) < 16 && c.progress > s.at + 0.05) {
+        st.puff = {x: s.x, y: s.y, at: Date.now(), bug: Math.random() < 0.4 ? (s.x < c.w / 2 ? 1 : -1) : 0};
+        run(st, c, 1500, 140); return;
+      }
     },
     draw(g, st, c) {
-      const p = c.progress;
+      const p = c.progress, f = st.puff, e = f ? (Date.now() - f.at) / 1000 : 9;
       for (const s of st.stamps) {
         const k = U.span(p, s.at, s.at + 0.1); if (k < 0.05) continue;
         const R = s.r * (0.35 + 0.65 * k) * 1.5; g.drawImage(st.dots[s.sp], s.x - R, s.y - R * s.sq, 2 * R, 2 * R * s.sq);
@@ -376,6 +450,19 @@
         const h = s.h * k, tx = s.x + s.lean * h, ty = s.y - h;
         g.beginPath(); g.moveTo(s.x, s.y); g.quadraticCurveTo(s.x, s.y - h * 0.7, tx, ty); g.stroke();
         g.beginPath(); g.ellipse(tx + s.lean * 1.2, ty, 1.9 * k, 0.9 * k, s.lean, 0, TAU); g.fill();
+      }
+      if (e < 1.5) {
+        g.fillStyle = 'rgba(236,230,150,' + (0.9 * (1 - e / 1.5)).toFixed(3) + ')'; g.beginPath();
+        for (let i = 0; i < 6; i++) { const x = f.x + (i - 2.5) * 3 + Math.sin(i * 2.4 + e * 3) * (4 + 9 * e), y = f.y - 4 - e * (14 + i * 5); g.moveTo(x + 1.3, y); g.arc(x, y, 1.3, 0, TAU); }
+        g.fill();
+        if (f.bug && e < 1.2) {   // the beetle: a dark bean on six quick legs, gone again in a second
+          const x = f.x + f.bug * 64 * e, y = f.y + 1, a = Math.min(1, (1.2 - e) * 4);
+          g.strokeStyle = 'rgba(20,14,10,' + a + ')'; g.lineWidth = 0.8; g.beginPath();
+          for (let i = -1; i <= 1; i++) { const sw = Math.sin(e * 40 + i * 2) * 1.2; g.moveTo(x + i * 2.2 + sw, y - 3.4); g.lineTo(x + i * 2.2 - sw, y + 3.4); }
+          g.stroke();
+          g.fillStyle = 'rgba(28,20,14,' + a + ')'; g.beginPath(); g.ellipse(x, y, 3.6, 2.2, 0, 0, TAU); g.fill();
+          g.fillStyle = 'rgba(150,190,120,' + (a * 0.7) + ')'; g.fillRect(x - 1.8, y - 1.4, 2.2, 0.9);   // a glint on its back
+        }
       }
     },
   });
@@ -410,7 +497,7 @@
     g.restore();
   }
   HP.fx.add('honeycomb', {
-    label: 'Honeycomb', grows: true, days: 7, live: true, fps: 12,
+    label: 'Honeycomb', grows: true, days: 7, live: true, fps: 12, covers: true,
     options: [amount(), {key: 'bees', label: 'Bees', type: 'bool', default: true}],
     create(c) {
       const r = c.rand, amt = c.opts.amount, R = 9, dx = R * 1.5, dy = R * Math.sqrt(3), band = 7 + 11 * amt, cells = [], bees = [], gaps = c.gaps, org = [];
@@ -428,7 +515,12 @@
       }
       for (const k of cells) { k.at = 0.01 + 0.72 * Math.pow(k.od / far, 0.85) + k.j * 0.05; k.honey = k.h < 0.55 ? k.at + 0.1 + k.h * 0.45 : 9; k.cap = k.h < 0.12; }
       for (let i = 0, n = Math.round(2 + 4 * amt); i < n; i++) bees.push({x: null, y: 0, tx: 0, ty: 0, a: 0, wait: 0, ph: r() * TAU});
-      return {cells, bees, grown: []};
+      return {cells, bees, grown: [], px: 0, py: 0};
+    },
+    // the bees within reach come to see what touched the comb: they circle the spot for a few seconds and go back to work
+    touch(st, x, y) {
+      st.px = x; st.py = y;
+      for (const b of st.bees) if (b.x != null && Math.hypot(b.x - x, b.y - y) < 420) b.nosy = 3 + Math.random() * 1.5;
     },
     draw(g, st, c, t, dt) {
       g.drawImage(still(st, c, gg => paintComb(gg, st, c.progress)), 0, 0);
@@ -439,7 +531,12 @@
       for (let i = 0, n = Math.min(st.bees.length, Math.ceil(cells.length / 10)); i < n; i++) {
         const b = st.bees[i]; let fly = 0;
         if (b.x == null) { const k = cells[Math.floor(Math.random() * cells.length)]; b.x = b.tx = k.x; b.y = b.ty = k.y; b.wait = Math.random() * 1.5; }
-        if (b.wait > 0) { b.wait -= dt; if (b.wait <= 0) { const k = next(b); b.tx = k.x; b.ty = k.y; } }
+        if (b.nosy > 0) {
+          const a = t * 3.2 + b.ph, dx = st.px + Math.cos(a) * 24 - b.x, dy = st.py + Math.sin(a) * 24 - b.y, d = Math.hypot(dx, dy) || 1, v = Math.min(d, 130 * dt);
+          b.x += dx / d * v; b.y += dy / d * v; b.a = Math.atan2(dy, dx); fly = 1;
+          if ((b.nosy -= dt) <= 0) b.wait = 0.01;   // then on to a cell near by, as usual
+        }
+        else if (b.wait > 0) { b.wait -= dt; if (b.wait <= 0) { const k = next(b); b.tx = k.x; b.ty = k.y; } }
         else {
           const dx = b.tx - b.x, dy = b.ty - b.y, d = Math.hypot(dx, dy);
           if (d < 3) b.wait = 1 + Math.random() * 3;
@@ -485,7 +582,7 @@
     }
   }
   HP.fx.add('coral', {
-    label: 'Coral reef', grows: true, days: 14, live: true, fps: 12,
+    label: 'Coral reef', grows: true, days: 14, live: true, fps: 12, covers: true,
     options: [amount(), {key: 'fish', label: 'Fish', type: 'bool', default: true}],
     create(c) {
       const r = c.rand, amt = c.opts.amount, corals = [], lanes = [], schools = [];
@@ -516,14 +613,36 @@
         for (let j = 0, n = 3 + Math.floor(r() * 3); j < n; j++) s.fish.push({ox: -dir * j * (13 + r() * 9), oy: (r() - 0.5) * 9, ph: r() * 6, s: 1.05 + r() * 0.45, dx: 0, dy: 0, vx: 0, vy: 0, px: -999, py: -999});
         schools.push(s);
       }
-      return {corals, lanes, schools};
+      // A few anemones on the sea bed. They wave, so they are drawn every frame and not on the still sheet; a finger
+      // near one makes it pull its arms in. Made last, so the corals and fish above stay as the seed had them before.
+      const nems = [];
+      for (let i = 0, n = Math.round(2 + 3 * amt); i < n; i++) {
+        const x = 24 + r() * (c.w - 48), room = reach(c, x, c.h - 3, 0, -1, 30), a = {x, y: c.h - 1, len: Math.min(room, 15 + r() * 9), col: REEF[Math.floor(r() * 3) % 3], ph: r() * 6, n: 6 + Math.floor(r() * 3), at: 0.2 + r() * 0.3, shy: 0};
+        if (room >= 12) nems.push(a);
+      }
+      return {corals, lanes, schools, nems};
     },
     // a finger sends the nearby fish darting away; they drift back to their group afterwards
     touch(st, x, y) {
+      for (const a of st.nems) if (Math.hypot(a.x - x, a.y - a.len / 2 - y) < 80) a.shy = 1;
       for (const s of st.schools) for (const f of s.fish) { const dx = f.px - x, dy = f.py - y, d = Math.hypot(dx, dy) || 1; if (d < 150) { const k = 120 + 260 * (1 - d / 150); f.vx += dx / d * k; f.vy += dy / d * k; } }
     },
     draw(g, st, c, t, dt) {
       g.drawImage(still(st, c, gg => paintReef(gg, st, c.progress)), 0, 0);
+      g.lineCap = 'round';
+      for (const a of st.nems) {
+        const q = U.span(c.progress, a.at, a.at + 0.3); if (q < 0.05) continue;
+        a.shy = Math.max(0, a.shy - dt * 0.25);   // four seconds to come all the way out again
+        const open = 1 - 0.78 * U.span(a.shy, 0, 0.7), L = a.len * q * open, tips = [];
+        g.strokeStyle = a.col[0]; g.lineWidth = 2.3; g.beginPath();
+        for (let i = 0; i < a.n; i++) {
+          const f = i / (a.n - 1) - 0.5, ex = a.x + f * a.len * 1.5 * q * open + Math.sin(t * 1.4 + a.ph + i * 0.8) * 3 * open, ey = a.y - L * (1 - f * f * 0.9);
+          g.moveTo(a.x + f * 6, a.y - 2); g.quadraticCurveTo(a.x + f * 7, a.y - L * 0.65, ex, ey); tips.push(ex, ey);
+        }
+        g.stroke();
+        g.fillStyle = a.col[2]; g.beginPath(); for (let i = 0; i < tips.length; i += 2) { g.moveTo(tips[i] + 1.6, tips[i + 1]); g.arc(tips[i], tips[i + 1], 1.6, 0, TAU); } g.fill();
+        g.fillStyle = a.col[1]; g.beginPath(); g.ellipse(a.x, a.y - 1, 5.5 * q, (3 + 3 * (1 - open)) * q, 0, 0, TAU); g.fill();   // the foot, fatter when it has pulled in
+      }
       if (!c.opts.fish) return;
       const eyes = [], n = Math.ceil(st.schools.length * U.span(c.progress, 0.02, 0.45));   // the fish arrive as the reef does
       for (let i = 0; i < n; i++) {

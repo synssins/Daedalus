@@ -18,6 +18,27 @@
   /** Is the point over the middle of a button: further in than the rim that things may creep over? */
   const middle = (rects, x, y) => rects.some(b => !b.hidden && !b.flat && inside(b, x, y, Math.min(b.w, b.h) * 0.15));
 
+  /** These kinds are drawn only when asked. For a short reaction to a finger the drawing is asked for a few times a
+   *  second until it is over: a handful of extra drawings, then quiet again. */
+  function run(st, ctx, ms) {
+    st.until = Date.now() + ms; ctx.redraw();
+    if (!st.timer) st.timer = setInterval(() => { ctx.redraw(); if (Date.now() > st.until) { clearInterval(st.timer); st.timer = 0; } }, 130);
+  }
+  /** What a petal knocked off this flower looks like. */
+  const petalOf = (plant, f) => plant === 'flowers' ? WILD[f.c % WILD.length][1] : plant === 'roses' ? ROSE[f.c % 3][1] : plant === 'morningglory' ? '#6f6ae6' : plant === 'moonflower' ? '#fbfaf0' : '#c3a8f2';
+  /** A finger in the plant: the leaves near it rustle for a second. With "shed", a few open flowers near it lose a petal. */
+  function rustle(st, x, y, ctx, shed) {
+    const now = Date.now(), sh = st.shake;
+    if (sh && now - sh.at < 200 && Math.hypot(sh.x - x, sh.y - y) < 18) return;  // a slow kind: not a drawing for every twitch of the finger
+    let near = false;
+    if (st.fronds) { if (ctx.progress > 0.2) for (const fr of st.fronds) { for (let i = 0; i < fr.pts.length && !near; i += 3) near = Math.abs(fr.pts[i].x - x) < 34 && Math.abs(fr.pts[i].y - y) < 34; if (near) break; } }
+    else for (const l of st.leaves) { const P = l.s.pts[l.i]; if (l.on && Math.abs(P.x - x) < 55 && Math.abs(P.y - y) < 55) { near = true; break; } }
+    if (!near) return;
+    st.shake = {x, y, at: now};
+    if (shed && st.plant !== 'flytrap') for (const fl of st.flowers) if (fl.open && st.petals.length < 12 && Math.abs(fl.cx - x) < 50 && Math.abs(fl.cy - y) < 50 && Math.random() < 0.6) st.petals.push({x: fl.cx, y: fl.cy, vx: (Math.random() - 0.5) * 44, ph: Math.random() * TAU, col: petalOf(st.plant, fl), at: now});
+    run(st, ctx, 1100);
+  }
+
   /** The path a stem follows round one button: its rounded outline, d pixels outside, clockwise, a point every STEP. */
   function ring(b, d) {
     const x = b.x - d, y = b.y - d, w = b.w + 2 * d, h = b.h + 2 * d, rr = Math.max(1, Math.min((b.r || 0) + d, w / 2, h / 2)), out = [];
@@ -272,7 +293,7 @@
 
   HP.fx.add('vine', {
     label: 'Vine',
-    grows: true, days: 7,
+    grows: true, days: 7, covers: true,
     options: [{key: 'plant', label: 'Plant', type: 'select', default: 'flowers', choices: [['flowers', 'Wildflowers'], ['morningglory', 'Morning glory'], ['moonflower', 'Moonflower'],
       ['wisteria', 'Wisteria'], ['ivy', 'Ivy'], ['roses', 'Roses'], ['pumpkin', 'Pumpkins'], ['flytrap', 'Flytraps'], ['kelp', 'Kelp']]},
       {key: 'density', label: 'Amount', type: 'range', min: 0.3, max: 1, step: 0.05, default: 0.7}],
@@ -280,7 +301,7 @@
     create(ctx) {
       const r = ctx.rand, o = ctx.opts, plant = SPEC[o.plant] ? o.plant : 'flowers', sp = SPEC[plant], kelp = plant === 'kelp';
       const dens = U.clamp(+o.density || 0.7, 0.3, 1), W = ctx.w, H = ctx.h, btn = ctx.rects.filter(b => !b.hidden && !b.flat);
-      const st = {plant, sp, stems: [], leaves: [], flowers: [], curls: [], max: 1, closed: shut[ctx.seed] || (shut[ctx.seed] = {}), glow: softDot('235,240,255')};
+      const st = {plant, sp, stems: [], leaves: [], flowers: [], curls: [], max: 1, closed: shut[ctx.seed] || (shut[ctx.seed] = {}), glow: softDot('235,240,255'), petals: [], shake: null};
       if (!btn.length) return st;
 
       // Stems run down the middle of the gaps: half the narrowest gap away from every button's edge.
@@ -440,9 +461,24 @@
       }
     },
 
+    // A finger among the leaves makes them rustle (not over a tile's middle: that is a tile being used). A finger
+    // drawn along a stem also knocks a few petals off the open flowers; pumpkins and hanging flowers wobble. Kelp lets go a few bubbles.
+    touch(st, x, y, ctx) { if (!middle(ctx.rects, x, y)) rustle(st, x, y, ctx, false); },
+    drag(st, x, y, ctx) { if (!middle(ctx.rects, x, y)) rustle(st, x, y, ctx, true); },
+
     draw(g, st, ctx) {
       const p = ctx.progress, e = ctx.env, sp = st.sp, plant = st.plant, now = Date.now();
-      if (st.fronds) { if (p > 0.003) kelpDraw(g, st, ctx); return; }
+      const sh = st.shake && now - st.shake.at < 1000 ? st.shake : null, se = sh ? (now - sh.at) / 1000 : 0;
+      const shaken = (x, y) => sh && Math.abs(x - sh.x) < 60 && Math.abs(y - sh.y) < 60;
+      if (st.fronds) {
+        if (p > 0.003) kelpDraw(g, st, ctx);
+        if (sh) {  // bubbles wobbling up from the touched frond
+          g.strokeStyle = 'rgba(225,245,255,' + (0.8 * (1 - se)).toFixed(3) + ')'; g.lineWidth = 1; g.beginPath();
+          for (let i = 0; i < 5; i++) { const x = sh.x + (i - 2) * 6 + Math.sin(se * 6 + i * 2.1) * 4, y = sh.y - se * (34 + i * 11), r = 1.6 + (i % 3) * 0.8; g.moveTo(x + r, y); g.arc(x, y, r, 0, TAU); }
+          g.stroke();
+        }
+        return;
+      }
       if (p <= 0.003 || !st.stems.length) return;
       // Stems reach full length at 60% of the cycle; the rest of the time belongs to leaves, buds and flowers.
       const reach = st.max * Math.pow(Math.min(1, p / 0.6), 0.75), arrive = (s, i) => 0.6 * Math.pow((s.birth + s.cum[i]) / st.max, 1 / 0.75);
@@ -515,7 +551,8 @@
         const P = l.s.pts[l.i];
         // kelp blades all lift toward the surface; other leaves point forward and out from the stem
         const ang = plant === 'kelp' ? Math.atan2(-P.tx * l.side * 0.8 - 0.75, P.ty * l.side * 0.8) + l.tw : Math.atan2(P.ty, P.tx) + l.side * (sp.shape === 'broad' ? 0.7 : 0.95) + l.tw;
-        leaf(P.x, P.y, ang, sp.L * l.sz * k, l.turn < fall ? AUTUMN[l.c2] : sp.leaf[l.c], l.turn < fall ? 'rgba(90,30,10,.6)' : rib);
+        l.on = true;  // out: a finger can rustle it
+        leaf(P.x, P.y, ang + (shaken(P.x, P.y) ? Math.sin(se * 26 + l.i * 1.7) * 0.45 * (1 - se) : 0), sp.L * l.sz * k, l.turn < fall ? AUTUMN[l.c2] : sp.leaf[l.c], l.turn < fall ? 'rgba(90,30,10,.6)' : rib);
       }
       // a growing tip carries a pair of small pale leaves
       if (plant !== 'kelp' && sp.shape !== 'pinnate') for (const t of tips) { const a = Math.atan2(t.ty, t.tx); leaf(t.x, t.y, a + 0.5, 6, sp.stem[0], rib); leaf(t.x, t.y, a - 0.5, 6, sp.stem[0], rib); }
@@ -533,7 +570,16 @@
         const P = f.s.pts[f.i];
         g.strokeStyle = sp.stem[0]; g.lineWidth = plant === 'flytrap' ? 2.4 : 1.4; g.beginPath(); g.moveTo(P.x, P.y); g.lineTo(f.x, f.y); g.stroke();
         if (plant === 'moonflower' && open > 0.5) { g.globalCompositeOperation = 'lighter'; g.globalAlpha = 0.4; g.drawImage(st.glow, f.x - f.r * 2.4, f.y - f.r * 2.4, f.r * 4.8, f.r * 4.8); g.globalAlpha = 1; g.globalCompositeOperation = 'source-over'; }
-        g.save(); g.translate(f.x, f.y); fn(g, f, b, open, p); g.restore();
+        g.save(); g.translate(f.x, f.y); if (shaken(f.cx, f.cy)) g.rotate(Math.sin(se * 20 + f.id) * 0.3 * (1 - se)); fn(g, f, b, open, p); g.restore();
+      }
+      // petals a finger knocked off: they flutter down for a second
+      if (st.petals.length) {
+        st.petals = st.petals.filter(q => now - q.at < 1100);
+        for (const q of st.petals) {
+          const t = (now - q.at) / 1000; g.globalAlpha = Math.min(1, 2.2 - 2 * t); g.fillStyle = q.col;
+          g.beginPath(); g.ellipse(q.x + q.vx * t + Math.sin(t * 7 + q.ph) * 5, q.y + 16 * t + 55 * t * t, 4, 2.3, q.ph + t * 5, 0, TAU); g.fill();
+        }
+        g.globalAlpha = 1;
       }
     },
   });
@@ -543,7 +589,7 @@
   const CAPS = ['#cf3a2c', '#a9743f', '#e3c690', '#8d7fc0'];
   HP.fx.add('mushrooms', {
     label: 'Mushrooms',
-    grows: true, days: 5,
+    grows: true, days: 5, covers: true,
     options: [{key: 'amount', label: 'Amount', type: 'range', min: 0.3, max: 1, step: 0.05, default: 0.7}],
     create(ctx) {
       const r = ctx.rand, amt = U.clamp(+ctx.opts.amount || 0.7, 0.3, 1), btn = ctx.rects.filter(b => !b.hidden && !b.flat), groups = [];
@@ -563,15 +609,30 @@
       }
       return {groups, glow: softDot('120,255,205')};
     },
+    // a tap on a cap: it squashes, springs back and lets go a puff of spores
+    tap(st, x, y, ctx) {
+      for (const gr of st.groups) for (const m of gr.list) {
+        if (!m.up || Math.hypot(x - m.tx, y - m.ty + 3) > Math.max(13, m.r + 4) || middle(ctx.rects, m.tx, m.ty)) continue;
+        m.hit = Date.now(); run(st, ctx, 1000); return true;
+      }
+    },
+    // a finger close by: the whole cluster gives a small start
+    touch(st, x, y, ctx) {
+      if (middle(ctx.rects, x, y)) return;
+      for (const gr of st.groups) if (Math.abs(gr.x - x) < 45 && y > gr.y - 60 && y < gr.y + 12 && ctx.progress > 0.1) { gr.jog = Date.now(); run(st, ctx, 500); }
+    },
     draw(g, st, ctx) {
-      const p = ctx.progress, night = ctx.env.night;
+      const p = ctx.progress, night = ctx.env.night, now = Date.now();
       g.lineCap = 'round';
       for (const gr of st.groups) {
         const up = U.span(p, 0.02, 0.3);
         if (up > 0.05) { g.strokeStyle = '#4f8f3a'; g.lineWidth = 1.3; g.beginPath(); for (const b of gr.grass) { g.moveTo(gr.x + b[0], gr.y); g.quadraticCurveTo(gr.x + b[0], gr.y - b[1] * up * 0.6, gr.x + b[0] + b[2], gr.y - b[1] * up); } g.stroke(); }
         for (const m of gr.list) {
           const k = U.span(p, m.t0, m.t0 + 0.5); if (k <= 0.02) continue;
-          const h = m.h * (0.15 + 0.85 * k), cw = m.cw * (0.5 + 0.5 * k), ch = m.cw * (0.95 - 0.35 * k), x0 = gr.x + m.dx, tx = x0 + m.lean * h, ty = gr.y - h, sw = Math.max(2.5, cw * 0.5);
+          // squash and spring: hard after a tap, slightly when its cluster was startled
+          const he = m.hit ? (now - m.hit) / 1000 : 9, je = gr.jog ? (now - gr.jog) / 1000 : 9;
+          const sq = he < 0.8 ? Math.sin(he * 20) * 0.24 * (1 - he / 0.8) : je < 0.45 ? Math.sin(je * 24) * 0.08 * (1 - je / 0.45) : 0;
+          const h = m.h * (0.15 + 0.85 * k) * (1 - sq), cw = m.cw * (0.5 + 0.5 * k) * (1 + sq * 0.6), ch = m.cw * (0.95 - 0.35 * k), x0 = gr.x + m.dx, tx = x0 + m.lean * h, ty = gr.y - h, sw = Math.max(2.5, cw * 0.5);
           g.strokeStyle = 'rgba(30,20,10,.35)'; g.lineWidth = sw + 1.6; g.beginPath(); g.moveTo(x0, gr.y); g.quadraticCurveTo(x0, gr.y - h * 0.5, tx, ty); g.stroke();
           g.strokeStyle = '#efe6cf'; g.lineWidth = sw; g.stroke();
           g.save(); g.translate(tx, ty); g.rotate(m.lean * 0.6);
@@ -581,6 +642,12 @@
           g.fillStyle = 'rgba(255,255,255,.28)'; g.beginPath(); g.ellipse(-cw * 0.35, -ch * 0.62, cw * 0.3, ch * 0.16, -0.5, 0, TAU); g.fill();
           if (m.kind === 0) { g.fillStyle = '#fff6ea'; g.beginPath(); for (const q of [[-0.5, -0.38, 0.13], [0.08, -0.7, 0.16], [0.52, -0.33, 0.12]]) { g.moveTo(q[0] * cw + q[2] * cw, q[1] * ch); g.arc(q[0] * cw, q[1] * ch, q[2] * cw, 0, TAU); } g.fill(); }
           g.restore();
+          m.tx = tx; m.ty = ty; m.r = cw; m.up = k > 0.3;  // where a finger finds it
+          if (he < 1) {  // the spores: a few specks spreading upward
+            g.fillStyle = (night ? 'rgba(170,255,222,' : 'rgba(252,242,205,') + (0.9 * (1 - he)).toFixed(3) + ')'; g.beginPath();
+            for (let i = 0; i < 7; i++) { const a = i * 0.9 + m.dx, x = tx + Math.cos(a) * (4 + 20 * he), y = ty - ch - 4 - 26 * he + Math.sin(a * 2) * 5 * he; g.moveTo(x + 1.9, y); g.arc(x, y, 1.9, 0, TAU); }
+            g.fill();
+          }
           if (night) { const s = cw * 4.6; g.globalCompositeOperation = 'lighter'; g.globalAlpha = 0.4 * k; g.drawImage(st.glow, tx - s / 2, ty - ch * 0.5 - s / 2, s, s); g.globalAlpha = 1; g.globalCompositeOperation = 'source-over'; }
         }
       }

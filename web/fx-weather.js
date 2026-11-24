@@ -5,6 +5,8 @@
   const U = HP.fx.util, TAU = Math.PI * 2;
   const amount = {key: 'amount', label: 'Amount', type: 'range', min: 0.2, max: 1, step: 0.05, default: 0.7};
   const solidOf = ctx => ctx.rects.filter(r => !r.hidden && !r.flat);
+  /** Is the point over the middle of a tile, further in than the rim an overlay may use? Taps there belong to the tile. */
+  const deep = (ctx, x, y) => ctx.rects.some(b => !b.hidden && !b.flat && Math.min(x - b.x, b.x + b.w - x, y - b.y, b.y + b.h - y) > 0.15 * Math.min(b.w, b.h));
   const canvas = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
   /** One soft round glow, drawn once and stamped many times: far cheaper than a gradient per light per frame. */
   const glow = (size, stops) => {
@@ -19,7 +21,7 @@
   const SNOW = {snowy: 1, 'snowy-rainy': 1};
   HP.fx.add('snow', {
     label: 'Snow',
-    live: true, fps: 12,
+    live: true, fps: 12, covers: true,
     options: [{key: 'always', label: 'Whatever the weather', type: 'bool', default: false}, amount],
     create(ctx) {
       const r = ctx.rand, flakes = [], ledges = [], old = piles;
@@ -38,8 +40,34 @@
       // on a button the snow sits mostly in the gap above it and only just laps over the edge
       for (const b of solidOf(ctx)) ledge(b.x + (b.r || 0) * 0.45, b.x + b.w - (b.r || 0) * 0.45, b.y, Math.min(12, 0.14 * Math.min(b.w, b.h)), 3, true);
       ledge(0, ctx.w, ctx.h, 24, 0, false);
-      return {flakes, ledges, layer: canvas(ctx.w, ctx.h), dirty: true, acc: 0, puffs: []};
+      return {flakes, ledges, layer: canvas(ctx.w, ctx.h), dirty: true, acc: 0, puffs: [], gx: 0, gy: 0, gk: 0, wind: 0};
     },
+    // a finger parts the falling flakes for a moment
+    touch(st, x, y) { st.gx = x; st.gy = y; st.gk = 1; },
+    // a tap on a deep pile sets it off: the whole of it slides off the nearer end of its ledge
+    tap(st, x, y, ctx) {
+      if (deep(ctx, x, y)) return;
+      for (const L of st.ledges) {
+        if (x < L.x1 || x > L.x2 || y < L.y - L.cap - 12 || y > L.y + 6) continue;
+        let sum = 0; for (const c of L.cols) sum += c;
+        if (sum / L.cols.length < 0.3) continue;
+        const n = L.cols.length - 1, dx = (L.x2 - L.x1) / n, dir = x < (L.x1 + L.x2) / 2 ? -1 : 1, every = Math.ceil((n + 1) / 16);
+        for (let i = 0; i <= n; i++) {
+          if (i % every === 0 && st.puffs.length < 30) st.puffs.push({x: L.x1 + dx * i, y: L.y - 2 - L.cols[i] * L.cap * 0.5, vx: dir * (50 + Math.random() * 90), vy: -15 - Math.random() * 35, life: 1.3});
+          L.cols[i] *= 0.06;
+        }
+        st.dirty = true; return true;
+      }
+    },
+    // a pressed tile shakes: some of the snow on its top hops off
+    press(st, rect) {
+      for (const L of st.ledges) if (Math.abs(L.y - rect.y) < 1 && L.x1 >= rect.x - 1 && L.x2 <= rect.x + rect.w + 1) {
+        const dx = (L.x2 - L.x1) / (L.cols.length - 1);
+        for (let i = 0; i < L.cols.length; i++) if (L.cols[i] > 0.08) { if (i % 2 && st.puffs.length < 30) st.puffs.push({x: L.x1 + dx * i, y: L.y - 3, vx: (Math.random() - 0.5) * 70, vy: -50 - Math.random() * 40, life: 1}); L.cols[i] *= 0.7; }
+        st.dirty = true;
+      }
+    },
+    swipe(st, dir) { st.wind = -dir; },  // the screen slides away: the flakes are left behind for a moment
     // a finger dragged along a snowy edge brushes it clean, and the snow falls off as a little puff
     drag(st, x, y) {
       for (const L of st.ledges) {
@@ -68,8 +96,11 @@
       g.drawImage(st.layer, 0, 0);
       if (snowing) {
         const n = Math.min(st.flakes.length, Math.round(110 * o.amount)), wet = e.weather === 'snowy-rainy' ? 1.7 : 1;
+        st.gk = st.gk < 0.03 ? 0 : st.gk * Math.exp(-dt * 1.6); st.wind = Math.abs(st.wind) < 0.03 ? 0 : st.wind * Math.exp(-dt * 2.2);
         for (let i = 0; i < n; i++) {
           const f = st.flakes[i];
+          if (st.gk) { const dx = f.x - st.gx, dy = f.y - st.gy, d2 = dx * dx + dy * dy; if (d2 < 16900 && d2 > 1) { const d = Math.sqrt(d2), p = (1 - d / 130) * 260 * st.gk * dt; f.x += dx / d * p; f.y += dy / d * p; } }
+          if (st.wind) { f.x += st.wind * 280 * dt; if (f.x < -5) f.x = ctx.w + 5; }
           f.y += (20 + f.z * 38) * f.sp * wet * dt; f.x += (Math.sin(t * 0.6 * f.sp + f.ph) * 14 + 5) * dt;
           if (f.y > ctx.h + 5) { f.y = -5; f.x = Math.random() * ctx.w; }
           if (f.x > ctx.w + 5) f.x = -5;
@@ -102,7 +133,7 @@
       let any = false;
       for (let i = 0; i <= n; i++) {
         // toward a button's rounded corners the pile thins to nothing
-        const c = L.cols[i] * (L.taper ? Math.pow(Math.sin(Math.PI * i / n), 0.6) : 1);
+        const c = L.cols[i] * (L.taper ? Math.pow(Math.max(0, Math.sin(Math.PI * i / n)), 0.6) : 1);
         if (c > 0.02) any = true;
         top.push(L.y - c * L.cap * L.bump[i]); bot.push(L.y + L.drape * Math.min(1, c * 5));
       }
@@ -143,6 +174,8 @@
     d.fill();
     return c;
   }
+  /** How hard it is raining as far as this overlay goes (0: not at all). */
+  const raining = ctx => RAIN[ctx.env.weather] || (ctx.opts.always ? 1 : 0);
   HP.fx.add('rain', {
     label: 'Rain',
     live: true, fps: 12,
@@ -150,11 +183,27 @@
     create(ctx) {
       const drops = [];
       for (let i = 0; i < 110; i++) drops.push({x: Math.random() * ctx.w * 1.2, y: Math.random() * ctx.h, z: i % 3, sp: 0.85 + Math.random() * 0.3, land: ctx.h + 60});
-      return {solid: solidOf(ctx), beads: [], runs: [], t: 0, drops, splashes: [], bead: beadSprite(), splash: splashSprite(), odd: false};
+      return {solid: solidOf(ctx), beads: [], runs: [], t: 0, drops, splashes: [], bead: beadSprite(), splash: splashSprite(), odd: false, rips: []};
+    },
+    // a finger on the wet glass: a ripple spreads from it, the streaks nearby jump aside and the beads it disturbs let go and run
+    touch(st, x, y, ctx) {
+      if (!raining(ctx)) return;
+      st.rips.push({x, y, a: 0}); if (st.rips.length > 4) st.rips.shift();
+      for (const f of st.drops) { const dx = f.x - x, dy = f.y - y; if (dx * dx + dy * dy < 10000) f.x += dx < 0 ? -28 : 28; }
+      for (let i = st.beads.length - 1; i >= 0 && st.runs.length < 6; i--) {
+        const b = st.beads[i]; if (Math.hypot(b.x - x, b.y - y) > 110 || U.over(st.solid, b.x, b.y, 5)) continue;  // one on a tile's face stays: a run never crosses a face
+        st.beads.splice(i, 1); st.runs.push({x: b.x, y: b.y, r: b.r + 2, big: 0, v: 90 + Math.random() * 60, ph: Math.random() * TAU, mode: 1, b: null, dir: 1, trail: []});
+      }
+    },
+    // a pressed tile throws a row of splashes off its top edge
+    press(st, rect, ctx) {
+      if (!raining(ctx)) return;
+      const rr = rect.r || 0;
+      for (let i = 0; i < 5 && st.splashes.length < 16; i++) st.splashes.push({x: rect.x + rr + (rect.w - 2 * rr) * (i + 0.5) / 5, y: rect.y, a: 0});
     },
     draw(g, st, ctx, t, dt) {
       const hard = RAIN[ctx.env.weather] || (ctx.opts.always ? 1 : 0), w = ctx.w, h = ctx.h;
-      if (!hard && !st.beads.length && !st.runs.length && !st.splashes.length) return;
+      if (!hard && !st.beads.length && !st.runs.length && !st.splashes.length && !st.rips.length) return;
       const wantBeads = Math.min(12, Math.round(12 * ctx.opts.amount * hard)), wantRuns = hard ? Math.min(3, Math.round(2 * ctx.opts.amount * hard) + 1) : 0;
       // The streaks. At most 60 in rain and 110 when it pours: that is plenty to read as rain, and each is one line.
       if (hard) {
@@ -188,6 +237,11 @@
           s.a += dt * 3.6; if (s.a >= 1) st.splashes.splice(i, 1);
         }
         g.globalAlpha = 1;
+      }
+      for (let i = st.rips.length - 1; i >= 0; i--) {
+        const r = st.rips[i]; r.a += dt * 1.7; if (r.a >= 1) { st.rips.splice(i, 1); continue; }
+        g.strokeStyle = 'rgba(225,238,255,' + (0.6 * (1 - r.a)).toFixed(3) + ')'; g.lineWidth = 1.6;
+        g.beginPath(); g.arc(r.x, r.y, 8 + 50 * r.a, 0, TAU); g.moveTo(r.x + 4 + 28 * r.a, r.y); g.arc(r.x, r.y, 4 + 28 * r.a, 0, TAU); g.stroke();
       }
       // new beads arrive a few at a time, never all at once
       st.t += dt * hard * 14;
@@ -279,6 +333,11 @@
       for (let i = 0; i < 16; i++) lie(r() * ctx.w, ctx.h - 5 - r() * 7);
       return {sprites, fall, lying, layer: canvas(ctx.w, ctx.h), key: ''};
     },
+    // a touch is a gust: the falling leaves near it are blown away from the finger and lifted a little
+    touch(st, x, y) {
+      for (const f of st.fall) { const dx = f.x - x, dy = f.y - y, d = Math.hypot(dx, dy) || 1; if (d < 220) { const k = (1 - d / 220) * 320; f.gx = dx / d * k; f.gy = dy / d * k - 70; } }
+    },
+    swipe(st, dir) { for (const f of st.fall) { f.gx = -dir * (160 + Math.random() * 180); f.gy = -30; } },  // the screen slides away under them
     draw(g, st, ctx, t, dt) {
       const o = ctx.opts, m = ctx.env.month;
       if (!o.always && !(m >= 9 && m <= 11)) return;
@@ -293,7 +352,8 @@
       for (let i = 0; i < n; i++) {
         const f = st.fall[i];
         f.y += f.vy * dt; if (f.y > ctx.h + 20) { f.y = -20; f.x = Math.random() * ctx.w; }
-        const sw = t * f.f + f.ph;
+        if (f.gx || f.gy) { const k = Math.exp(-dt * 2.2); f.x += f.gx * dt; f.y += f.gy * dt; f.gx *= k; f.gy *= k; if (Math.abs(f.gx) + Math.abs(f.gy) < 3) f.gx = f.gy = 0; }
+        const sw = t * f.f + f.ph + (f.gx || 0) * 0.02;  // a blown leaf tumbles faster
         g.save(); g.translate(f.x + Math.sin(sw) * f.amp, f.y + Math.abs(Math.cos(sw)) * -6);
         g.rotate(Math.sin(sw + 1) * 0.7 + t * f.spin + f.ph);
         g.scale(0.3 + 0.7 * Math.abs(Math.cos(t * f.tum + f.ph)), 1);  // turning over as it falls
@@ -320,10 +380,13 @@
       d.globalCompositeOperation = 'destination-in'; d.fillStyle = hz; d.fillRect(0, 0, 32, 160);
       const bands = [];
       for (let i = 0; i < 2; i++) bands.push({y: ctx.h * (0.24 + i * 0.13 + r() * 0.04), amp: ctx.h * (0.035 + r() * 0.025), f1: 4 + r() * 3, f2: 9 + r() * 5, ph: r() * TAU, sp: 0.09 + r() * 0.06, tall: ctx.h * (0.24 - i * 0.05)});
-      return {ray, bands};
+      return {ray, bands, rips: [], now: 0};
     },
+    // a touch sends a slow bright ripple out along the curtains, both ways from the finger
+    touch(st, x) { st.rips.push({x, t: st.now}); if (st.rips.length > 3) st.rips.shift(); },
     draw(g, st, ctx, t) {
       const e = ctx.env;
+      st.now = t; while (st.rips.length && t - st.rips[0].t > 6) st.rips.shift();
       if (!ctx.opts.always && !e.night) return;
       const strength = ctx.opts.amount * (e.cold ? 0.58 : 0.4);
       g.globalCompositeOperation = 'lighter';
@@ -334,8 +397,10 @@
           // the rays flicker along the curtain and the whole curtain thins toward its ends
           const rays = 0.55 + 0.45 * Math.sin(u * 17 + t * 0.5 + b.ph) * Math.sin(u * 8.3 - t * 0.21), a = strength * breathe * rays * (0.35 + 0.65 * Math.sin(Math.PI * U.clamp(u * 0.9 + 0.05 + 0.1 * Math.sin(t * 0.04 + b.ph), 0, 1)));
           if (a < 0.02) continue;
-          const tall = b.tall * (0.75 + 0.25 * rays);
-          g.globalAlpha = a; g.drawImage(st.ray, x - 24, y - tall, 48, tall);
+          let lift = 0;
+          for (const r of st.rips) { const age = t - r.t, off = Math.abs(Math.abs(x - r.x) - age * 170); if (off < 80) lift += (1 - off / 80) * (1 - age / 6); }
+          const tall = b.tall * (0.75 + 0.25 * rays) * (1 + 0.3 * lift);
+          g.globalAlpha = Math.min(1, a * (1 + 2 * lift)); g.drawImage(st.ray, x - 24, y - tall, 48, tall);
         }
       }
     },
@@ -345,12 +410,28 @@
   // On Independence Day and over New Year, after dark: a rocket climbs, bursts into a ball of sparks, and the sparks
   // sag and fade. A few a minute, with quiet in between.
   const FIRE = ['#ffd27a', '#ff7a9c', '#8dffb0', '#9ad0ff', '#c9a2ff', '#ffb36b'];
+  /** Is tonight a night for fireworks? */
+  const showNight = ctx => { const e = ctx.env, d = e.date || new Date(), md = (d.getMonth() + 1) * 100 + d.getDate(); return !!(e.night && (ctx.opts.always || md === 704 || md === 1231 || md === 101)); };
+  const tint = () => FIRE[Math.floor(Math.random() * FIRE.length)];
   HP.fx.add('fireworks', {
     label: 'Fireworks',
     live: true, fps: 12,
     options: [{key: 'always', label: 'Every night', type: 'bool', default: false}, amount],
     create() {
       return {rockets: [], bursts: [], next: 0.5, flash: glow(64, [[0, 'rgba(255,255,255,1)'], [0.3, 'rgba(255,240,200,.5)'], [1, 'rgba(255,220,160,0)']])};
+    },
+    // A tap on open sky sends a rocket up from the bottom to burst where the finger was. Never over a tile, and the
+    // tap is not kept: there is nothing of ours under the finger, and whatever else is there still gets it.
+    tap(st, x, y, ctx) {
+      if (!showNight(ctx) || U.over(ctx.rects, x, y) || st.rockets.length + st.bursts.length >= 4) return;
+      st.rockets.push({x, y: ctx.h, to: Math.min(y, ctx.h - 30), dx: 0, col: tint()});
+    },
+    // a pressed tile gets a small crackle of sparks off its top edge
+    press(st, rect, ctx) {
+      if (!showNight(ctx) || st.rockets.length + st.bursts.length >= 4) return;
+      const x = rect.x + rect.w / 2, y = rect.y - 3, sparks = [];
+      for (let k = 0; k < 18; k++) { const a = -Math.random() * Math.PI, v = 70 + Math.random() * 80; sparks.push({x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, inner: k < 6}); }
+      st.bursts.push({x, y, col: tint(), sparks, age: 0.3, life: 1.3});  // age 0.3: no white flash for so small a thing
     },
     draw(g, st, ctx, t, dt) {
       const e = ctx.env, d = e.date || new Date(), md = (d.getMonth() + 1) * 100 + d.getDate();
@@ -407,6 +488,12 @@
     touch(st, x, y) {
       for (const f of st.lights) { const dx = f.x - x, dy = f.y - y, d = Math.hypot(dx, dy) || 1; if (d < 230) { const push = (230 - d) / 230 * 340; f.vx += dx / d * push; f.vy += dy / d * push; } }
     },
+    // the lights round a pressed tile flare and twinkle fast for a moment
+    press(st, rect) {
+      const cx = rect.x + rect.w / 2, cy = rect.y + rect.h / 2, reach = Math.max(rect.w, rect.h) / 2 + 70;
+      for (const f of st.lights) if (f.b === rect || Math.hypot(f.x - cx, f.y - cy) < reach) f.fl = 1;
+    },
+    swipe(st, dir) { for (const f of st.lights) f.vx -= dir * 260; },  // left behind as the screen slides; they drift home
     draw(g, st, ctx, t, dt) {
       if (!ctx.opts.always && !ctx.env.night) return;
       const n = Math.min(st.lights.length, Math.round(ctx.opts.count));
@@ -428,8 +515,9 @@
         f.vx += (f.nx(t * 0.1 * f.sp) * 12 + U.clamp((tx - f.x) * 0.35, -22, 22) - f.vx) * ease;
         f.vy += (f.ny(t * 0.1 * f.sp) * 12 + U.clamp((ty - f.y) * 0.35, -22, 22) - f.vy) * ease;
         f.x = U.clamp(f.x + f.vx * dt, -10, ctx.w + 10); f.y = U.clamp(f.y + f.vy * dt, -10, ctx.h + 10);
-        const pulse = Math.sin(t * 0.8 * f.sp + f.ph), s = f.s * (1 + 0.12 * pulse);
-        g.globalAlpha = 0.68 + 0.3 * pulse; g.drawImage(st.dots[f.k], f.x - s / 2, f.y - s / 2, s, s);
+        const fl = f.fl > 0 ? (f.fl = Math.max(0, f.fl - dt * 1.3)) : 0;
+        const pulse = Math.sin(t * 0.8 * f.sp + f.ph), s = f.s * (1 + 0.12 * pulse) * (1 + 0.7 * fl * Math.abs(Math.sin(t * 13 + f.ph)));
+        g.globalAlpha = Math.min(1, 0.68 + 0.3 * pulse + fl); g.drawImage(st.dots[f.k], f.x - s / 2, f.y - s / 2, s, s);
       }
     },
   });

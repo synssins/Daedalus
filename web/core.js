@@ -276,11 +276,27 @@ function cut() {
     if (i.el.classList.contains('flat') || i.el.classList.contains('solid') || i.el.hidden || !r.width || i.el.style.visibility === 'hidden' || i.el.style.pointerEvents === 'none') continue;
     // measured relative to the grid, so the cut stays right while the grid is shifted by a swipe or by tilt
     const rr = Math.min(parseFloat(getComputedStyle(i.el).borderTopLeftRadius) || radius, r.width / 2, r.height / 2), x = r.left - off.left, y = r.top - off.top, w = r.width, h = r.height;
-    path += `M${x + rr},${y}h${w - 2 * rr}a${rr},${rr} 0 0 1 ${rr},${rr}v${h - 2 * rr}a${rr},${rr} 0 0 1 ${-rr},${rr}h${-(w - 2 * rr)}a${rr},${rr} 0 0 1 ${-rr},${-rr}v${-(h - 2 * rr)}a${rr},${rr} 0 0 1 ${rr},${-rr}z`;
+    // a corner is its round arc, or a straight cut where an overlay has sliced it off (see HP.chip)
+    const c = i.el.hpCuts || {}, arc = (ex, ey) => `A${rr},${rr} 0 0 1 ${ex},${ey}`;
+    path += `M${x + (c.tl ? c.tl[0] : rr)},${y}L${x + w - (c.tr ? c.tr[0] : rr)},${y}` + (c.tr ? `L${x + w},${y + c.tr[1]}` : arc(x + w, y + rr))
+      + `L${x + w},${y + h - (c.br ? c.br[1] : rr)}` + (c.br ? `L${x + w - c.br[0]},${y + h}` : arc(x + w - rr, y + h))
+      + `L${x + (c.bl ? c.bl[0] : rr)},${y + h}` + (c.bl ? `L${x},${y + h - c.bl[1]}` : arc(x, y + h - rr))
+      + `L${x},${y + (c.tl ? c.tl[1] : rr)}` + (c.tl ? `L${x + c.tl[0]},${y}` : arc(x + rr, y)) + 'z';
   }
   $('blurclip').style.clipPath = $('blurclip').style.webkitClipPath = path ? `path('${path}')` : 'inset(50%)';
 }
 HP.cut = cut;
+/** Slice corners off a real tile, for an overlay that damages the dashboard for show. cuts: {tl, tr, br, bl}, each
+ *  [across, down] in pixels measured from that corner; null or {} mends the tile. The tile keeps working: only the
+ *  cut-off triangles are gone, and its frosted patch is cut to match. */
+HP.chip = (el, cuts) => {
+  const c = cuts || {}, w = el.offsetWidth, h = el.offsetHeight, any = c.tl || c.tr || c.br || c.bl;
+  el.hpCuts = any ? c : null;
+  const pts = [c.tl ? `0 ${c.tl[1]}px, ${c.tl[0]}px 0` : '0 0', c.tr ? `${w - c.tr[0]}px 0, ${w}px ${c.tr[1]}px` : `${w}px 0`,
+    c.br ? `${w}px ${h - c.br[1]}px, ${w - c.br[0]}px ${h}px` : `${w}px ${h}px`, c.bl ? `${c.bl[0]}px ${h}px, 0 ${h - c.bl[1]}px` : `0 ${h}px`];
+  el.style.clipPath = el.style.webkitClipPath = any ? `polygon(${pts.join(', ')})` : '';
+  cut();
+};
 
 /** Hand the overlay engine today's overlays for the dashboard on screen. Called again when the day or the weather
  *  changes what should show. */
@@ -353,8 +369,8 @@ function swipePages() {
 }
 function slide(px, ms) {
   const t = ms ? `transform ${ms}ms cubic-bezier(.2,.7,.2,1)` : '';
-  $('grid').style.transition = $('blurclip').style.transition = $('blur').style.transition = t;
-  $('grid').style.transform = $('blurclip').style.transform = px ? `translate3d(${px}px,0,0)` : '';
+  $('grid').style.transition = $('blurclip').style.transition = $('blur').style.transition = $('fx').style.transition = t;
+  $('grid').style.transform = $('blurclip').style.transform = $('fx').style.transform = px ? `translate3d(${px}px,0,0)` : '';  // the overlays ride along with their tiles
   $('blur').style.transform = `translate3d(${-px}px,0,0) scale(1.1)`;  // the frosted backdrop stays put while its cut-outs travel
 }
 function swipeSetup() {
@@ -364,7 +380,7 @@ function swipeSetup() {
     const s = swipe.s; if (!s) return;
     const dx = e.clientX - s.x, dy = e.clientY - s.y;
     s.moved = Math.max(s.moved, Math.abs(dx), Math.abs(dy)); s.dx = dx;
-    if (!swipe.active && Math.abs(dx) > 26 && Math.abs(dx) > Math.abs(dy) * 1.8 && swipePages().length > 1) { swipe.active = true; document.body.classList.add('swiping'); }
+    if (!swipe.active && Math.abs(dx) > 26 && Math.abs(dx) > Math.abs(dy) * 1.8 && swipePages().length > 1) { swipe.active = true; document.body.classList.add('swiping'); HP.fx.swipe(dx < 0 ? -1 : 1); }
     if (swipe.active) slide(dx * 0.92);
   });
   const end = () => {

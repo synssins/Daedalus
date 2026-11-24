@@ -27,11 +27,18 @@
 //   touch(state, x, y, ctx)   // optional; a finger went down here (not claimed)
 //   drag(state, x, y, ctx)    // optional; a finger is moving here
 //   press(state, rect, ctx)   // optional; the button with this rectangle was pressed
+//   swipe(state, dir, ctx)    // optional; the screen starts to slide to another dashboard (dir -1 = to the left, 1 = right)
+//   restore(state, ctx)       // optional; the screen was double-tapped: put back at once every real tile this kind took, hid or cut
+//   covers: true,             // it can lie over a tile's face: its layer fades for a few seconds when a tile is tapped
 // });
 // ctx: {w, h, rects: [{x, y, w, h, r, on, flat, type, el, tile}], gaps: [{x1, y1, x2, y2}], env, opts, seed, progress, days,
 //       rand() (seeded), util, redraw(), page, pages}
 // rects[i].el is the tile's own element and rects[i].tile its settings: for the rare kind that moves a real tile.
 // ctx.page names the dashboard on screen and ctx.pages every dashboard this device has, for kinds that roam.
+// Kinds can meet each other. ctx.scene is shared by every kind on the dashboard. A kind with creatures tells the others
+// where they are, every frame: ctx.scene.next.push({kind: 'sheep', x, y, h, pet(by) {...}}) with x, y = where it stands
+// (feet), h its height, and optional functions others may call (pet: someone strokes it; by = {x, y}).
+// ctx.scene.actors is what everyone posted in the frame before: read that to find someone to visit.
 // ctx.env: {night, elevation (sun, degrees), weather ('rainy', 'snowy', 'clear-night', ...), temp (outdoor, in the
 //           house's own unit), cold (true at or below freezing), month (1-12), date: Date}
 (() => {
@@ -88,6 +95,7 @@
 
   // ---------- the engine ----------
   let host = null, slow = null, live = null, items = [], rects = [], gaps = [], env = {date: new Date(), month: new Date().getMonth() + 1}, preview = null;
+  const scene = {actors: [], next: []};
   let W = 0, H = 0, raf = 0, last = 0, t0 = performance.now(), slowTimer = 0, config = [], key = '', pages = [];
 
   // Weather as people say it, each covering several of Home Assistant's states.
@@ -110,12 +118,27 @@
     const make = () => { const c = document.createElement('canvas'); c.style.cssText = 'position:absolute;left:0;top:0;width:100%;height:100%'; host.append(c); return c; };
     slow = make(); live = make();
     // A tap goes to an overlay first if one claims it (a flower); otherwise to the button as usual.
-    document.addEventListener('click', e => { for (let i = items.length - 1; i >= 0; i--) { const it = items[i]; if (it.def.tap && it.def.tap(it.st, e.clientX, e.clientY, it.ctx) === true) { e.stopPropagation(); e.preventDefault(); redraw(); return; } } }, true);
+    // A double tap anywhere is "give me my screen back": every kind that took, hid or cut a real tile undoes it now.
+    let lastTap = 0, lastX = 0, lastY = 0;
+    document.addEventListener('click', e => {
+      const now = performance.now(), twice = now - lastTap < 420 && Math.hypot(e.clientX - lastX, e.clientY - lastY) < 70;
+      lastTap = twice ? 0 : now; lastX = e.clientX; lastY = e.clientY;
+      if (twice) items.forEach(it => { if (it.def.restore) { try { it.def.restore(it.st, it.ctx); } catch (err) { fail(it.kind, err); } } });
+    }, true);
+    document.addEventListener('click', e => { for (let i = items.length - 1; i >= 0; i--) { const it = items[i]; if (it.def.tap && it.def.tap(it.st, e.clientX, e.clientY, it.ctx) === true) { e.stopPropagation(); e.preventDefault(); redraw(); return; } }
+      if (U.over(rects, e.clientX, e.clientY)) giveWay(); }, true);
     let down = false;
     document.addEventListener('pointerdown', e => { down = true; items.forEach(it => { if (it.def.touch) it.def.touch(it.st, e.clientX, e.clientY, it.ctx); }); });
     document.addEventListener('pointermove', e => { if (down) items.forEach(it => { if (it.def.drag) it.def.drag(it.st, e.clientX, e.clientY, it.ctx); }); });
     document.addEventListener('pointerup', () => { down = false; }); document.addEventListener('pointercancel', () => { down = false; });
     document.addEventListener('visibilitychange', () => { if (!document.hidden) { redraw(); loop(); } });
+  }
+  /** A tile was tapped: whatever may lie over the tiles steps back for a few seconds, so the tile can be read and used. */
+  let wayTimer = 0;
+  function giveWay() {
+    const fade = (c, isLive) => { if (c && items.some(it => it.def.covers && !!it.def.live === isLive)) { c.style.transition = 'opacity .25s'; c.style.opacity = '0.12'; } };
+    fade(slow, false); fade(live, true);
+    clearTimeout(wayTimer); wayTimer = setTimeout(() => { [slow, live].forEach(c => { if (c) { c.style.transition = 'opacity 1.2s'; c.style.opacity = ''; } }); }, 4000);
   }
   function size(c, dpr) {
     const w = Math.round(W * dpr), h = Math.round(H * dpr);
@@ -131,14 +154,14 @@
     return opts.loop === 'stay' ? Math.min(1, p) : p - Math.floor(p);
   }
   function build() {
-    items = [];
+    items = []; scene.actors = []; scene.next = [];
     if (!W) return;
     config.forEach((c, n) => {
       const def = kinds[c.kind]; if (!def) return;
       const opts = {}; (def.options || []).forEach(o => { opts[o.key] = o.default; }); Object.assign(opts, c);
       if (HP.fx.demo) opts.now = 1;  // the Studio's Preview: kinds that wait (a goose's visit, the tank battle) start at once
       const seed = U.hash(key + '/' + c.kind + '/' + n + '/' + (opts.start || ''));
-      const ctx = {w: W, h: H, rects, gaps, env, opts, seed, util: U, rand: U.rng(seed), redraw, page: key, pages, progress: def.grows ? progressOf(def, opts) : 1, days: +opts.days || def.days || 7};
+      const ctx = {w: W, h: H, rects, gaps, env, opts, seed, scene, util: U, rand: U.rng(seed), redraw, page: key, pages, progress: def.grows ? progressOf(def, opts) : 1, days: +opts.days || def.days || 7};
       let st = null; try { st = def.create ? def.create(ctx) : {}; } catch (e) { fail(c.kind, e); return; }
       items.push({def, ctx, st, kind: c.kind});
     });
@@ -168,6 +191,7 @@
       if (ts - last < gapMs - 3) return;
       const dt = Math.min(0.25, (ts - last) / 1000) || 0; last = ts;
       const g = size(live, 1), t = (ts - t0) / 1000;
+      scene.actors = scene.next; scene.next = [];
       for (const it of items) if (it.def.live) {
         if (it.def.grows) it.ctx.progress = progressOf(it.def, it.ctx.opts);
         g.save(); try { it.def.draw(g, it.st, it.ctx, t, dt); } catch (e) { fail(it.kind, e); } g.restore();
@@ -203,6 +227,8 @@
     lights(flags) { let ch = false; rects.forEach((r, i) => { if (r.on !== !!flags[i]) { r.on = !!flags[i]; ch = true; } }); if (ch) redraw(); },
     env(e) { let ch = false; for (const k in e) if (env[k] !== e[k]) { env[k] = e[k]; if (k !== 'date') ch = true; } if (ch) redraw(); },
     press(i) { const r = rects[i]; if (r) items.forEach(it => { if (it.def.press) it.def.press(it.st, r, it.ctx); }); },
+    /** The screen starts to slide sideways to another dashboard. */
+    swipe(dir) { items.forEach(it => { if (it.def.swipe) { try { it.def.swipe(it.st, dir, it.ctx); } catch (e) { fail(it.kind, e); } } }); },
     /** The Studio's preview: show a growing overlay at this point of its cycle (0 to 1), or null for the real clock. */
     preview(p) { preview = p; items.forEach(it => { if (it.def.grows) it.ctx.progress = progressOf(it.def, it.ctx.opts); }); redraw(); },
     get count() { return items.length; },

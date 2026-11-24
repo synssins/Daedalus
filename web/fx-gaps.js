@@ -95,7 +95,9 @@
       const L = p[p.length - 1], P = p[p.length - 2], nd = N.nodes[L.n];
       let es = (w.core ? nd.core : nd.e).filter(i => other(N.edges[i], L.n) !== L.back);
       if (!es.length) { if (w.die) { w.end = true; break; } es = nd.e; }
-      const E = N.edges[es[Math.floor(Math.random() * es.length)]], n = other(E, L.n), Q = N.nodes[n], l1 = c[c.length - 1] - c[c.length - 2] || 1;
+      let way = es[Math.floor(Math.random() * es.length)];
+      if (w.want) { let bd = 1e9; for (const i of es) { const q = N.nodes[other(N.edges[i], L.n)], dd = Math.hypot(q.x - w.want.x, q.y - w.want.y); if (dd < bd) { bd = dd; way = i; } } }  // a walker with somewhere to be takes the way that leads nearer to it
+      const E = N.edges[way], n = other(E, L.n), Q = N.nodes[n], l1 = c[c.length - 1] - c[c.length - 2] || 1;
       L.sharp = ((L.x - P.x) * (Q.x - L.x) + (L.y - P.y) * (Q.y - L.y)) / (l1 * E.len) < 0.3;
       p.push({x: Q.x, y: Q.y, n, back: L.n}); c.push(c[c.length - 1] + E.len);
     }
@@ -152,6 +154,8 @@
   function rbox(g, x, y, w, h, r) { g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r); g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath(); }
   /** A number 0..1 from a whole number, the same every time: gives each ripple its own shape without remembering it. */
   function hash(n) { n = Math.imul(n ^ n >>> 15, 0x2c1b3c6d); n = Math.imul(n ^ n >>> 12, 0x297a2d39); return ((n ^ n >>> 15) >>> 0) / 4294967296; }
+  /** Is the point over the middle of a tile, further in than the rim an overlay may use? Taps there belong to the tile. */
+  const deep = (ctx, x, y) => ctx.rects.some(b => !b.hidden && !b.flat && Math.min(x - b.x, b.x + b.w - x, y - b.y, b.y + b.h - y) > 0.15 * Math.min(b.w, b.h));
   const AMOUNT = {key: 'amount', label: 'Amount', type: 'range', min: 0.2, max: 1, step: 0.05, default: 0.6};
 
   // ---------- Circuit ----------
@@ -192,7 +196,15 @@
       g.lineWidth = 1.3; g.beginPath();
       N.forEach(n => { if (n.e.length > 2) { g.moveTo(n.x + 3.3, n.y); g.arc(n.x, n.y, 3.3, 0, TAU); } });
       g.fill(); g.stroke();
-      return {net, rgb, still, glow: dot(32, [[0, 'rgba(255,255,255,1)'], [0.3, 'rgba(' + rgb + ',.75)'], [1, 'rgba(' + rgb + ',0)']]), pulses: [], flash: [], o: {x: 0, y: 0, a: 0}};
+      return {net, rgb, still, glow: dot(32, [[0, 'rgba(255,255,255,1)'], [0.3, 'rgba(' + rgb + ',.75)'], [1, 'rgba(' + rgb + ',0)']]), pulses: [], flash: [], sparks: [], o: {x: 0, y: 0, a: 0}};
+    },
+    // a finger near the board: the nearest junction sparks and sends a pulse down every trace that leaves it
+    touch(st, x, y) {
+      const net = st.net; let n = -1, bd = 130;
+      net.nodes.forEach((q, i) => { const d = Math.hypot(q.x - x, q.y - y); if (d < bd && q.e.length) { bd = d; n = i; } });
+      if (n < 0 || st.pulses.length > 14) return;
+      for (const e of net.nodes[n].e) st.pulses.push({w: start(net, e, net.edges[e].a === n, false, true), d: 0, sp: 260, life: 230, size: 18});
+      st.sparks.push({x: net.nodes[n].x, y: net.nodes[n].y, t: 0}); if (st.sparks.length > 4) st.sparks.shift();
     },
     press(st, rect) {
       // one pulse each way along the nearest trace on every side of the button
@@ -219,6 +231,10 @@
           at(w, p.d - k * 7, 3, o); const s = p.size - k * 1.7; g.globalAlpha = a * Math.pow(1 - k / 6, 1.5);
           g.drawImage(st.glow, o.x - s / 2, o.y - s / 2, s, s);
         }
+      }
+      for (let i = st.sparks.length - 1; i >= 0; i--) {  // the spark at a touched junction: a quick bright bloom
+        const f = st.sparks[i]; f.t += dt; if (f.t > 0.4) { st.sparks.splice(i, 1); continue; }
+        const s = 18 + 70 * f.t; g.globalAlpha = 1 - f.t / 0.4; g.drawImage(st.glow, f.x - s / 2, f.y - s / 2, s, s);
       }
       for (let i = st.flash.length - 1; i >= 0; i--) {  // the pressed button's outline lights up for a moment
         const f = st.flash[i]; f.t += dt; if (f.t > 0.45) { st.flash.splice(i, 1); continue; }
@@ -247,7 +263,13 @@
         fish.push({w, len, kind, patches, sp: 20 + r() * 14, ph: r() * TAU, nz: U.noise(ctx.seed + i * 13 + 5), burst: 0, x: 0, y: 0, a: 0});
       }
       const sp = []; for (let k = 0; k < 7; k++) sp.push({x: 0, y: 0, a: 0, nx: 0, ny: 0});
-      return {net, fish, rings: [], sp, q: new Array(26)};
+      return {net, fish, rings: [], sp, q: new Array(26), food: null, now: 0};
+    },
+    // A tap on open water is a pinch of food: rings where it lands, and a moment later the fish near by come for it
+    // and nose about the spot. Never over a tile, and the tap is not kept: nothing of the pond is under the finger.
+    tap(st, x, y, ctx) {
+      if (U.over(ctx.rects, x, y)) return;
+      st.food = {x, y, t: st.now}; st.rings.push({x, y, t: 0}, {x, y, t: -0.3});
     },
     touch(st, x, y) {
       // the near ones dart off; one that was heading for the finger whips round first
@@ -259,17 +281,25 @@
     },
     draw(g, st, ctx, t, dt) {
       const S = st.sp, q = st.q;
+      st.now = t; if (st.food && t - st.food.t > 10) st.food = null;
+      const food = st.food && t - st.food.t > 1 ? st.food : null;  // they need a moment to notice
       // rings on the water, under the fish
       g.lineWidth = 1.2;
       for (let i = st.rings.length - 1; i >= 0; i--) {
         const r = st.rings[i]; r.t += dt; if (r.t > 1.6) { st.rings.splice(i, 1); continue; }
+        if (r.t < 0) continue;  // a second ring, still to come
         g.strokeStyle = 'rgba(232,244,255,' + (0.3 * (1 - r.t / 1.6)).toFixed(3) + ')';
         g.beginPath(); g.arc(r.x, r.y, 5 + r.t * 20, 0, TAU); g.moveTo(r.x + 2 + r.t * 11, r.y); g.arc(r.x, r.y, 2 + r.t * 11, 0, TAU); g.stroke();
       }
       for (const f of st.fish) {
         const w = f.w, L = f.len, K = KOI[f.kind];
         f.burst *= Math.exp(-dt * 1.5);  // calming down
-        const v = f.sp * (0.8 + 0.3 * f.nz(t * 0.25)) + f.burst;
+        let v = f.sp * (0.8 + 0.3 * f.nz(t * 0.25)) + f.burst;
+        const fd = food ? Math.hypot(food.x - f.x, food.y - f.y) : 1e9;
+        if (fd < 420) {
+          if (!w.want && Math.cos(f.a) * (food.x - f.x) + Math.sin(f.a) * (food.y - f.y) < 0) turnBack(w, w.d, 14);  // heading away: round it comes
+          w.want = food; v = fd < 50 ? v * 0.25 : v + 60;  // hurries over, then dawdles at the food
+        } else if (w.want) w.want = null;
         w.d += v * dt; f.ph += dt * (2.2 + v * 0.11);
         grow(w, w.d, 30); w.d -= trim(w, w.d, L + 10);
         for (let k = 1; k < w.p.length - 1; k++) { const c = w.p[k]; if (c.sharp && !c.done && w.c[k] <= w.d) { c.done = true; if (st.rings.length < 8) st.rings.push({x: c.x, y: c.y, t: 0}); } }
@@ -321,11 +351,13 @@
     create(ctx) {
       const net = network(ctx), r = ctx.rand, n = U.clamp(Math.round(ctx.opts.count), 6, 40), lines = [], ants = [], nl = Math.max(2, Math.round(n / 5));  // several short lines, so lines cross paths and meet
       for (let i = 0; i < nl; i++) lines.push({w: start(net, net.coreList[Math.floor(r() * net.coreList.length)], r() < 0.5, true), ants: [], sp: 20 + r() * 9});
-      for (let i = 0; i < n; i++) { const a = {line: i % nl, d: 0, v: 0, pause: 0, cool: 0, hurry: 0, leg: r() * TAU, ph: r() * TAU, lane: 1.6 + r() * 1.2, x: -99, y: -99, a: 0}; lines[a.line].ants.push(a); ants.push(a); }
+      for (let i = 0; i < n; i++) { const a = {line: i % nl, d: 0, v: 0, pause: 0, cool: 0, hurry: 0, leg: r() * TAU, ph: r() * TAU, lane: 1.6 + r() * 1.2, x: -99, y: -99, a: 0, ox: 0, oy: 0}; lines[a.line].ants.push(a); ants.push(a); }
       for (const l of lines) { let d = 30 + l.ants.length * 26; grow(l.w, d, 60); for (const a of l.ants) { a.d = d; d -= 15 + r() * 16; } }
       return {net, lines, ants, o: {x: 0, y: 0, a: 0}};
     },
     touch(st, x, y) {
+      // the ants right by the finger break out of line, away from it, and run; the line closes up again as they calm down
+      for (const a of st.ants) { const dx = a.x - x, dy = a.y - y, d = Math.hypot(dx, dy) || 1; if (d < 75) { const k = 6 + 16 * (1 - d / 75); a.ox = dx / d * k; a.oy = dy / d * k; a.hurry = 1; a.pause = 0; } }
       // a finger on an ant sends it and its neighbours running (the tap itself still goes to whatever is underneath)
       if (!st.ants.some(a => Math.hypot(a.x - x, a.y - y) < 22)) return;
       for (const a of st.ants) if (Math.hypot(a.x - x, a.y - y) < 140) { a.hurry = 1; a.pause = 0; }
@@ -342,7 +374,8 @@
           if (room < 13) want = 0; else if (room < 22) want = Math.min(want, front.v);
           a.v += (want - a.v) * Math.min(1, dt * 6);  // eases to a stop and away again
           a.d += a.v * dt; a.leg += a.v * dt * 0.6;
-          at(l.w, a.d, 6, o); a.a = o.a; a.x = o.x - Math.sin(o.a) * a.lane; a.y = o.y + Math.cos(o.a) * a.lane;  // keeps to its own side, like traffic
+          if (a.ox || a.oy) { const k = Math.exp(-dt * 1.2); a.ox *= k; a.oy *= k; if (Math.abs(a.ox) + Math.abs(a.oy) < 0.4) a.ox = a.oy = 0; }
+          at(l.w, a.d, 6, o); a.a = o.a; a.x = o.x - Math.sin(o.a) * a.lane + a.ox; a.y = o.y + Math.cos(o.a) * a.lane + a.oy;  // keeps to its own side, like traffic
         }
         const cut = trim(l.w, l.ants[l.ants.length - 1].d, 20); if (cut) for (const a of l.ants) a.d -= cut;
       }
@@ -517,10 +550,12 @@
       if (own[sig + 1] >= 0) return false;
       own[sig + 1] = ti; T.j++; T.sig.push(sig, T.end); st.go[sig] = ti; T.end += X.len / X.k; T.held.push(sig + 1, T.end); return true;
     }
-    // of the routes that are free, mostly the one used longest ago, so trains get round all of the track
+    // of the routes that are free, mostly the one used longest ago, so trains get round all of the track.
+    // A place another train has been waiting longer for is left to that train, or one on a side line might never get out.
     let best = null, bs = 1e18;
     for (const R of X.routes) {
-      if (R.ids.some(id => own[id] >= 0)) continue;
+      const to = R.segs[R.segs.length - 1];
+      if (R.ids.some(id => own[id] >= 0) || st.trains.some(V => V !== T && !V.off && V.wait > T.wait && V.j === st.segs[V.seg].k - 1 && st.segs[V.seg].routes.some(Q => Q.segs[Q.segs.length - 1] === to))) continue;
       let s = Math.random() * 3; for (const i of R.segs) s += st.segs[i].used / R.segs.length;
       if (s < bs) { bs = s; best = R; }
     }
@@ -536,6 +571,62 @@
       T.held.push(Y.s0, Y.k ? T.end : c0 + Y.len); prev = Y;
     }
     return true;
+  }
+  // ----- a train that has been pulled off the track -----
+  // Another kind (the goose) can grab a train, haul it away and dump it. T.off says where the train is: 0 on the track,
+  // 1 being hauled, 2 lying where it was dropped, 3 on its way back. Off the track it has no part in the sections at all.
+  function sparks(st, x, y, n) { for (; n > 0 && st.puffs.length < 70; n--) st.puffs.push({x, y, t: 0, hot: true, life: 0.3 + Math.random() * 0.3, r: 0, vx: (Math.random() - 0.5) * 90, vy: (Math.random() - 0.8) * 90}); }
+  /** Grabbed: off the rails with a jolt, and everything it held is given back at once so the others carry on. */
+  function derail(st, T) {
+    if (T.off) return false;
+    for (let i = 0; i < T.held.length; i += 2) st.own[T.held[i]] = -1;
+    for (let i = 0; i < T.sig.length; i += 2) st.go[T.sig[i]] = -1;
+    T.held = []; T.sig = []; T.off = 1; T.v = 0; T.idle = 0; T.toot = 5;  // toot: a burst of steam
+    T.cars.forEach((c, i) => { c.a += (Math.random() - 0.5) * (i ? 1.6 : 0.7); c.x += (Math.random() - 0.5) * 7; c.y += (Math.random() - 0.5) * 7; c.flip = i && Math.random() < 0.5 ? 1 : 0; sparks(st, c.x, c.y, 3); });
+    return true;
+  }
+  /** Hauled by the nose to x, y: each car is pulled along by the one in front, like a chain, wagging as it goes. */
+  function haul(st, T, x, y) {
+    if (T.off !== 1) return;
+    T.idle = 0; let px = x, py = y, gap = 12;
+    T.cars.forEach((c, i) => {
+      const dx = px - c.x, dy = py - c.y, d = Math.hypot(dx, dy) || 1;
+      if (d > gap) { c.x = px - dx / d * gap; c.y = py - dy / d * gap; c.a = Math.atan2(dy, dx) + (i ? Math.sin(c.x * 0.09 + c.y * 0.07 + i) * 0.3 : 0); if (Math.random() < 0.04) sparks(st, c.x, c.y, 1); }
+      px = c.x; py = c.y; gap = i ? 20 : 23.5;
+    });
+  }
+  /** Let go: it stays in a heap where it is, the engine on its side, one car on its back. It gets up again after a while. */
+  function dump(st, T) {
+    if (T.off !== 1) return;
+    T.off = 2; T.lie = 0; T.wake = 40 + Math.random() * 30;
+    const e = T.cars[0], up = 1 + Math.floor(Math.random() * (T.cars.length - 1));
+    T.cars.forEach((c, i) => { if (i) { c.x += (e.x - c.x) * 0.3 + (Math.random() - 0.5) * 8; c.y += (e.y - c.y) * 0.3 + (Math.random() - 0.5) * 8; } c.a += (Math.random() - 0.5) * 1.2; c.flip = i === up ? 2 : !i || Math.random() < 0.6 ? 1 : 0; });
+  }
+  /** One frame of a train that is off the track. Getting back on goes by the railway's own rule: it waits for a
+   *  standing place nobody holds, takes it like any train would, and only then do the cars right themselves and hop
+   *  over, one after the other. Once the last one has clicked on, it is an ordinary standing train again. */
+  function rescue(st, T, ti, dt) {
+    if (T.off === 1) { if ((T.idle += dt) > 3) dump(st, T); return; }  // whoever had it has gone away
+    if (T.off === 2) { if ((T.lie += dt) > T.wake) { T.off = 3; T.hop = -1; } return; }
+    if (T.hop < 0) {
+      const e = T.cars[0]; let best = null, bd = 1e9;
+      for (const s of st.sig) if (st.own[s.id] < 0) { const d = Math.hypot(s.x - e.x, s.y - e.y); if (d < bd) { bd = d; best = s; } }
+      for (const c of T.cars) c.z = Math.abs(Math.sin(st.t * 7 + c.back)) * 2;  // fidgeting while it waits
+      if (!best) return;
+      const X = st.segs[best.seg], bl = X.len / X.k;
+      st.own[best.id] = ti; T.seg = best.seg; T.j = best.j; T.end = (best.j + 1) * bl; T.w = {p: X.p.slice(), c: X.c.slice()}; T.d = T.end - STOP - (bl - T.len - 60) / 2; T.held = [best.id, T.end]; T.hop = 0;
+      for (const c of T.cars) {
+        const a = at(T.w, T.d - c.back + c.len * 0.32, st.R, st.o1), b = at(T.w, T.d - c.back - c.len * 0.32, st.R, st.o2), ta = Math.atan2(a.y - b.y, a.x - b.x);
+        c.fx = c.x; c.fy = c.y; c.fa = c.a; c.tx = (a.x + b.x) / 2; c.ty = (a.y + b.y) / 2; c.da = ta - c.a - Math.round((ta - c.a) / TAU) * TAU; c.flip = 0;
+      }
+      return;
+    }
+    T.hop += dt; let done = true;
+    T.cars.forEach((c, i) => {
+      const u = U.clamp((T.hop - i * 0.3) / 1.4, 0, 1), s = u * u * (3 - 2 * u); if (u < 1) done = false;
+      c.x = c.fx + (c.tx - c.fx) * s; c.y = c.fy + (c.ty - c.fy) * s; c.a = c.fa + c.da * s; c.z = Math.abs(Math.sin(u * Math.PI * 3)) * 6;
+    });
+    if (done) { T.off = 0; T.v = T.wait = 0; T.toot = 2; }
   }
   HP.fx.add('train', {
     label: 'Train', live: true, fps: 12,
@@ -587,10 +678,14 @@
         for (let j = 0; j < nc; j++) cars.push({len: 17, back: 24 + 3 + 8.5 + j * 20, col: WAGON[(first + j) % 4]});
         for (const car of cars) { car.x = car.y = car.a = 0; }
         // each train has its own pace, so a quick one catches a slow one up and has to follow it from signal to signal
+        // off: 0 while it is on the track (see below); wait: seconds it has stood at a signal
         // w: the train's own route, grown ahead and cut off behind; d: where its nose is along it; end: where the section it may run to ends
         // held: what it holds, as pairs (number, where along the route that ends); sig: the signals it has been cleared past, the same way
         rw.own[X.s0 + pl[1]] = i;
-        st.trains.push({w: {p: X.p.slice(), c: X.c.slice()}, d: end - STOP - r() * (bl - len - 60), v: 0, top: 55 * ([1.18, 0.8, 1.02, 0.9][i % 4] + (r() - 0.5) * 0.08), seg: pl[0], j: pl[1], end, held: [X.s0 + pl[1], end], sig: [], len, cars, em: r() * 0.17, toot: 0, boil: BOILER[i % 4]});
+        const T = {off: 0, wait: 0, w: {p: X.p.slice(), c: X.c.slice()}, d: end - STOP - r() * (bl - len - 60), v: 0, top: 55 * ([1.18, 0.8, 1.02, 0.9][i % 4] + (r() - 0.5) * 0.08), seg: pl[0], j: pl[1], end, held: [X.s0 + pl[1], end], sig: [], len, cars, em: r() * 0.17, toot: 0, boil: BOILER[i % 4]};
+        // what the other kinds see of it (ctx.scene), and what they may do to it
+        T.post = {kind: 'train', x: 0, y: 0, h: 14, dir: 0, grab: () => derail(st, T), drag: (x, y) => haul(st, T, x, y), drop: () => dump(st, T)};
+        st.trains.push(T);
       }
       // Headlight. The cone is painted once, lamp at (4, 64) pointing right, fading with distance and towards its sides.
       // "lit" is a scratch canvas the same size: each frame the tile edges in front of an engine are drawn into it and cut
@@ -602,18 +697,26 @@
       // seven wedges, each narrower, so the sides fade out softly
       for (let h = 0.34; h > 0.09; h -= 0.04) { cg.beginPath(); cg.moveTo(4, 64); cg.arc(4, 64, 168, -h, h); cg.closePath(); cg.fill(); }
       st.cone = cone; st.lit = lit; st.tiles = net.solid;
-      return Object.assign(st, {segs, S: rw.S, at0: rw.at0, own: rw.own, go: rw.go, red: lamp('255,72,56'), green: lamp('80,235,120'),
+      return Object.assign(st, {segs, S: rw.S, at0: rw.at0, own: rw.own, go: rw.go, red: lamp('255,72,56'), green: lamp('80,235,120'), spark: lamp('255,214,110'),
         steam: dot(32, [[0, 'rgba(255,255,255,.9)'], [0.5, 'rgba(245,247,252,.45)'], [1, 'rgba(240,244,250,0)']])});
     },
-    press(st, rect) {  // the engine nearest the pressed tile whistles
+    press(st, rect) {  // the engine nearest the pressed tile whistles (of those on the track)
       let best = null, bd = 1e9;
-      for (const T of st.trains) { const e = T.cars[0], d = Math.hypot(e.x - rect.x - rect.w / 2, e.y - rect.y - rect.h / 2); if (d < bd) { bd = d; best = T; } }
+      for (const T of st.trains) {
+        if (T.off === 2 && T.cars.some(c => c.x > rect.x - 6 && c.x < rect.x + rect.w + 6 && c.y > rect.y - 6 && c.y < rect.y + rect.h + 6)) T.lie = T.wake;  // lying on the pressed tile: time to get up
+        if (T.off) continue;
+        const e = T.cars[0], d = Math.hypot(e.x - rect.x - rect.w / 2, e.y - rect.y - rect.h / 2); if (d < bd) { bd = d; best = T; }
+      }
       if (best) best.toot = 3;
     },
+    // A finger near an engine: it whistles. Only "toot" is set, which does nothing but make the next steam puffs big:
+    // the track, sections, signals and the trains' movement are not touched. (A train lying off the track keeps quiet.)
+    touch(st, x, y) { for (const T of st.trains) { const e = T.cars[0]; if (!T.off && Math.hypot(e.x - x, e.y - y) < 60) T.toot = 3; } },
     draw(g, st, ctx, t, dt) {
-      const own = st.own;
+      const own = st.own; st.t = t;
       g.drawImage(st.still, 0, 0, ctx.w, ctx.h);
       st.trains.forEach((T, ti) => {
+        if (T.off) { rescue(st, T, ti, dt); return; }
         const w = T.w, p = w.p;
         // slow for a bend ahead (and until the engine is round it); ease to the new speed
         let f = 1;
@@ -624,6 +727,7 @@
         T.v += U.clamp(T.top * ctx.opts.speed * (0.45 + 0.55 * U.span(f, 0, 1)) - T.v, -70 * dt, 22 * dt);
         T.v = Math.min(T.v, Math.sqrt(Math.max(0, 68 * room)));  // never faster than it can stop in the room it has
         T.d += Math.min(T.v * dt, Math.max(0, room));
+        T.wait = T.v < 0.5 && room < 1 ? T.wait + dt : 0;  // how long it has stood at its signal
         while (T.held.length > 2 && T.d - T.len - CLEAR > T.held[1]) { own[T.held[0]] = -1; T.held.splice(0, 2); }  // the tail is well clear of a section or junction: give it back
         while (T.sig.length && T.d > T.sig[1]) { st.go[T.sig[0]] = -1; T.sig.splice(0, 2); }
         const cut = trim(w, T.d, T.len + 40);
@@ -646,6 +750,11 @@
       const env = ctx.env, k = env.night ? 1 : typeof env.elevation === 'number' ? 0.18 + 0.82 * U.span(8 - env.elevation, 0, 12) : 0.18, lg = st.lit ? st.lit.getContext('2d') : null;
       for (const T of st.trains) {
         const e = T.cars[0], co = Math.cos(e.a), si = Math.sin(e.a), lx = e.x + co * 12, ly = e.y + si * 12;
+        if (T.off) {  // off the track the lamp only flickers, and dies soon after the train is dropped
+          const f = T.off === 1 ? 1 : T.off === 2 ? 1 - T.lie / 2.5 : 0;
+          if (f > 0 && Math.random() < 0.6) { g.save(); g.translate(lx, ly); g.rotate(e.a); g.globalCompositeOperation = 'lighter'; g.globalAlpha = 0.34 * k * f; g.drawImage(st.cone, -4, -64); g.restore(); }
+          continue;
+        }
         // the sides of nearby tiles that face the lamp, drawn as the lamp sees them (lamp at (4, 64), beam to the right)
         lg.setTransform(1, 0, 0, 1, 0, 0); lg.globalCompositeOperation = 'source-over'; lg.clearRect(0, 0, 176, 128);
         lg.translate(4, 64); lg.rotate(-e.a); lg.translate(-lx, -ly); lg.beginPath();
@@ -665,9 +774,14 @@
         g.globalAlpha = 0.34 * k; g.drawImage(st.cone, -4, -64); g.globalAlpha = k; g.drawImage(st.lit, -4, -64); g.restore();
       }
       for (const T of st.trains) {
-        g.strokeStyle = '#1c1d22'; g.lineWidth = 1.6; g.beginPath(); T.cars.forEach((c, i) => { if (i) g.lineTo(c.x, c.y); else g.moveTo(c.x, c.y); }); g.stroke();  // couplings
+        if (T.off < 2) { g.strokeStyle = '#1c1d22'; g.lineWidth = 1.6; g.beginPath(); T.cars.forEach((c, i) => { if (i) g.lineTo(c.x, c.y); else g.moveTo(c.x, c.y); }); g.stroke(); }  // couplings (they part when the train is dumped)
         for (let i = T.cars.length - 1; i >= 0; i--) {
-          const c = T.cars[i]; g.save(); g.translate(c.x, c.y); g.rotate(c.a);
+          const c = T.cars[i]; g.save(); g.translate(c.x, c.y - (c.z || 0)); g.rotate(c.a);
+          if (c.flip === 2) {  // on its back: the underframe and four wheels
+            g.fillStyle = '#2b2d35'; rbox(g, -8.5, -4, 17, 8, 1.5); g.fill(); g.fillStyle = '#9a9eaa'; g.fillRect(-6.6, -4.4, 3.4, 2); g.fillRect(3.2, -4.4, 3.4, 2); g.fillRect(-6.6, 2.4, 3.4, 2); g.fillRect(3.2, 2.4, 3.4, 2);
+            g.restore(); continue;
+          }
+          if (c.flip) g.scale(1, 0.62);  // on its side: seen edge on
           if (i) {
             g.fillStyle = c.col; g.strokeStyle = 'rgba(20,20,30,.75)'; g.lineWidth = 0.9; rbox(g, -8.5, -4.3, 17, 8.6, 1.6); g.fill(); g.stroke();
             g.fillStyle = 'rgba(0,0,0,.28)'; g.fillRect(-6.3, -2.5, 12.6, 5); g.fillStyle = 'rgba(255,255,255,.3)'; g.fillRect(-6.3, -2.5, 12.6, 1.1);
@@ -682,21 +796,27 @@
             g.strokeStyle = '#8b8f99'; g.lineWidth = 0.9; g.stroke();
             g.fillStyle = '#c8372d'; g.fillRect(11.2, -4.2, 1.4, 8.4);                             // buffer beam
           }
+          if (c.flip) { g.fillStyle = '#17181d'; g.beginPath(); g.arc(-5, 5.4, 2, 0, TAU); g.moveTo(7, 5.4); g.arc(5, 5.4, 2, 0, TAU); g.fill(); }  // and its wheels
           g.restore();
         }
         // the lamp itself, and at night a dim red one on the last car
         const hd = T.cars[0], tl = T.cars[T.cars.length - 1];
-        g.globalCompositeOperation = 'lighter'; g.globalAlpha = 0.45 + 0.55 * k; g.drawImage(st.steam, hd.x + Math.cos(hd.a) * 11.5 - 5, hd.y + Math.sin(hd.a) * 11.5 - 5, 10, 10);
-        if (k > 0.6) { g.globalAlpha = 0.8; g.drawImage(st.red, tl.x - Math.cos(tl.a) * 8.5 - 5, tl.y - Math.sin(tl.a) * 8.5 - 5, 10, 10); }
-        g.globalAlpha = 1; g.globalCompositeOperation = 'source-over';
+        if (!T.off) {
+          g.globalCompositeOperation = 'lighter'; g.globalAlpha = 0.45 + 0.55 * k; g.drawImage(st.steam, hd.x + Math.cos(hd.a) * 11.5 - 5, hd.y + Math.sin(hd.a) * 11.5 - 5, 10, 10);
+          if (k > 0.6) { g.globalAlpha = 0.8; g.drawImage(st.red, tl.x - Math.cos(tl.a) * 8.5 - 5, tl.y - Math.sin(tl.a) * 8.5 - 5, 10, 10); }
+          g.globalAlpha = 1; g.globalCompositeOperation = 'source-over';
+          if (ctx.scene) { const P = T.post; P.x = hd.x; P.y = hd.y; P.dir = hd.a; ctx.scene.next.push(P); }  // tell the other kinds where it is
+        }
         // steam: puffs are left where the chimney was and swell and thin out as the train moves on; a whistle is three big ones
-        const e = T.cars[0]; T.em += dt * (0.5 + T.v / 55);
+        const e = T.cars[0]; T.em += dt * (T.off > 1 ? 0.1 : 0.5 + T.v / 55);  // lying there: only a wisp
         if ((T.em > 0.17 || T.toot > 0) && st.puffs.length < 8 * st.trains.length) { T.em = 0; const big = T.toot-- > 0 ? 2.2 : 1; st.puffs.push({x: e.x + Math.cos(e.a) * 7.6, y: e.y + Math.sin(e.a) * 7.6, t: 0, r: (3 + Math.random() * 2) * big, vx: (Math.random() - 0.5) * 8, vy: -5 - Math.random() * 5}); }
         if (T.toot < 0) T.toot = 0;
       }
       for (let i = st.puffs.length - 1; i >= 0; i--) {
-        const p = st.puffs[i]; p.t += dt; if (p.t > 1.8) { st.puffs.splice(i, 1); continue; }
-        p.x += p.vx * dt; p.y += p.vy * dt; const s = (p.r + p.t * 8) * 2; g.globalAlpha = 0.6 * Math.pow(1 - p.t / 1.8, 1.3); g.drawImage(st.steam, p.x - s / 2, p.y - s / 2, s, s);
+        const p = st.puffs[i]; p.t += dt; if (p.t > (p.life || 1.8)) { st.puffs.splice(i, 1); continue; }
+        p.x += p.vx * dt; p.y += p.vy * dt;
+        if (p.hot) { g.globalAlpha = 1 - p.t / p.life; g.drawImage(st.spark, p.x - 3, p.y - 3, 6, 6); continue; }  // a spark
+        const s = (p.r + p.t * 8) * 2; g.globalAlpha = 0.6 * Math.pow(1 - p.t / 1.8, 1.3); g.drawImage(st.steam, p.x - s / 2, p.y - s / 2, s, s);
       }
     },
   });
@@ -720,9 +840,16 @@
         for (const E of net.edges) for (let s = 6 + r() * 10; s < E.len; s += 9 + r() * 14) { const A = N[E.a], h = E.wid / 2, j = (r() - 0.5) * 5; if (E.v) { g.moveTo(A.x - h, A.y + s); g.lineTo(A.x + h, A.y + s + j); } else { g.moveTo(A.x + s, A.y - h); g.lineTo(A.x + s + j, A.y + h); } }
         g.stroke();
       } else { fill('#155a9c', 1, 1); fill('#2583c4', 0.62, 0); fill('#49a6dc', 0.24, 0); }
-      return {net, lava, still, glow: lava ? dot(48, [[0, 'rgba(255,170,50,.55)'], [0.4, 'rgba(255,80,10,.22)'], [1, 'rgba(255,40,0,0)']]) : null};
+      return {net, lava, still, rips: [], now: 0, glow: lava ? dot(48, [[0, 'rgba(255,170,50,.55)'], [0.4, 'rgba(255,80,10,.22)'], [1, 'rgba(255,40,0,0)']]) : null};
+    },
+    // a finger in or beside a channel: a splash there (water: rings and a few drops; lava: a flare)
+    touch(st, x, y) {
+      const h = st.net.nearest(x, y); if (!h || h.d > 45) return;
+      const E = st.net.edges[h.e], A = st.net.nodes[E.a], B = st.net.nodes[E.b], k = h.s / E.len;
+      st.rips.push({x: A.x + (B.x - A.x) * k, y: A.y + (B.y - A.y) * k, t: st.now}); if (st.rips.length > 4) st.rips.shift();
     },
     draw(g, st, ctx, t) {
+      st.now = t;
       const lava = st.lava, amt = ctx.opts.amount, N = st.net.nodes, E = st.net.edges, sp = lava ? 10 : 34, gap = lava ? 170 - 80 * amt : 120 - 70 * amt, shift = sp * t;
       g.globalAlpha = lava ? 0.9 : 0.62; g.drawImage(st.still, 0, 0, ctx.w, ctx.h); g.globalAlpha = 1;
       g.lineCap = 'round'; g.lineJoin = 'round';
@@ -754,6 +881,15 @@
         let k = 0;
         for (const n of N) if (n.e.length > 2 && k++ < 40) { const s = 30 + 8 * Math.sin(t * 0.9 + n.x * 0.05 + n.y * 0.03); g.globalAlpha = 0.5 + 0.3 * Math.sin(t * 1.1 + n.x * 0.02); g.drawImage(st.glow, n.x - s / 2, n.y - s / 2, s, s); }
       }
+      for (let i = st.rips.length - 1; i >= 0; i--) {
+        const r = st.rips[i], e = (t - r.t) / 1.1; if (e >= 1) { st.rips.splice(i, 1); continue; }
+        if (lava) { const s = 34 + 70 * e; g.globalAlpha = 1 - e; g.drawImage(st.glow, r.x - s / 2, r.y - s / 2, s, s); g.drawImage(st.glow, r.x - s / 4, r.y - s / 4, s / 2, s / 2); continue; }
+        g.globalAlpha = 1; g.strokeStyle = 'rgba(236,248,255,' + (0.85 * (1 - e)).toFixed(3) + ')'; g.lineWidth = 1.4;
+        g.beginPath(); g.arc(r.x, r.y, 4 + 24 * e, 0, TAU); g.moveTo(r.x + 2 + 13 * e, r.y); g.arc(r.x, r.y, 2 + 13 * e, 0, TAU); g.stroke();
+        g.fillStyle = g.strokeStyle; g.beginPath();
+        for (let k = 0; k < 5; k++) { const a = -0.5 - k * 0.55, x = r.x + Math.cos(a) * 26 * e, y = r.y + Math.sin(a) * 30 * e + 34 * e * e; g.moveTo(x + 1.4, y); g.arc(x, y, 1.4, 0, TAU); }  // drops thrown up, falling back
+        g.fill();
+      }
     },
   });
 
@@ -769,6 +905,7 @@
     {p: [[-0.9, 0.35], [-0.5, 0.8], [0.5, 0.8], [0.9, 0.35], [0, 0.35], [0, -1], [0.65, 0.1]], l: [[0, 1], [1, 2], [2, 3], [3, 4], [4, 0], [4, 5], [5, 6], [6, 4]]},              // boat
     {p: [[-1, 0.3], [-0.6, -0.2], [-0.2, 0.2], [0.2, -0.3], [0.6, 0.1], [1, -0.5], [0.72, -0.82]], l: [[0, 1], [1, 2], [2, 3], [3, 4], [4, 5], [5, 6]]},                          // wave
     {p: [[-0.8, 0.5], [-0.95, -0.3], [-0.45, 0.1], [0, -0.65], [0.45, 0.1], [0.95, -0.3], [0.8, 0.5]], l: [[0, 1], [1, 2], [2, 3], [3, 4], [4, 5], [5, 6], [6, 0]]}];              // crown
+  const starry = ctx => !!(ctx.opts.always || ctx.env.night);
   HP.fx.add('stars', {
     label: 'Constellations', grows: true, days: 1, live: true, fps: 8,
     options: [{key: 'always', label: 'By day too', type: 'bool', default: false}, AMOUNT],
@@ -803,9 +940,21 @@
         for (const l of F.l) { const a = best.pts[l[0]], b = best.pts[l[1]], j = lines.length; a.on = Math.min(a.on, j); b.on = Math.min(b.on, j + 1); lines.push({a, b}); }  // "on": the moment (in lines) a star lights
         for (const p of best.pts) cstars.push(p);
       }
-      return {solid, field, twink, lines, cstars, still: sheet(ctx), done: -1, glow: dot(24, [[0, 'rgba(255,255,255,1)'], [0.3, 'rgba(200,225,255,.5)'], [1, 'rgba(160,200,255,0)']])};
+      return {solid, field, twink, lines, cstars, shots: [], flare: null, now: 0, still: sheet(ctx), done: -1, glow: dot(24, [[0, 'rgba(255,255,255,1)'], [0.3, 'rgba(200,225,255,.5)'], [1, 'rgba(160,200,255,0)']])};
+    },
+    // a finger on the sky knocks a star loose: a short shooting star from that spot
+    touch(st, x, y, ctx) {
+      if (!starry(ctx)) return;
+      const a = 0.35 + Math.random() * 0.6;
+      st.shots.push({x, y, a: Math.random() < 0.5 ? a : Math.PI - a, t: st.now}); if (st.shots.length > 3) st.shots.shift();
+    },
+    // a tap right on a star (one of a figure, or one that twinkles) makes it flare
+    tap(st, x, y, ctx) {
+      if (!starry(ctx) || deep(ctx, x, y)) return;
+      for (const list of [st.cstars, st.twink]) for (const c of list) if (Math.abs(c.x - x) < 13 && Math.abs(c.y - y) < 13) { st.flare = {x: c.x, y: c.y, t: st.now}; return true; }
     },
     draw(g, st, ctx, t) {
+      st.now = t;
       if (!ctx.opts.always && !ctx.env.night) return;
       // how many lines are finished, and how far along the next one is
       const q = U.clamp((ctx.progress - 0.03) / 0.94, 0, 1) * st.lines.length, done = Math.min(st.lines.length, Math.floor(q));
@@ -834,6 +983,20 @@
         const l = st.lines[done], k = U.span(q - done, 0, 1), x = U.lerp(l.a.x, l.b.x, k), y = U.lerp(l.a.y, l.b.y, k);
         g.globalAlpha = 0.6; g.strokeStyle = 'rgb(196,220,255)'; g.lineWidth = 1; g.beginPath(); g.moveTo(l.a.x, l.a.y); g.lineTo(x, y); g.stroke();
         g.globalAlpha = 0.9; g.drawImage(st.glow, l.a.x - 8, l.a.y - 8, 16, 16); g.drawImage(st.glow, x - 7, y - 7, 14, 14);
+      }
+      const fl = st.flare;
+      if (fl && t - fl.t < 0.9) {  // a tapped star: a bloom and four long rays, gone in under a second
+        const e = (t - fl.t) / 0.9, k = Math.sin(e * Math.PI), s = 16 + 50 * k, ray = 6 + 22 * k;
+        g.globalAlpha = Math.min(1, 1.6 * k); g.drawImage(st.glow, fl.x - s / 2, fl.y - s / 2, s, s);
+        g.strokeStyle = '#eaf2ff'; g.lineWidth = 1; g.beginPath(); g.moveTo(fl.x - ray, fl.y); g.lineTo(fl.x + ray, fl.y); g.moveTo(fl.x, fl.y - ray); g.lineTo(fl.x, fl.y + ray); g.stroke();
+      }
+      for (let i = st.shots.length - 1; i >= 0; i--) {  // shooting stars: a bright head and a tail that thins out behind it
+        const s = st.shots[i], e = (t - s.t) / 0.75; if (e >= 1) { st.shots.splice(i, 1); continue; }
+        const d = 30 + 300 * e, tail = Math.min(d, 90), cx = Math.cos(s.a), cy = Math.sin(s.a), hx = s.x + cx * d, hy = s.y + cy * d;
+        g.globalAlpha = 0.9 * (1 - e * e); g.strokeStyle = 'rgb(220,235,255)';
+        g.lineWidth = 1.8; g.beginPath(); g.moveTo(hx, hy); g.lineTo(hx - cx * tail * 0.4, hy - cy * tail * 0.4); g.stroke();
+        g.lineWidth = 0.8; g.beginPath(); g.moveTo(hx, hy); g.lineTo(hx - cx * tail, hy - cy * tail); g.stroke();
+        g.drawImage(st.glow, hx - 8, hy - 8, 16, 16);
       }
     },
   });
@@ -939,19 +1102,31 @@
         else { g.strokeStyle = 'rgba(205,220,240,.55)'; g.stroke(); g.strokeStyle = 'rgba(255,255,255,.45)'; g.beginPath(); g.arc(b.x, b.y, 2.7, Math.PI * 1.05, Math.PI * 1.5); g.stroke(); }  // dark glass with a glint
       }
       const glows = {}; for (const c of (warm ? [WARM] : BULBS)) glows[c] = dot(64, [[0, 'rgba(' + c + ',.75)'], [0.35, 'rgba(' + c + ',.26)'], [1, 'rgba(' + c + ',0)']]);
-      return {still, bulbs, glows};
+      return {still, bulbs, glows, now: 0};
+    },
+    // The bulbs near a finger flare up and fade; a finger run along the string lights them one after another.
+    // (They do not swing: the wire and glass are painted once, and at six frames a second a swing would only jerk.)
+    touch(st, x, y) { for (const b of st.bulbs) if (Math.hypot(b.x - x, b.y - y) < 60) b.fl = st.now; },
+    drag(st, x, y) { for (const b of st.bulbs) if (Math.hypot(b.x - x, b.y - y) < 38) b.fl = st.now; },
+    // a tap on a bulb pops it: a flash, then dark glass for four seconds, then it comes back on
+    tap(st, x, y, ctx) {
+      for (const b of st.bulbs) if (Math.hypot(b.x - x, b.y - y) < 13 && !(st.now - b.pop < 4) && !deep(ctx, b.x, b.y)) { b.pop = st.now; return true; }
     },
     draw(g, st, ctx, t) {
+      st.now = t;
       g.drawImage(st.still, 0, 0, ctx.w, ctx.h);
-      const lit = b => b.base === 2 || (b.rect && b.rect.on);
+      const lit = b => b.base === 2 || (b.rect && b.rect.on), out = b => t - b.pop < 4;
       g.globalCompositeOperation = 'lighter';
       for (const b of st.bulbs) {
-        const on = lit(b); if (!on && !b.base) continue;
-        const s = on ? 58 : 30; g.globalAlpha = on ? 1 : 0.5 + 0.25 * Math.sin(t * b.sp + b.ph);
+        if (out(b)) { if (t - b.pop < 0.3) { g.globalAlpha = 1 - (t - b.pop) / 0.3; g.drawImage(st.glows[b.col], b.x - 42, b.y - 42, 84, 84); } continue; }
+        const on = lit(b), fl = t - b.fl < 1.2 ? 1 - (t - b.fl) / 1.2 : 0; if (!on && !b.base && !fl) continue;
+        const s = on ? 58 : 30 + 28 * fl; g.globalAlpha = on ? 1 : Math.min(1, (b.base ? 0.5 + 0.25 * Math.sin(t * b.sp + b.ph) : 0) + fl);
         g.drawImage(st.glows[b.col], b.x - s / 2, b.y - s / 2, s, s);
       }
       g.globalAlpha = 1; g.globalCompositeOperation = 'source-over';
-      for (const b of st.bulbs) if (lit(b)) {  // the few at full brightness get bright glass on top
+      for (const b of st.bulbs) if (out(b)) {  // a popped one: dark glass over the painted bulb
+        g.fillStyle = '#1b222c'; g.beginPath(); g.ellipse(b.x, b.y, 4.2, 5.4, 0, 0, TAU); g.fill(); g.strokeStyle = 'rgba(205,220,240,.5)'; g.lineWidth = 0.8; g.stroke();
+      } else if (lit(b)) {  // the few at full brightness get bright glass on top
         g.fillStyle = 'rgb(' + b.col + ')'; g.beginPath(); g.ellipse(b.x, b.y, 4, 5.2, 0, 0, TAU); g.fill(); g.strokeStyle = 'rgba(90,45,0,.45)'; g.lineWidth = 0.8; g.stroke();  // a rim, or it is lost on a lit button
         g.fillStyle = 'rgba(255,255,240,.88)'; g.beginPath(); g.ellipse(b.x, b.y - 0.4, 2.2, 3.3, 0, 0, TAU); g.fill();
       }

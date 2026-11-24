@@ -19,6 +19,10 @@
 // }
 // "Where" is a state name, or [[name, weight], ...] to choose by chance, or {key: where, _: where} to choose by
 // the creature's key (its role for the walkers, night or day for the sheep). 0 means: ignore the event.
+//
+// Two events come from outside: "notice" (a finger went down somewhere on the glass) and "jolt" (the screen starts
+// to slide to another dashboard). A state takes part by naming where they lead; the rest carry on undisturbed.
+// Creatures also tell the other kinds where they are (ctx.scene), so that, say, a stick figure can come and pet the sheep.
 (() => {
   const U = HP.fx.util;
 
@@ -256,6 +260,7 @@
     }};
   const FONT_ART = {w: 3, h: 5, pal: {x: '#ffe9a8'}, frames: {}};
   DIGITS.forEach((d, i) => { FONT_ART.frames['d' + i] = [[glyph(d, 'x'), 0, 0]]; });
+  FONT_ART.frames.bang = [[glyph('22202', 'x'), 0, 0]];  // "!", after the digits so their places on the sheet stay
 
   const ROLES = [['walker', 40], ['floater', 14], ['climber', 14], ['builder', 13], ['tunneler', 11], ['blocker', 8]];
   const ACORN = {
@@ -264,13 +269,19 @@
     on: {tap: 'wave', old: 'fade'},
     states: {
       drop:  {frames: ['fall0', 'fall1'], ft: .12, move: 'air', soft: 1, fade: 5, on: {land: 'walk', tap: 0}},
-      walk:  {frames: ['walk0', 'walk1'], ft: .16, vx: 10, dur: [3, 8], next: {blocker: 'block', builder: 'build', _: 'walk'},
-        on: {edge: {floater: 'glide', builder: 'build', _: 'fall'}, wall: {climber: 'climb', tunneler: 'dig', _: 'turn'}, bump: 'turn', screen: 'leave', exit: 'hopin'}},
+      walk:  {frames: ['walk0', 'walk1'], ft: .16, vx: 10, dur: [3, 8], enter: 'stride', next: {blocker: 'block', builder: 'build', _: 'walk'},
+        on: {notice: 'gawk', jolt: 'slip', edge: {floater: 'glide', builder: 'build', _: 'fall'}, wall: {climber: 'climb', tunneler: 'dig', _: 'turn'}, bump: 'turn', screen: 'leave', exit: 'hopin'}},
       turn:  {frames: ['walk0'], enter: 'flip', dur: 0, next: 'walk'},
       fall:  {frames: ['fall0', 'fall1'], ft: .12, move: 'air', on: {land: 'walk', crash: 'poof'}},
       glide: {frames: ['glide0', 'glide1'], ft: .4, move: 'air', vmax: 42, vx: 2.5, soft: 1, on: {land: 'walk'}},
       climb: {frames: ['climb0', 'climb1'], ft: .2, move: 'climb', vy: 7, off: 4, on: {top: 'walk'}},
-      block: {frames: ['block0', 'block1'], ft: .5, solid: 1, enter: 'plain', dur: [9, 16], next: 'walk'},
+      block: {frames: ['block0', 'block1'], ft: .5, solid: 1, enter: 'plain', dur: [9, 16], next: 'walk', on: {jolt: 'slip'}},
+      // a finger on the glass: stop, turn to look at it, then turn back and carry on
+      gawk:  {frames: ['walk0'], enter: 'face', dur: 1.5, next: 'back', on: {notice: 'gawk', jolt: 'slip'}},
+      back:  {frames: ['walk0'], enter: 'unface', dur: 0, next: 'walk'},
+      // the screen is pulled away under it: it tumbles the other way, sits seeing stars, then gets up and goes on
+      slip:  {frames: ['fall0', 'fall1'], ft: .1, spin: 1.3, vx: 16, dur: .6, enter: 'jolt', next: 'daze', on: {edge: 'fall', wall: 'daze', bump: 'daze', screen: 'daze', tap: 0}},
+      daze:  {frames: ['fall0'], ft: .3, tick: 'stars', dur: 1.3, next: 'back', on: {tap: 0}},
       build: {frames: ['build0', 'build1'], ft: .22, enter: 'stair', tick: 'brick', on: {built: 'walk'}},
       // a tunneller may not damage a real tile: dust, then it slips behind the tile and comes out at the far side
       dig:   {frames: ['build0', 'build1'], ft: .12, tick: 'dust', dur: 1.3, next: 'sink'},
@@ -286,6 +297,12 @@
     },
     acts: {
       flip(c) { c.dir = -c.dir; },
+      // "was" is the way it was walking before something turned its head; forgotten once it walks on
+      stride(c) { c.was = 0; },
+      face(c, W) { if (!c.was) c.was = c.dir; if (Math.abs(W.look.x - c.x) > 4 * W.S) c.dir = W.look.x < c.x ? -1 : 1; },
+      unface(c) { if (c.was) c.dir = c.was; },
+      jolt(c, W) { if (!c.was) c.was = c.dir; c.dir = W.jolt; },
+      stars(c, W) { if (W.parts.length < 60) W.parts.push({x: c.x + (Math.random() - .5) * 10 * W.S, y: c.y - 11 * W.S, vx: (Math.random() - .5) * 30, vy: -18, g: 0, t: 0, life: .7, col: '#ffe45c', sz: W.S, star: 1}); },
       plain(c) { c.role = 'walker'; },
       reroll(c) { let r; do r = pick(ROLES.slice(1)); while (r === c.role); c.role = r; },
       puff(c, W) { burst(W, c.x, c.y - 3 * W.S, 9, ['#fffaf0', '#f3e2c4', '#d9c3a0'], 90, {}); },
@@ -368,9 +385,14 @@
     },
     tap(W, x, y) {
       const c = under(W, x, y); if (!c) return;
+      if (c.was) c.dir = c.was;  // it had only turned to look at the finger
       fire(c, 'tap', W);  // a wave, then a new job
       return true;
     },
+    // a finger anywhere: the ones out walking stop and look that way for a moment; the first two are startled ("!")
+    touch(W, x, y) { W.look = {x, y}; let n = 0; for (const c of W.list) if (fire(c, 'notice', W) && n++ < 2) c.bang = W.t + 1.2; },
+    // the screen slides off to another dashboard: they are thrown the other way, as off a tablecloth pulled from under them
+    swipe(W, dir) { W.jolt = -dir; for (const c of W.list) fire(c, 'jolt', W); },
     draw(g, W, ctx, t, dt) {
       const S = W.S, want = U.clamp(Math.round(+ctx.opts.count || 8), 3, 20);
       W.t += dt; W.wait -= dt;
@@ -402,7 +424,11 @@
         g.globalAlpha = 1;
       }
       if (gone) W.plats = W.plats.filter(q => !q.dead);
-      for (const c of W.list) paint(g, c, W);
+      for (const c of W.list) {
+        paint(g, c, W);
+        if (c.bang > W.t && c.st === 'gawk') blit(g, W.font, W.font.ix.bang, 0, c.x, Math.max(12, c.y - 10 * S - 2));  // kept on the screen for one on the top row
+        if (ctx.scene && !c.s.hide) ctx.scene.next.push({kind: 'walker', x: c.x, y: c.y, h: c.def.tall * S});  // so other kinds can meet them
+      }
       blit(g, W.props, W.props.ix.hatch, 0, W.hatch.x, W.hatch.y + 9 * S);  // over them: they come out from behind its lintel
       drawParts(g, W, dt);
     },
@@ -432,6 +458,8 @@
       sitL: [[WOOL, 1, 7], [FACE, 9, 4], TUCK],
       sitR: [[WOOL, 1, 7], [FACE, 11, 4], TUCK],
       dazed: [[WOOL, 1, 7], [DIZZY, 10, 4], TUCK],
+      pet0: [[WOOL, 1, 7], [SHUT, 11, 5], TUCK],   // sitting with its eyes shut, being stroked
+      pet1: [[WOOL, 1, 6], [SHUT, 11, 5], TUCK],   // ...and a little wriggle of the wool
       sleep0: [[WOOL, 1, 7], [SHUT, 11, 8]],
       sleep1: [[['...wwwwwww..'], 1, 6], [WOOL, 1, 7], [SHUT, 11, 8]],
       yawn: [[WOOL, 1, 5], [GAPE, 11, 2], [LEGS, 4, 12]],
@@ -443,13 +471,15 @@
     }};
   // the speech bubble, the z's of its sleep and the tufts it eats
   const BUBBLE = ['.wwwwwwwwwwwww.'].concat(new Array(5).fill('wwwwwwwwwwwwwww'), ['.wwwwwwwwwwwww.', '...ww..........', '...w...........']);
-  const EXTRA_ART = {w: 15, h: 9, pal: {w: '#fffdf6', k: '#3a2233', z: '#e6f0ff', g: '#8fd85a', G: '#4fa63c'},
+  const EXTRA_ART = {w: 15, h: 9, pal: {w: '#fffdf6', k: '#3a2233', z: '#e6f0ff', g: '#8fd85a', G: '#4fa63c', r: '#ff6b8a'},
     frames: {
       baa: [[BUBBLE, 0, 0], [glyph('44757', 'k'), 2, 1], [glyph('06357', 'k'), 6, 1], [glyph('06357', 'k'), 10, 1]],
       z: [[glyph('07247', 'z'), 6, 4]],
       Z: [[glyph('71247', 'z'), 6, 4]],
       tuft2: [[['.g..g', 'g.gg.', 'gGgGg'], 5, 6]],
       tuft1: [[['.g.g.', 'gGgGg'], 5, 7]],
+      bang: [[glyph('22202', 'w'), 6, 3]],
+      heart: [[['r.r', 'rrr', '.r.'], 6, 5]],
     }};
 
   let audio = null;
@@ -477,7 +507,7 @@
       meteor: {frames: [], move: 'fly', speed: 640, enter: 'aim', each: 'sparks', paint: 'meteor', on: {arrive: 'impact', grab: 0}},
       impact: {frames: ['dazed'], ft: .3, enter: 'crater', tick: 'stars', dur: [1.5, 2.3], next: 'shake'},
       shake:  {frames: ['sitL', 'sitF', 'sitR', 'sitF'], ft: .09, dur: 1.08, next: 'idle'},
-      idle:   {frames: ['stand', 'stand', 'stand', 'stand', 'stand', 'stand', 'blink'], ft: .3, dur: [1.2, 3.5],
+      idle:   {frames: ['stand', 'stand', 'stand', 'stand', 'stand', 'stand', 'blink'], ft: .3, dur: [1.2, 3.5], enter: 'nosy',
         next: {night: [['sleep', 6], ['sit', 2], ['yawn', 2], ['walk', 1.5]], _: [['walk', 6], ['run', 1.2], ['sit', 1.5], ['look', 1.6], ['yawn', .7], ['sneeze', .5], ['turn', 1], ['sleep', .6]]}},
       turn:   {frames: ['stand'], enter: 'flip', dur: 0, next: 'walk'},
       walk:   {frames: ['walk0', 'stand', 'walk1', 'stand'], ft: .16, vx: 8, dur: [2, 7], next: 'idle',
@@ -496,12 +526,33 @@
       sneeze: {frames: ['sneeze0', 'sneeze0', 'sneeze0', 'sneeze1', 'sneeze1', 'stand'], ft: .16, once: 1, tick: 'spray', next: 'idle'},
       bleat:  {frames: ['yawn'], move: 'air', jump: 300, enter: 'baa', on: {land: 'idle'}},
       held:   {frames: ['fall0', 'fall1'], ft: .1, move: 'held', on: {drop: 'fall', grab: 0}},
+      // a finger on the glass: it stops and looks that way for a moment
+      gawk:   {frames: ['stand'], enter: 'face', dur: 1.5, next: 'idle'},
+      // the screen is pulled away under it: it rolls the other way, sits dazed, shakes its head and gets on with things
+      slip:   {frames: ['run1'], spin: 1.4, vx: 20, dur: .7, enter: 'jolt', next: 'dizzy', on: {edge: 'fall', wall: 'dizzy', screen: 'dizzy', tap: 0, grab: 0}},
+      dizzy:  {frames: ['dazed'], ft: .3, tick: 'stars', dur: [1.3, 2], next: 'shake'},
+      // Somebody is stroking it (another kind calls pet() on what the sheep posts, every frame). It sits where it is
+      // with its eyes shut and wriggles; each stroke starts the three seconds again, and when they run out it goes
+      // back to its own life. Calm: a tap or a finger on the glass does not make it jump, and it does not leave.
+      pet:    {frames: ['pet0', 'pet0', 'pet1', 'pet0'], ft: .3, tick: 'love', dur: 3, next: 'idle', on: {tap: 0, notice: 0, jolt: 0}},
+      visit:  {frames: ['walk0', 'stand', 'walk1', 'stand'], ft: .16, vx: 8, dur: [2, 5], next: 'look', on: {edge: 'idle', wall: 'idle', screen: 'idle'}},
       leave:  {frames: ['walk0', 'stand', 'walk1', 'stand'], ft: .16, move: 'free', vx: 10, dur: 5, next: 'away'},
       // after a long nap it sometimes goes back where it came from: straight up, trailing sparks
       launch: {frames: ['fall0', 'fall1'], ft: .08, move: 'free', vy: -170, each: 'sparks', dur: 2.2, next: 'away', on: {tap: 0, grab: 0}},
     },
     acts: {
       flip(c) { c.dir = -c.dir; },
+      face(c, W) { if (Math.abs(W.look.x - c.x) > 6 * W.S) c.dir = W.look.x < c.x ? -1 : 1; },
+      jolt(c, W) { c.dir = W.jolt; },
+      love(c, W) {
+        if (Math.random() < .1) W.parts.push({x: c.x + (Math.random() - .5) * 8 * W.S, y: c.y - 9 * W.S, vx: 0, vy: -14, g: 0, t: 0, life: 1.3, img: W.ex.ix.heart});
+        else if (Math.random() < .03) c.say = W.t + 1.1;  // a soft "baa": the bubble only, no jump, no sound
+      },
+      // Now and then, on coming to rest: is somebody of another kind standing near, on this level? Then go and see.
+      nosy(c, W) {
+        const sc = W.ctx.scene; if (!sc || Math.random() > .3) return;
+        for (const a of sc.actors) if (a.kind !== 'sheep' && Math.abs(a.y - c.y) < 12 && Math.abs(a.x - c.x) < 150 && Math.abs(a.x - c.x) > 14 * W.S) { c.dir = a.x < c.x ? -1 : 1; go(c, 'visit', W); return; }
+      },
       // The meteor's target: a spot on a tile top. The first landing comes from the seed, later ones from chance.
       aim(c, W) {
         const tp = W.tp.length ? W.tp : W.plats, first = c.first; c.first = null;
@@ -540,6 +591,13 @@
     },
   };
 
+  // which of its moods a finger or a jolt breaks into: the ones with its feet on the ground. A sleeper is not woken
+  // by a look, but is thrown out of bed with the rest.
+  for (const k of ['idle', 'walk', 'run', 'graze', 'sit', 'yawn', 'look', 'sneeze', 'gawk', 'visit']) SHEEP.states[k].on = Object.assign({notice: 'gawk', jolt: 'slip'}, SHEEP.states[k].on);
+  SHEEP.states.sleep.on = {jolt: 'slip'};
+  /** May it be petted where it is: standing or sitting on something, not in the air, in a hand, rolling or away. */
+  const calm = c => c.plat && !c.s.hide && !c.s.paint && !c.s.move && !c.s.spin && c.st !== 'launch';
+
   HP.fx.add('sheep', {
     label: 'Sheep',
     live: true, fps: 12,
@@ -569,6 +627,10 @@
       fire(c, 'tap', W);  // "baa", and a jump
       return true;
     },
+    // a finger anywhere: it stops and looks that way ("!"); see "notice" above
+    touch(W, x, y) { W.look = {x, y}; for (const c of W.list) if (fire(c, 'notice', W)) c.bang = W.t + 1.2; },
+    // the screen slides off to another dashboard: it rolls the other way, as off a tablecloth pulled from under it
+    swipe(W, dir) { W.jolt = -dir; for (const c of W.list) fire(c, 'jolt', W); },
     // a finger sliding over it picks it up; it is let go when the finger stops moving or lifts
     drag(W, x, y) {
       let c = W.grip && W.grip.st === 'held' ? W.grip : null;
@@ -587,7 +649,12 @@
       }
       W.marks.length = n; g.globalAlpha = 1;
       for (const sp of W.spots) { if (sp.off) { if (W.t > sp.back) { sp.off = false; sp.n = 2; } else continue; } blit(g, W.ex, sp.n > 1 ? W.ex.ix.tuft2 : W.ex.ix.tuft1, 0, sp.x, sp.y); }
-      for (const c of W.list) { paint(g, c, W); if (c.say > W.t && !c.s.hide) blit(g, W.ex, W.ex.ix.baa, 0, U.clamp(c.x + 6 * S, 8 * S, W.w - 8 * S), c.y - 11 * S); }
+      for (const c of W.list) {
+        paint(g, c, W); if (c.say > W.t && !c.s.hide) blit(g, W.ex, W.ex.ix.baa, 0, U.clamp(c.x + 6 * S, 8 * S, W.w - 8 * S), c.y - 11 * S);
+        if (c.bang > W.t && c.st === 'gawk') blit(g, W.ex, W.ex.ix.bang, 0, c.x, Math.max(8 * S, c.y - 11 * S));  // kept on the screen for one on the top row
+        // tell the other kinds where it stands, and let them stroke it
+        if (ctx.scene && calm(c)) ctx.scene.next.push({kind: 'sheep', x: c.x, y: c.y, h: c.def.tall * S, pet() { if (c.st === 'pet') c.time = 0; else if (calm(c)) go(c, 'pet', W); }});
+      }
       drawParts(g, W, dt);
     },
   });
