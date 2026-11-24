@@ -39,7 +39,9 @@
   }
   function start() {
     if (starting) return starting;
-    starting = native('mic', {on: true}, 3600000).then(r => { if (r.error) throw new Error(r.error === 'denied' ? 'The microphone is not allowed on this device' : r.error); HP.mic.native = true; },
+    starting = native('mic', {on: true}, 3600000).then(r => { if (r.error) throw new Error(r.error === 'denied' ? 'The microphone is not allowed on this device' : r.error); HP.mic.native = true;
+      // If no sound shows up, ask the app where it stopped and pass that on.
+      setTimeout(() => { if (!chunks && subs.size) native('micstat').then(m => HP.report('mic: no sound yet. app says ' + JSON.stringify({on: m.on, running: m.running, permission: m.permission, taps: m.taps, frames: m.frames, sent: m.sent, note: m.note})), () => {}); }, 6000); },
       e => { if (/no native bridge/.test(e.message)) return startWeb(); throw e; }).catch(e => { starting = null; throw e; });
     return starting;
   }

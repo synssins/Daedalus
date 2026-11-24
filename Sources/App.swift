@@ -27,6 +27,9 @@ class PanelViewController: UIViewController, WKScriptMessageHandler, WKUIDelegat
     let motion = CMMotionManager()
     let audio = AVAudioEngine()
     var micOn = false
+    // Counters for "micstat": where sound stops, when it does not reach the page.
+    var micTaps = 0, micFrames = 0, micSent = 0
+    var micNote = ""
 
     /// Hardware identifier such as "iPad5,3".
     func machine() -> String {
@@ -122,6 +125,10 @@ class PanelViewController: UIViewController, WKScriptMessageHandler, WKUIDelegat
                 }
             }
             return
+        case "micstat":
+            out["on"] = micOn; out["taps"] = micTaps; out["frames"] = micFrames; out["sent"] = micSent; out["note"] = micNote
+            out["running"] = audio.isRunning
+            out["permission"] = AVAudioSession.sharedInstance().recordPermission == .granted
         case "brightness":
             if let v = m["value"] as? Double { UIScreen.main.brightness = CGFloat(max(0, min(1, v))) }
             out["brightness"] = Double(UIScreen.main.brightness)
@@ -148,11 +155,14 @@ class PanelViewController: UIViewController, WKScriptMessageHandler, WKUIDelegat
         try session.setActive(true)
         let input = audio.inputNode
         let inFormat = input.outputFormat(forBus: 0)
+        micNote = "input \(Int(inFormat.sampleRate)) Hz, \(inFormat.channelCount) ch"
+        micTaps = 0; micFrames = 0; micSent = 0
         guard let outFormat = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 16000, channels: 1, interleaved: true),
               let converter = AVAudioConverter(from: inFormat, to: outFormat) else {
             throw NSError(domain: "HomePanel", code: 1, userInfo: [NSLocalizedDescriptionKey: "no usable input format"])
         }
         input.installTap(onBus: 0, bufferSize: 4096, format: inFormat) { [weak self] buffer, _ in
+            self?.micTaps += 1
             let capacity = AVAudioFrameCount(Double(buffer.frameLength) * 16000.0 / inFormat.sampleRate) + 32
             guard let out = AVAudioPCMBuffer(pcmFormat: outFormat, frameCapacity: capacity) else { return }
             var fed = false
@@ -163,10 +173,15 @@ class PanelViewController: UIViewController, WKScriptMessageHandler, WKUIDelegat
                 status.pointee = .haveData
                 return buffer
             }
-            guard failure == nil, out.frameLength > 0, let samples = out.int16ChannelData else { return }
+            if let failure = failure { self?.micNote = "convert: \(failure.localizedDescription)"; return }
+            guard out.frameLength > 0, let samples = out.int16ChannelData else { return }
+            self?.micFrames += Int(out.frameLength)
             let b64 = Data(bytes: samples[0], count: Int(out.frameLength) * 2).base64EncodedString()
             DispatchQueue.main.async {
-                self?.web.evaluateJavaScript("window.nativeAudio && window.nativeAudio('\(b64)')", completionHandler: nil)
+                self?.micSent += 1
+                self?.web.evaluateJavaScript("window.nativeAudio && window.nativeAudio('\(b64)')") { _, err in
+                    if let err = err { self?.micNote = "page: \(err.localizedDescription)" }
+                }
             }
         }
         audio.prepare()
