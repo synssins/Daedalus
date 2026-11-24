@@ -61,6 +61,10 @@ with tempfile.TemporaryDirectory() as tmp:
     a = s.save_design(None, "A", {"grid": {"cols": 8, "rows": 8}, "pages": []}); b = s.save_design(None, "B", {"grid": {"cols": 8, "rows": 8}, "pages": []})
     s.update_tablet("ABC-123", {"panels": [b["id"], a["id"], b["id"]]})
     assert s.panels_of(s.tablets["ABC-123"]) == [b["id"], a["id"]] and s.tablets["ABC-123"]["design"] == b["id"]
+    s.update_tablet("ABC-123", {"default": a["id"]})  # the default is chosen apart from the order
+    assert s.tablets["ABC-123"]["design"] == a["id"] and s.panels_of(s.tablets["ABC-123"])[0] == b["id"]
+    s.update_tablet("ABC-123", {"panels": [a["id"], b["id"]], "default": b["id"]})
+    assert s.tablets["ABC-123"]["design"] == b["id"]
     s.delete_design(b["id"])
     assert s.panels_of(s.tablets["ABC-123"]) == [a["id"]] and s.tablets["ABC-123"]["design"] == a["id"]
     s.update_tablet("ABC-123", {"design": None})

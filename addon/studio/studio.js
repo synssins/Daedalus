@@ -25,6 +25,7 @@ const ICON = Object.assign({}, window.HP_ICONS, {
   'chevron-down': 'M7.41,8.58L12,13.17L16.59,8.58L18,10L12,16L6,10L7.41,8.58Z',
   check: 'M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z',
   close: 'M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z',
+  drag: 'M9,3H11V5H9V3M13,3H15V5H13V3M9,7H11V9H9V7M13,7H15V9H13V7M9,11H11V13H9V11M13,11H15V13H13V11M9,15H11V17H9V15M13,15H15V17H13V15M9,19H11V21H9V19M13,19H15V21H13V19Z',
 });
 const icon = n => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="${ICON[n] || ''}"/></svg>`;
 const $ = s => document.querySelector(s);
@@ -181,12 +182,21 @@ function viewDevices() {
   const ts = [...A.state.tablets].sort((a, b) => (a.status === 'approved') - (b.status === 'approved') || a.name.localeCompare(b.name));
   const rows = ts.map(t => {
     const pending = t.status === 'pending';
-    // The device's panels in order. The first is its default; the others are reached by swiping or by a link button.
+    // The device's panels in swipe order. One is the default, where the device starts. Drag a row to reorder
+    // (or Alt+Up / Alt+Down on a focused row).
     const mine = (t.panels || []).map(id => A.state.designs.find(d => d.id === id)).filter(Boolean), ids = mine.map(d => d.id);
     const rest = A.state.designs.filter(d => !ids.includes(d.id));
+    const move = (from, to) => { if (to < 0 || to >= ids.length || to === from) return; const next = [...ids]; next.splice(to, 0, next.splice(from, 1)[0]); setPanels(t, next); };
     const panel = h('div', {class: 'plist'},
-      ...mine.map((d, k) => h('div', {class: 'pl'},
-        h('span', {class: 'nm'}, d.name), k === 0 ? h('span', {class: 'tagd'}, 'Default') : btn('Set default', null, () => setPanels(t, [d.id, ...ids.filter(x => x !== d.id)]), 'mini text'),
+      ...mine.map((d, k) => h('div', {class: 'pl', draggable: true, tabIndex: 0, 'data-k': k,
+        ondragstart: ev => { ev.dataTransfer.setData('text/plain', t.id + ':' + k); ev.dataTransfer.effectAllowed = 'move'; },
+        ondragover: ev => { ev.preventDefault(); ev.currentTarget.classList.add('over'); },
+        ondragleave: ev => ev.currentTarget.classList.remove('over'),
+        ondrop: ev => { ev.preventDefault(); ev.currentTarget.classList.remove('over'); const [tid, from] = ev.dataTransfer.getData('text/plain').split(':'); if (tid === t.id) move(+from, k); },
+        onkeydown: ev => { if (ev.altKey && (ev.key === 'ArrowUp' || ev.key === 'ArrowDown')) { ev.preventDefault(); move(k, k + (ev.key === 'ArrowUp' ? -1 : 1)); } }},
+        h('input', {type: 'radio', name: 'def-' + t.id, checked: d.id === t.design, title: 'Default', 'aria-label': 'Default panel: ' + d.name, onchange: () => send('PATCH', 'tablets/' + t.id, {default: d.id}).then(setState, fail)}),
+        h('span', {class: 'nm'}, d.name),
+        h('span', {class: 'grip', title: 'Drag to reorder', html: icon('drag')}),
         h('button', {type: 'button', class: 'btn icon mini', title: 'Remove', 'aria-label': 'Remove ' + d.name, html: icon('close'), onclick: () => setPanels(t, ids.filter(x => x !== d.id))}))),
       pending || !rest.length ? null : h('select', {'aria-label': 'Add a panel to ' + t.name, onchange: e => { if (e.target.value) setPanels(t, [...ids, e.target.value]); }},
         h('option', {value: ''}, mine.length ? 'Add panel' : 'Choose panel'), ...rest.map(d => h('option', {value: d.id}, d.name))));
@@ -203,7 +213,7 @@ function viewDevices() {
   $('#main').replaceChildren(
     h('div', {class: 'head'}, h('h1', null, 'Devices')),
     h('div', {class: 'body'}, ts.length
-      ? h('div', {class: 'card'}, h('table', null, h('thead', null, h('tr', null, ...['Name', 'Model', 'Status', 'Panels', 'Preview', ''].map(x => h('th', null, x)))), h('tbody', null, ...rows)))
+      ? h('div', {class: 'card fit'}, h('table', null, h('thead', null, h('tr', null, ...['Name', 'Model', 'Status', 'Panels', 'Preview', ''].map(x => h('th', null, x)))), h('tbody', null, ...rows)))
       : h('div', {class: 'empty', html: '<b>No devices</b>Open the HomePanel app on a tablet on this network.'})));
 }
 

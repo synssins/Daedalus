@@ -379,15 +379,16 @@ async function loadAll() {
 /** Put a design on screen. Called at start, when the server says it changed, and by the Studio while editing.
  *  rec is the theme the panel follows, if any (see resolveTheme). */
 HP.setDesign = (d, page, rec) => HP.setPanels([{id: '', design: d, theme: rec}], page);
-/** A device holds one or more panels, each {id, design, theme}. The first is its default: where it starts.
+/** A device holds one or more panels, each {id, design, theme}. startId names its default: where it starts.
  *  When the list changes while running, the screen stays on the dashboard it was showing if that still exists. */
-HP.setPanels = (list, page) => {
+HP.setPanels = (list, page, startId) => {
   const was = HP.panels && HP.stack[0] ? {id: (HP.panels[HP.stack[0].panel || 0] || {}).id, page: HP.stack[0].page} : null;
   HP.panels = list; HP.cur = -1;
-  let k = 0, pg = page;
+  let k = Math.max(0, list.findIndex(p => p.id === startId)), pg = page;
+  const home = k;
   if (!pg && was) { const i = list.findIndex(p => p.id === was.id); if (i >= 0 && list[i].design.pages.some(x => x.id === was.page)) { k = i; pg = was.page; } }
   const d = list[k].design;
-  HP.stack = [{panel: k, page: pg || (k === 0 && HP.startPage) || d.start || d.pages[0].id}];
+  HP.stack = [{panel: k, page: pg || (k === home && HP.startPage) || d.start || d.pages[0].id}];
   splash();
   show();  // without Home Assistant yet, tiles draw in their offline state rather than leaving the screen blank
   wakeSetup();
@@ -418,8 +419,8 @@ async function serverMode(server, cfg) {
     const panels = j.panels || (j.design ? [{id: j.id || '', design: j.design, theme: j.theme}] : []);
     if (!panels.length && cfg.preview) return;  // the Studio is about to send one itself
     if (!panels.length) return splash('No panel yet', 'Choose one for "' + ((j.tablet && j.tablet.name) || 'this device') + '" in HomePanel Studio.');
-    keep.set('panels', panels);
-    HP.setPanels(panels);
+    keep.set('panels', panels); keep.set('start', j.id || null);
+    HP.setPanels(panels, null, j.id);
     HP.report('engine ' + (window.HP_ENGINE ? HP_ENGINE.version : 'none') + ', drew ' + HP.live.length + ' buttons, ' + innerWidth + 'x' + innerHeight + (HP.orb ? '' : ', orb missing') + (HP.assist ? '' : ', assistant missing'));
   };
 
@@ -439,7 +440,7 @@ async function serverMode(server, cfg) {
   keep.set('key', HP.key);
   if (window.HP_ENGINE) HP_ENGINE.check(server);
 
-  if (keep.get('panels') && !cfg.preview) HP.setPanels(keep.get('panels'));  // last known panels at once, fresh ones right after
+  if (keep.get('panels') && !cfg.preview) HP.setPanels(keep.get('panels'), null, keep.get('start'));  // last known panels at once, fresh ones right after
   connectHA(server, HP.key);
   pull().catch(e => { if (!HP.design) splash('Cannot reach HomePanel Studio', e.message); });
 

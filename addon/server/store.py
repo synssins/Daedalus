@@ -85,7 +85,12 @@ class Store:
             t["panels"] = [p for p in dict.fromkeys(changes["panels"] or []) if isinstance(p, str)]
         elif "design" in changes:
             t["panels"] = [changes["design"]] if changes["design"] else []
-        t["design"] = self.panels_of(t)[0] if self.panels_of(t) else None
+        if "default" in changes:
+            t["default"] = changes["default"]
+        # "design" is the device's default panel: the chosen one while it is still on the device, else the first.
+        mine = self.panels_of(t)
+        t["design"] = t.get("default") if t.get("default") in mine else (mine[0] if mine else None)
+        t["default"] = t["design"]
         self._save_tablets()
         return t
 
@@ -145,7 +150,8 @@ class Store:
         for t in self.tablets.values():
             if did in self.panels_of(t):
                 t["panels"] = [p for p in self.panels_of(t) if p != did]
-                t["design"] = t["panels"][0] if t["panels"] else None
+                if t.get("design") == did:
+                    t["design"] = t["default"] = t["panels"][0] if t["panels"] else None
         self._save_tablets()
 
     # ---- assets ----

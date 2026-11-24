@@ -113,12 +113,18 @@ td .sub { color: var(--ink2); font-size: 12.5px; }
 td input[type=text] { width: 100%; max-width: 260px; margin-left: -9px; background: transparent; border-bottom-color: transparent; }
 td input[type=text]:hover, td input[type=text]:focus { background: var(--field); border-bottom-color: var(--field-line); }
 
-.plist { display: flex; flex-direction: column; gap: 4px; min-width: 240px; }
-.pl { display: flex; align-items: center; gap: 8px; min-height: 30px; }
+/* The devices table keeps the width its content needs instead of stretching across the window. */
+.card.fit { width: max-content; max-width: 100%; overflow-x: auto; }
+.card.fit table { width: auto; }
+.card.fit td input[type=text] { width: 170px; }
+.plist { display: flex; flex-direction: column; gap: 2px; width: 230px; }
+.pl { display: flex; align-items: center; gap: 8px; min-height: 32px; padding: 0 2px 0 4px; border-radius: 4px; border-top: 2px solid transparent; }
+.pl:hover { background: var(--hover); }
+.pl.over { border-top-color: var(--pri); }
 .pl .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tagd { font-size: 12px; color: var(--pri); font-weight: 500; }
-.btn.text { background: none; height: 28px; width: auto; padding: 0 8px; font-size: 12.5px; }
-.plist select { margin-top: 2px; }
+.pl .grip { display: flex; color: var(--ink2); cursor: grab; }
+.pl input[type=radio] { width: 18px; height: 18px; flex: none; margin: 0; }
+.plist select { margin-top: 4px; }
 
 /* ---- panel pictures ---- */
 .thumb { position: relative; overflow: hidden; border-radius: 8px; background: #000; flex: none; }

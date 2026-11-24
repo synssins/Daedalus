@@ -175,9 +175,9 @@ async def tablet_design(request: web.Request):
     recs = [r for r in (s.get_design(i) for i in s.panels_of(t)) if r]
     # A panel that follows a theme gets the theme as it is now, so editing a theme changes every panel using it.
     panels = [{"id": r["id"], "name": r["name"], "design": r["design"], "theme": s.get_theme(r["design"].get("themeId"))} for r in recs]
-    first = panels[0] if panels else {}
-    # "panels" is everything on the device, default first. "design" and "theme" repeat the default for engines
-    # that predate several panels per device.
+    first = next((p for p in panels if p["id"] == t.get("design")), panels[0] if panels else {})
+    # "panels" is everything on the device in swipe order; "id" names the default, where the device starts.
+    # "design" and "theme" repeat the default for engines that predate several panels per device.
     return web.json_response({"panels": panels, "design": first.get("design"), "theme": first.get("theme"), "id": first.get("id"),
                               "tablet": {"name": t["name"], "start_page": t.get("start_page")}})
 
