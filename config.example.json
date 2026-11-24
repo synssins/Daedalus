@@ -1,0 +1,20 @@
+{
+  "ha_url": "http://homeassistant.local:8123",
+  "ha_token": "LONG_LIVED_ACCESS_TOKEN",
+  "start": {"view": "home"},
+  "dashboard": {
+    "rooms": [{"area": "living_room", "group": null}, {"area": "office", "group": "light.office_lights"}],
+    "quick_lights": [{"entity": "light.porch", "name": "Porch"}],
+    "quick_scenes": [{"entity": "scene.movie", "name": "Movie"}],
+    "all_off": "script.all_lights_off",
+    "garage": "cover.garage_door",
+    "lock": "lock.front_door",
+    "alarm": "alarm_control_panel.house",
+    "weather": "weather.forecast",
+    "ups": "sensor.ups_status",
+    "ups_on_battery": ["OB", "OB DISCHRG"],
+    "people": ["person.someone"],
+    "alerts": [{"entity": "binary_sensor.front_door", "bad": "on", "text": "Front door open"}],
+    "offline_watch": {"lock.front_door": "front lock"}
+  }
+}

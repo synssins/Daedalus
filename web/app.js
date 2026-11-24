@@ -126,45 +126,9 @@ function playCamera(ha, entity, video, status) {
   return () => { closed = true; if (pc) pc.close(); video.srcObject = null; video.removeAttribute('src'); video.load(); };
 }
 
-// ---------- camera wall ----------
-const MAX_LIVE = 4;  // Air 2 has 2 GB RAM: cap simultaneous decoders
-const wall = document.getElementById('wall');
-const bar = document.getElementById('bar');
-let ha, stops = [];
-
-function render(states, only) {
-  stops.forEach(f => f()); stops = [];
-  wall.innerHTML = '';
-  let cams = states.filter(s => s.entity_id.startsWith('camera.'));
-  if (only) cams = cams.filter(s => s.entity_id === only);
-  // Live cameras first, so the decoder budget goes to ones that work.
-  cams.sort((a, b) => (a.state === 'unavailable') - (b.state === 'unavailable') || a.entity_id.localeCompare(b.entity_id));
-  wall.className = only ? 'one' : '';
-  if (!cams.length) { wall.innerHTML = '<div class="empty">No cameras in Home Assistant</div>'; return; }
-  let live = 0;
-  for (const s of cams) {
-    const tile = document.createElement('div'); tile.className = 'tile';
-    const video = document.createElement('video');
-    video.muted = true; video.autoplay = true; video.playsInline = true; video.setAttribute('playsinline', '');
-    const label = document.createElement('div'); label.className = 'label';
-    const name = (s.attributes.friendly_name || s.entity_id).replace(/ High resolution channel$/i, '');
-    const status = t => { label.textContent = t ? name + ' · ' + t : name; tile.classList.toggle('live', !t); };
-    const img = document.createElement('img');
-    tile.append(img, video, label);
-    wall.append(tile);
-    if (s.state === 'unavailable') { tile.classList.add('dead'); status('unavailable'); }
-    else {
-      stops.push(snapshots(s, img, tile));
-      if (!(s.attributes.supported_features & 2)) status('stills, RTSPS off');
-      else if (live < MAX_LIVE || only) { live++; status('connecting'); stops.push(playCamera(ha, s.entity_id, video, status)); }
-      else status('tap for video');
-    }
-    tile.onclick = () => load(only ? null : s.entity_id);
-  }
-}
-
+// ---------- still pictures ----------
 /** Refresh a still image about once a second while the tile has no live video. Instant picture at start-up. */
-function snapshots(s, img, tile) {
+function snapshots(ha, s, img, tile) {
   const base = ha.url.replace(/^ws/, 'http').replace(/\/api\/websocket$/, '');
   let pic = s.attributes.entity_picture, busy = false, stopped = false;
   const next = () => {
@@ -183,16 +147,3 @@ function snapshots(s, img, tile) {
   const timer = setInterval(next, 1000);
   return () => { stopped = true; clearInterval(timer); };
 }
-
-function load(only) {
-  ha.call({type: 'get_states'}).then(st => render(st, only)).catch(e => { bar.textContent = e.message; });
-}
-
-native('ping').then(m => {
-  const cfg = m.config || {};
-  if (!cfg.ha_url || !cfg.ha_token) { bar.textContent = 'config.json needs ha_url and ha_token'; return; }
-  ha = new HA(cfg.ha_url, cfg.ha_token);
-  ha.onstate = s => { bar.textContent = s === 'online' ? '' : 'Home Assistant: ' + s; console.log('HA ' + s); };
-  ha.onready = () => load(null);
-  ha.connect();
-}).catch(e => { bar.textContent = 'native bridge failed: ' + e.message; });
