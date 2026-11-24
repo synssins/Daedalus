@@ -8,8 +8,9 @@ $ssh = @('-i', $key, '-o', 'BatchMode=yes', '-o', 'IdentitiesOnly=yes', "mobile@
 $dist = Join-Path $PSScriptRoot 'dist'
 
 Remove-Item $dist -Recurse -Force -ErrorAction SilentlyContinue
-$dl = @('run', 'download'); if ($RunId) { $dl += $RunId }
-gh @dl -n HomePanel -D $dist
+# Without a run id, gh picks an arbitrary run's artifact, so always name the newest successful one.
+if (-not $RunId) { $RunId = gh run list --limit 1 --status success --json databaseId --jq '.[0].databaseId' }
+gh run download $RunId -n HomePanel -D $dist
 if ($LASTEXITCODE) { throw 'artifact download failed' }
 
 scp -i $key -o IdentitiesOnly=yes -q "$dist\HomePanel.app.tar" "mobile@${Ip}:/var/mobile/HomePanel.app.tar"
