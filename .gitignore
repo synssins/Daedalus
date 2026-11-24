@@ -5,3 +5,7 @@ config.json
 CLAUDE.md
 AGENTS.md
 .claude/
+
+.impeccable/mocks/
+.impeccable/questions/
+.impeccable/review/
