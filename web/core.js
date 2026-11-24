@@ -252,7 +252,7 @@ function layout() {
 
 function update() {
   daylight();
-  for (const i of HP.live) if (i.def.update) { try { i.def.update(i.t, i.body, ctx, i); } catch (e) { console.error('tile ' + i.t.type + ': ' + e.message); } }
+  for (const i of HP.live) if (i.def.update) { try { i.def.update(i.t, i.body, ctx, i); } catch (e) { console.error('tile ' + i.t.type + ': ' + e.message); if (!i.bad) { i.bad = 1; HP.report('button ' + i.t.type + ': ' + e.message); } } }
 }
 /** State changes arrive in bursts; tiles patch their own text and classes, so this is cheap and never eats a tap. */
 function dirty() { if (!dirty.t) dirty.t = setTimeout(() => { dirty.t = null; update(); }, 250); }
@@ -363,6 +363,11 @@ function connectHA(url, token) {
   HP.ha.connect();
 }
 
+/** Tell the Studio's log what went wrong here (or that all is well): nobody can open a console on a wall tablet. */
+HP.report = text => { if (HP.server && HP.key && !HP.preview) fetch(HP.server + '/api/log', {method: 'POST', headers: {'Content-Type': 'application/json', Authorization: 'Bearer ' + HP.key}, body: JSON.stringify({text})}).catch(() => {}); };
+window.addEventListener('error', e => HP.report('script error: ' + e.message + ' @' + String(e.filename || '').split('/').pop() + ':' + e.lineno));
+window.addEventListener('unhandledrejection', e => HP.report('failed: ' + (e.reason && e.reason.message || e.reason)));
+
 /** Normal mode: everything comes from HomePanel Studio (the HA add-on). */
 async function serverMode(server, cfg) {
   HP.server = server; keep.set('server', server);
@@ -376,6 +381,7 @@ async function serverMode(server, cfg) {
     if (!j.design) return splash('No panel yet', 'Choose one for "' + ((j.tablet && j.tablet.name) || 'this device') + '" in HomePanel Studio.');
     keep.set('design', j.design); keep.set('theme', j.theme || null);
     HP.setDesign(j.design, null, j.theme);
+    HP.report('drew ' + HP.live.length + ' buttons, ' + innerWidth + 'x' + innerHeight + (HP.orb ? '' : ', orb missing') + (HP.assist ? '' : ', assistant missing'));
   };
 
   HP.key = cfg.key || null;

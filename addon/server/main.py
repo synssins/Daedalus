@@ -90,6 +90,17 @@ async def hello(request: web.Request):
     return web.json_response({"status": t["status"], "name": t["name"], "key": t["key"] if t["status"] == "approved" else None})
 
 
+async def tablet_log(request: web.Request):
+    """A device reports a script error or a milestone. It goes to the add-on log with the device's name, so a
+    panel that misbehaves on the wall can be diagnosed without plugging it in."""
+    t = tablet_for(request)
+    if not t:
+        raise web.HTTPUnauthorized()
+    body = await request.json()
+    log.info("device %s: %s", t["name"], str(body.get("text", ""))[:500])
+    return web.json_response({})
+
+
 async def tablet_design(request: web.Request):
     t = tablet_for(request)
     if not t:
@@ -488,6 +499,7 @@ def build_app() -> web.Application:
     r = app.router
     r.add_post("/api/hello", hello)
     r.add_get("/api/design", tablet_design)
+    r.add_post("/api/log", tablet_log)
     r.add_get("/api/events", tablet_events)
     r.add_get("/api/websocket", ha_socket)
     r.add_post("/api/llm", tablet_llm)
