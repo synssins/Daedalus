@@ -7,13 +7,14 @@
   var STYLES = ['ribbons', 'ring', 'veil'];
   var DEFAULT_COLORS = ['#22d3ee', '#8b5cf6', '#ec4899'];
   var FRAME_MS = 1000 / 30;
+  var REST_MS = 100; // at rest (idle, no sound) the orb sits on screen all day: a slow, cheap drift is enough
   var EASE_MS = 400;
   var TAU = Math.PI * 2;
   var WHITE = [255, 255, 255];
 
   // e: base energy, g: level gain, sp: speed, th: "working" motion, cool: cooler/brighter tint
   var STATES = {
-    idle:      { e: 0.16, g: 0,    sp: 0.35, th: 0, cool: 0 },
+    idle:      { e: 0.07, g: 0,    sp: 0.30, th: 0, cool: 0 },
     listening: { e: 0.18, g: 0.6,  sp: 0.55, th: 0, cool: 1 },
     thinking:  { e: 0.30, g: 0,    sp: 1.0,  th: 1, cool: 0.35 },
     speaking:  { e: 0.20, g: 0.9,  sp: 0.6,  th: 0, cool: 0 }
@@ -366,8 +367,9 @@
     function frame(ts) {
       raf = requestAnimationFrame(frame);
       var el = ts - lastTick;
-      if (el < FRAME_MS - 4) return; // 30 fps cap: every 2nd frame on a 60 Hz screen
-      lastTick = el > 2 * FRAME_MS ? ts : lastTick + FRAME_MS; // fixed step keeps the average at 30 on odd refresh rates
+      var stepMs = (to === STATES.idle && lvlIn < 0.02 && performance.now() - tStart > EASE_MS) ? REST_MS : FRAME_MS;
+      if (el < stepMs - 4) return; // 30 fps cap: every 2nd frame on a 60 Hz screen (10 fps at rest)
+      lastTick = el > 2 * stepMs ? ts : lastTick + stepMs; // fixed step keeps the average steady on odd refresh rates
       if (!measure()) return;
       var t0 = onFrame ? performance.now() : 0;
       var dt = Math.min(0.1, Math.max(0, (ts - lastDraw) / 1000));

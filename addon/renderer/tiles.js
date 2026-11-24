@@ -168,9 +168,19 @@
     },
   });
 
-  // The exchange shows inside the button: assist.js puts the orb where the icon is and the words on the two lines.
+  // The assistant's face on the dashboard: the orb is always there, calm while nothing happens, and it is where
+  // the wake word, the listening, the thinking and the answer show (assist.js drives it). Tap to talk without the word.
   HP.tile('assistant', {
-    create(t, body, ctx, i) { i.p = U.card(body, t.icon || 'microphone'); U.set(i.p.n, t.name || 'Assistant'); U.set(i.p.l, t.label || ''); },
+    create(t, body, ctx, i) {
+      i.p = U.card(body, ''); i.el.classList.add('talking');
+      U.set(i.p.n, t.name || ''); U.set(i.p.l, t.label || '');
+      if (!HP.orb) return null;
+      const canvas = document.createElement('canvas'), side = Math.floor(Math.min(i.w, i.h) * 0.92);  // a square that fits the button, whatever its shape
+      canvas.style.width = canvas.style.height = side + 'px';
+      i.p.ic.append(canvas);
+      i.orb = HP.orb.create(canvas, {style: t.orb || 'ribbons'}); i.orb.start();
+      return {destroy: () => { i.orb.destroy(); i.orb = null; }};
+    },
     tap: t => () => HP.assist.start(t),
   });
 })();

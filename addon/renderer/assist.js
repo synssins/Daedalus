@@ -9,18 +9,20 @@
 
   /** Where this exchange shows: the button if it is on screen, otherwise a small strip at the bottom of the screen. */
   function view(t) {
-    const inst = HP.live.find(i => i.t === t && i.p);
-    const box = inst ? inst.el : document.getElementById('assist');
-    if (!inst) { box.innerHTML = '<div class="ic"></div><div class="tx"><div class="n"></div><div class="l"></div></div>'; }
-    const hold = box.querySelector('.ic'), n = box.querySelector('.n'), l = box.querySelector('.l'), was = {icon: hold.innerHTML, n: n.textContent, l: l.textContent};
-    const canvas = document.createElement('canvas');
-    hold.innerHTML = ''; hold.append(canvas); box.classList.add('talking');
-    const side = Math.floor(Math.min(hold.clientWidth, hold.clientHeight) * 0.92);  // a square that fits the button, whatever its shape
+    const inst = HP.live.find(i => i.t === t && i.orb);
+    if (inst) {  // the button is on screen: its own orb and lines show the exchange
+      const n = inst.p.n, l = inst.p.l, was = {n: n.textContent, l: l.textContent};
+      return {orb: inst.orb, said: n, heard: l, close() { if (inst.orb) { inst.orb.setLevel(0); inst.orb.setState('idle'); } n.textContent = was.n; l.textContent = was.l; }};
+    }
+    const box = document.getElementById('assist');
+    box.innerHTML = '<div class="ic"></div><div class="tx"><div class="n"></div><div class="l"></div></div>';
+    const hold = box.querySelector('.ic'), canvas = document.createElement('canvas');
+    hold.append(canvas); box.classList.add('talking');
+    const side = Math.floor(Math.min(hold.clientWidth, hold.clientHeight) * 0.92);
     canvas.style.width = canvas.style.height = side + 'px';
     const orb = HP.orb ? HP.orb.create(canvas, {style: t.orb || 'ribbons'}) : null;
     if (orb) orb.start();
-    return {orb, said: n, heard: l,
-      close() { if (orb) orb.destroy(); box.classList.remove('talking'); if (inst) { hold.innerHTML = was.icon; n.textContent = was.n; l.textContent = was.l; } else box.innerHTML = ''; }};
+    return {orb, said: box.querySelector('.n'), heard: box.querySelector('.l'), close() { if (orb) orb.destroy(); box.classList.remove('talking'); box.innerHTML = ''; }};
   }
   const state = (r, s, note) => { if (r.v.orb) r.v.orb.setState(s); if (note != null) r.v.heard.textContent = note; };
   const level = (r, v) => { if (r.v.orb) r.v.orb.setLevel(v); };
