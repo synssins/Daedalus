@@ -1,5 +1,5 @@
 name: HomePanel Studio
-version: "0.9.2"
+version: "0.9.3"
 slug: homepanel
 description: Design wall-tablet dashboards on a grid and serve them to HomePanel tablets
 url: https://github.com/synssins/HomePanel

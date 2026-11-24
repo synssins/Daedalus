@@ -86,11 +86,11 @@
 
   // ---------- changing the ground ----------
   /** Note that the ground whose lowest cell is (x, y) may have lost its footing. */
-  function hang(G, x, y) { if (x >= 0 && x < G.W && y >= 0 && y < G.H - 1 && G.mask[y * G.W + x] && !G.mask[(y + 1) * G.W + x] && G.loose.length < 600) G.loose.push(x, y); }
+  function hang(G, x, y) { if (x >= 0 && x < G.W && y >= 0 && y < G.H - 1 && G.mask[y * G.W + x] && !G.mask[(y + 1) * G.W + x] && G.loose.length < 2400) G.loose.push(x, y); }
   /** Loose ground falls: each column of ground left hanging over a hole drops a few rows a frame until it rests.
    *  The picture's column is copied down onto itself, so it never has to be read back. */
   function settle(G) {
-    const L = G.loose, W = G.W, m = G.mask, n = Math.min(L.length, 60);
+    const L = G.loose, W = G.W, m = G.mask, n = Math.min(L.length, 44);
     for (let i = 0; i < n; i += 2) {
       const x = L.shift(), y = L.shift();
       if (!m[y * W + x]) continue;
@@ -100,6 +100,7 @@
       for (let yy = y; yy >= ys; yy--) m[(yy + k) * W + x] = m[yy * W + x];
       for (let yy = ys; yy < ys + k; yy++) m[yy * W + x] = 0;
       G.tg.drawImage(G.cv, x, ys, 1, y - ys + 1, x, ys + k, 1, y - ys + 1); G.tg.clearRect(x, ys, 1, k);
+      for (const t of G.tanks) if (!t.dead && Math.abs(t.x - x) <= 4 && y + k >= t.y - 4 && y <= t.y) hurt(G, t, 1, true);  // what comes down on a tank hurts it
       L.push(x, y + k);
     }
   }
@@ -113,6 +114,11 @@
       if (b >= a) { G.mask.fill(0, y * G.W + a, y * G.W + b + 1); G.tg.clearRect(a, y, b - a + 1, 1); }
     }
     if (!hold) for (let x = cx - R; x <= cx + R; x++) for (let y = Math.min(cy, G.H - 1); y >= cy - ry - 2; y--) if (solid(G, x, y)) { hang(G, x, y); break; }
+  }
+  /** A blast big enough shakes everything near it loose: every overhang in its area falls, tunnels and channels too. */
+  function shake(G, cx, cy, R) {
+    cx = Math.round(cx); cy = Math.round(cy);
+    for (let x = Math.max(0, cx - R - 4); x <= Math.min(G.W - 1, cx + R + 4); x++) for (let y = Math.max(0, cy - R - 12); y <= Math.min(G.H - 2, cy + R + 4); y++) hang(G, x, y);
   }
   function cutBox(G, x0, y0, x1, y1, hold) {
     x0 = Math.max(0, Math.round(x0)); x1 = Math.min(G.W - 1, Math.round(x1)); y0 = Math.max(0, Math.round(y0)); y1 = Math.min(G.H - 1, Math.round(y1));
@@ -165,13 +171,14 @@
   //   home, late, wob  steers toward the nearest enemy (late: only on the way down), wobbling as it goes
   //   chute            opens a parachute at the top of its arc;  float: seconds it rises under a balloon first
   //   bore             [way, cells, radius]: on reaching ground it tunnels ('fwd', 'down' or 'side') before going off
-  //   inst             no projectile at all: 'laser', 'rise', 'shield';  once: a tank may use it once a round
+  //   inst             no projectile at all: 'laser', 'rise', 'shield', 'riot';  once: a tank may use it once a round
+  //   flat             worth trying from under a roof;  tool: never in a kit, the gunner reaches for it when it must;  n: the effect's own numbers
   const DEF = {
     pea:        {wt: 10, col: '#ffffff', sz: 1, hit: [['boom', 6, 40]]},
     shell:      {wt: 12, col: '#ffffff', sz: 2, hit: [['boom', 9, 55]]},
     slug:       {wt: 6, col: '#ffd23c', sz: 3, hit: [['boom', 13, 70]]},
     anvil:      {wt: 2, col: '#9aa3b8', sz: 4, g: 0.45, v: 0.67, hit: [['boom', 20, 90]]},
-    needle:     {wt: 3, col: '#ff4d4d', sz: 2, shape: 'bar', trail: 'line', g: 0.5, v: 2.2, els: [0.15, 0.3, 0.5], hit: [['boom', 4, 75]]},
+    needle:     {wt: 3, col: '#ff4d4d', sz: 2, shape: 'bar', trail: 'line', flat: 1, g: 0.5, v: 2.2, els: [0.15, 0.3, 0.5], hit: [['boom', 4, 75]]},
     fiver:      {wt: 4, col: '#ffd23c', sz: 2, shape: 'diamond', apex: 1, hit: [['split', 'bomblet', 5, 11, 0]]},
     bomblet:    {col: '#ffd23c', sz: 1, hit: [['boom', 6, 30]]},
     litter:     {wt: 2, col: '#ff9a2e', sz: 3, shape: 'diamond', apex: 1, hit: [['split', 'pod', 3, 22, 12]]},
@@ -180,15 +187,15 @@
     drizzle:    {wt: 2, col: '#3fe0ff', sz: 2, shape: 'diamond', apex: 1, hit: [['split', 'drop', 12, 7, 0]]},
     drop:       {col: '#3fe0ff', sz: 1, trail: 'none', drag: 0.6, hit: [['boom', 3, 12]]},
     pinball:    {wt: 3, col: '#ff6ad5', sz: 2, shape: 'ring', bounce: 0.72, nb: 4, hit: [['boom', 8, 50]]},
-    marble:     {wt: 3, col: '#b6ff3c', sz: 2, shape: 'ring', roll: 1, hit: [['boom', 9, 55]]},
-    skipper:    {wt: 3, col: '#cfe6ff', sz: 2, shape: 'bar', hop: 1, bounce: 0.55, nb: 5, els: [0.35, 0.55, 0.8], hit: [['boom', 8, 45]]},
+    marble:     {wt: 3, col: '#b6ff3c', sz: 2, shape: 'ring', roll: 1, flat: 1, hit: [['boom', 9, 55]]},
+    skipper:    {wt: 3, col: '#cfe6ff', sz: 2, shape: 'bar', hop: 1, flat: 1, bounce: 0.55, nb: 5, els: [0.35, 0.55, 0.8], hit: [['boom', 8, 45]]},
     mole:       {wt: 3, col: '#5dff6a', sz: 2, bore: ['fwd', 30, 2], hit: [['boom', 8, 50]]},
     plumb:      {wt: 2, col: '#5dff6a', sz: 2, shape: 'bar', bore: ['down', 46, 2], hit: [['boom', 7, 45]]},
     trencher:   {wt: 2, col: '#5dff6a', sz: 2, shape: 'diamond', bore: ['side', 60, 3], hit: [['boom', 5, 35]]},
     mudpie:     {wt: 3, col: '#c08a52', sz: 3, hit: [['dirt', 11]]},
     rampart:    {wt: 2, col: '#c08a52', sz: 2, shape: 'bar', hit: [['wall', 3, 26]]},
     trapdoor:   {wt: 2, col: '#a98bff', sz: 2, shape: 'cross', hit: [['shaft', 6, 28]]},
-    ember:      {wt: 3, col: '#ff5a1e', sz: 2, trail: 'spark', hit: [['boom', 3, 10], ['fire', 26]]},
+    ember:      {wt: 3, col: '#ff5a1e', sz: 2, trail: 'spark', hit: [['boom', 3, 10], ['fire', 26, 1, 50]]},
     thunderclap: {wt: 2, col: '#ffffff', sz: 2, shape: 'cross', prox: 10, hit: [['burst', 20, 5, 38]]},
     shove:      {wt: 2, col: '#cfe6ff', sz: 2, shape: 'ring', hit: [['boom', 3, 8], ['push', 50, 70]]},
     gulp:       {wt: 2, col: '#a98bff', sz: 2, shape: 'ring', hit: [['pull', 14]]},
@@ -199,7 +206,7 @@
     drifter:    {wt: 2, col: '#ffffff', sz: 2, chute: 1, hit: [['boom', 12, 65]]},
     floater:    {wt: 2, col: '#ff4d4d', sz: 2, float: 2.4, hit: [['boom', 11, 60]]},
     zapper:     {wt: 2, col: '#3fe0ff', sz: 2, shape: 'cross', hit: [['boom', 4, 15], ['arc', 90, 26]]},
-    ruler:      {wt: 2, col: '#ff4d4d', sz: 2, shape: 'bar', inst: 'laser'},
+    ruler:      {wt: 2, col: '#ff4d4d', sz: 2, shape: 'bar', inst: 'laser', n: [1, 70, 40, 0]},
     skyfall:    {wt: 2, col: '#ffd23c', sz: 1, shape: 'cross', hit: [['beam']]},
     hailstones: {wt: 2, col: '#ff9a2e', sz: 1, shape: 'cross', hit: [['meteors', 7]]},
     rock:       {col: '#ff9a2e', sz: 2, trail: 'spark', hit: [['boom', 7, 30]]},
@@ -212,6 +219,29 @@
     switcher:   {wt: 1, col: '#b6ff3c', sz: 2, shape: 'ring', hit: [['swap']]},
     bubble:     {wt: 1, col: '#3fe0ff', sz: 2, shape: 'ring', inst: 'shield', once: 1},
     dud:        {wt: 1, col: '#ff6ad5', sz: 2, apex: 1, hit: [['sparkle', 40]]},
+    sun:        {wt: 1, col: '#b6ff3c', sz: 3, shape: 'ring', hit: [['nuke', 30, 110]]},
+    nova:       {wt: 0.5, col: '#b6ff3c', sz: 4, g: 0.7, v: 0.84, hit: [['nuke', 52, 140]]},
+    trident:    {wt: 2, col: '#ff9a2e', sz: 3, apex: 1, hit: [['split', 'warhead', 4, 20, 0]]},
+    warhead:    {col: '#ff9a2e', sz: 2, hit: [['boom', 11, 55]]},
+    fan:        {wt: 2, col: '#ffd23c', sz: 3, shape: 'bar', apex: 1, hit: [['split', 'bomblet', 9, 26, 0]]},
+    confetti:   {wt: 2, col: '#ff6ad5', sz: 3, shape: 'cross', hit: [['scatter', 'jelly', 12, 70]]},
+    jelly:      {col: '#ff6ad5', sz: 2, trail: 'none', bounce: 0.75, nb: 3, fuse: 2.5, hit: [['cboom', 6, 22]]},
+    gopher:     {wt: 2, col: '#5dff6a', sz: 1, bore: ['fwd', 18, 1], hit: [['boom', 5, 32]]},
+    badger:     {wt: 1, col: '#5dff6a', sz: 3, bore: ['fwd', 55, 3], hit: [['boom', 12, 65]]},
+    sprout:     {wt: 2, col: '#c08a52', sz: 2, shape: 'bar', bore: ['up', 46, 2], hit: [['boom', 4, 20]]},
+    clod:       {wt: 2, col: '#c08a52', sz: 2, hit: [['dirt', 6]]},
+    landslide:  {wt: 1, col: '#c08a52', sz: 4, hit: [['dirt', 22]]},
+    slurry:     {wt: 2, col: '#c08a52', sz: 2, shape: 'ring', hit: [['mud', 90]]},
+    shrug:      {wt: 1, tool: 1, col: '#ffffff', sz: 2, shape: 'cross', inst: 'riot', n: 12},
+    heave:      {wt: 1, tool: 1, col: '#ffffff', sz: 3, shape: 'diamond', inst: 'riot', n: 20},
+    scoop:      {wt: 2, col: '#ffffff', sz: 2, shape: 'ring', hit: [['clear', 18]]},
+    bead:       {wt: 2, col: '#b6ff3c', sz: 1, roll: 1, flat: 1, hit: [['boom', 5, 35]]},
+    boulder:    {wt: 1, col: '#b6ff3c', sz: 4, roll: 1, flat: 1, hit: [['boom', 14, 75]]},
+    inferno:    {wt: 1, col: '#ff5a1e', sz: 3, trail: 'spark', hit: [['boom', 4, 12], ['fire', 50, 2, 90]]},
+    drool:      {wt: 2, col: '#b6ff3c', sz: 2, shape: 'diamond', apex: 1, hit: [['split', 'acid', 10, 9, 0]]},
+    acid:       {col: '#b6ff3c', sz: 1, trail: 'none', bore: ['down', 34, 0], hit: [['cboom', 2, 14]]},
+    lance:      {wt: 1, col: '#3fe0ff', sz: 3, shape: 'bar', inst: 'laser', n: [3, 110, 55, 45]},
+    chalk:      {wt: 1, col: '#ffffff', sz: 1, trail: 'line', hit: [['mark']]},
   };
   const PICK = Object.keys(DEF).filter(n => DEF[n].wt), PLAIN = ['pea', 'shell', 'shell', 'slug'], DIRT = [176, 122, 69];
   Object.keys(DEF).forEach(n => { DEF[n].name = n; });
@@ -219,7 +249,7 @@
   function alive(G) { return G.tanks.filter(t => !t.dead); }
   function nearest(G, p) { let best = null, bd = 1e9; for (const t of G.tanks) if (!t.dead && t !== p.by) { const d = Math.abs(t.x - p.x) + Math.abs(t.y - p.y); if (d < bd) { bd = d; best = t; } } return best; }
   function hitTank(G, p) { for (const t of G.tanks) if (!t.dead && Math.abs(p.x - t.x - 0.5) <= 4.5 && p.y >= t.y - 4 && p.y <= t.y + 1 && (t !== p.by || p.free || p.age > 0.25)) return t; return null; }
-  function shot(d, x, y, vx, vy, by, free) { return {d, x, y, vx, vy, by, free, age: 0, nb: 0, rub: 0, tr: 0, ph: Math.random() * 6.28, roll: 0, rv: 0, acc: 0, rt: 0, bore: 0, bored: 0, open: 0, tank: null}; }
+  function shot(d, x, y, vx, vy, by, free) { return {d, x, y, vx, vy, by, free, age: 0, nb: 0, rub: 0, tr: 0, ph: Math.random() * 6.28, roll: 0, rv: 0, acc: 0, rt: 0, bore: 0, bored: 0, dug: 0, open: 0, tank: null, col: null}; }
   function launch(t, d, a, v) { v *= d.v || 1; return shot(d, t.x + 0.5 + Math.cos(a) * 6, t.y - 4 - Math.sin(a) * 6, Math.cos(a) * v, -Math.sin(a) * v, t, false); }
 
   /** The one physics step every projectile takes, real or imagined by a gunner taking aim (sim): forces, then
@@ -290,11 +320,13 @@
   }
 
   // ---------- particles and passing sights ----------
-  // kinds: 0 dirt and sparks (fall, vanish in the ground), 1 fire (flows downhill, burns), 2 smoke (drifts), 3 firework (floats down)
+  // kinds: 0 dirt and sparks (fall, vanish in the ground), 1 fire (flows downhill, burns), 2 smoke (drifts), 3 firework (floats down),
+  //        4 liquid dirt (flows to the lowest place it can reach and sets there as ground)
   function part(G, k, x, y, vx, vy, life, col) {
-    const P = G.parts, q = {k, x, y, vx, vy, life, col, d: vx < 0 ? -1 : 1, air: 1, tar: 0};
+    const P = G.parts, q = {k, x, y, vx, vy, life, col, d: vx < 0 ? -1 : 1, air: 1, tar: 0, h: 1, sp: 8};
     if (P.length < CAP) P.push(q);
-    else if (k === 1) for (let i = 0; i < P.length; i++) if (P[i].k !== 1) { P[i] = q; break; }  // fire matters: it pushes out a speck of dust
+    else if (k === 1 || k === 4) for (let i = 0; i < P.length; i++) if (P[i].k !== 1 && P[i].k !== 4) { P[i] = q; break; }  // fire and mud matter: they push out a speck of dust
+    return q;
   }
   function dust(G, x, y, n, col) { for (let i = 0; i < n; i++) { const a = Math.random() * 6.28, v = 15 + Math.random() * 45; part(G, 0, x, y, Math.cos(a) * v, Math.sin(a) * v - 30, 0.5 + Math.random() * 0.7, col); } }
   function later(G, t, f) { G.pend.push({t, f}); }
@@ -304,12 +336,13 @@
     t.hp -= n;
     if (t.hp <= 0) { t.dead = true; t.hp = 0; later(G, 0.3, () => boom(G, t.x, t.y - 1, 13, 35)); }
   }
-  function boom(G, x, y, R, dmg, style) {
+  function boom(G, x, y, R, dmg, style, cols) {
     const tg = G.tg, col = colourAt(G, x | 0, y | 0);
     // scorch what will be the crater's rim, then cut
     tg.globalCompositeOperation = 'source-atop'; tg.fillStyle = 'rgba(0,0,0,.4)'; tg.beginPath(); tg.arc(Math.round(x) + 0.5, Math.round(y) + 0.5, R + 2.5, 0, 6.3); tg.fill(); tg.globalCompositeOperation = 'source-over';
     cut(G, x, y, R);
-    G.blasts.push({x, y, R, ry: R, t: 0, dur: 0.3 + R * 0.02, s: style || 'fire'});
+    G.blasts.push({x, y, R, ry: R, t: 0, dur: 0.3 + R * 0.02, s: style || 'fire', c: cols});
+    if (R >= 16) shake(G, x, y, R);
     dust(G, x, y, Math.min(R, 12), css(col, 0.9)); dust(G, x, y, 3, '#ffd23c');
     for (const t of G.tanks) if (!t.dead) { const d = Math.hypot(t.x - x, t.y - 2 - y); if (d < R + 5) hurt(G, t, dmg * (1 - d / (R + 5))); }
   }
@@ -332,7 +365,7 @@
     /** The ground straight below is simply gone: whoever stood there falls. */
     shaft(G, x, y, p, half, depth) { cutBox(G, x - half, y - 3, x + half, y + depth); G.fx.push({k: 'col', x, y: y + depth, y0: y - 3, w: half, t: 0.25, T: 0.25, c: '#a98bff'}); dust(G, x, y, 10, '#a98bff'); },
     /** Liquid fire: thrown out as drops that run downhill, pool and burn. */
-    fire(G, x, y, p, n) { for (let i = 0; i < n; i++) part(G, 1, x, y - 2, (Math.random() - 0.5) * 50, -10 - Math.random() * 35, 3 + Math.random() * 1.5, ''); },
+    fire(G, x, y, p, n, heat, wide) { for (let i = 0; i < n; i++) part(G, 1, x, y - 2, (Math.random() - 0.5) * wide, -10 - Math.random() * 35, 3 + Math.random() * 1.5, '').h = heat; },
     /** Goes off in the air: a wide, shallow scoop out of the ground below and a wide blast. */
     burst(G, x, y, p, rx, ry, dmg) {
       let gy = Math.round(y); while (gy < G.H && gy < y + 16 && !solid(G, x, gy)) gy++;
@@ -390,21 +423,49 @@
       t.x = U.clamp(Math.round(x), 6, G.W - 7); t.y = U.clamp(Math.round(y) - 2, 8, G.H - 2); t.fresh = true; t.vx = 0;
       cut(G, t.x, t.y - 2, 6, 4, true);  // room to stand in
     },
+    /** The big one: a white flash, a huge fireball that takes its time, a very large crater, everything near shaken
+     *  loose, sparks of fallout, and a cloud that climbs and leans with the wind. Whoever fired it had better be far away. */
+    nuke(G, x, y, p, R, dmg) {
+      boom(G, x, y, R, dmg); G.blasts[G.blasts.length - 1].dur = 1.5;
+      G.fx.push({k: 'flash', t: 0.16, T: 0.16}, {k: 'cloud', x, y, y0: y, R: R * 0.45, t: 4.5, T: 4.5});
+      for (let i = 0; i < 26; i++) { const a = -Math.random() * 3.14, v = 40 + Math.random() * 70; part(G, 3, x, y, Math.cos(a) * v, Math.sin(a) * v, 1.5 + Math.random() * 1.5, i % 2 ? '#b6ff3c' : '#ffd23c'); }
+    },
+    /** Bursts into n of another row, each its own bright colour, thrown every which way. */
+    scatter(G, x, y, p, name, n, speed) {
+      cut(G, x, y, 3);
+      for (let i = 0; i < n; i++) { const a = Math.random() * 6.28, v = speed * (0.5 + Math.random()), q = shot(DEF[name], x, y - 1, Math.cos(a) * v, -Math.abs(Math.sin(a)) * v - 20, p.by, true); q.col = css(TANKS[i % 6][1]); G.shells.push(q); }
+    },
+    /** A blast in the projectile's own colour. */
+    cboom(G, x, y, p, R, dmg) { boom(G, x, y, R, dmg, 'fire', [p.col || p.d.col, '#ffffff', '#ffffff']); },
+    /** Liquid dirt, poured out in waves: it runs to the lowest ground it can find and fills it level. */
+    mud(G, x, y, p, n) { for (let w = 0; w < 6; w++) later(G, w * 0.25, () => { for (let i = 0; i < n / 6; i++) part(G, 4, x + Math.random() * 6 - 3, y - 3, (Math.random() - 0.5) * 40, -10 - Math.random() * 20, 8, css(DIRT)); }); },
+    /** A big round bite out of the ground and nothing else: no heat, no harm. */
+    clear(G, x, y, p, R) { cut(G, x, y, R); G.fx.push({k: 'pop', x, y, t: 0.4, T: 0.4, R}); dust(G, x, y, 10, '#ffffff'); },
+    /** Only shows where it came down. */
+    mark(G, x, y) { G.fx.push({k: 'mark', x, y, t: 0.9, T: 0.9}); },
     /** Nothing but a pretty burst. */
     sparkle(G, x, y, p, n) { for (let i = 0; i < n; i++) { const a = i / n * 6.28, v = 20 + Math.random() * 40; part(G, 3, x, y, Math.cos(a) * v, Math.sin(a) * v, 1 + Math.random() * 0.8, css(TANKS[i % 6][1])); } },
   };
   /** The weapons that are not thrown at all. */
   const INST = {
-    /** A straight beam, at once: it burns a thin channel through a good depth of ground and anything in its way. */
+    /** A straight beam, at once: it burns a channel through a good depth of ground and anything in its way.
+     *  n: [half width, cells of ground it can burn, damage, recoil]. The wide one kicks the gunner backwards. */
     laser(G, t) {
-      const cx = Math.cos(t.a), cy = -Math.sin(t.a), x0 = t.x + 0.5 + cx * 7, y0 = t.y - 4 + cy * 7, seen = [];
-      let x = x0, y = y0, burn = 70;
+      const n = t.w.n, cx = Math.cos(t.a), cy = -Math.sin(t.a), x0 = t.x + 0.5 + cx * 7, y0 = t.y - 4 + cy * 7, seen = [];
+      let x = x0, y = y0, burn = n[1];
       for (let i = 0; i < 500; i++) {
         x += cx; y += cy; if (x < 0 || x >= G.W || y < 0 || y >= G.H) break;
-        if (solid(G, x, y)) { if (burn-- <= 0) break; cut(G, x, y, 1, 1, true); }
-        for (const o of G.tanks) if (!o.dead && o !== t && seen.indexOf(o) < 0 && Math.abs(x - o.x - 0.5) <= 4.5 && y >= o.y - 4 && y <= o.y + 1) { seen.push(o); hurt(G, o, 40); }
+        if (solid(G, x, y)) { if (burn-- <= 0) break; cut(G, x, y, n[0], n[0], true); }
+        for (const o of G.tanks) if (!o.dead && o !== t && seen.indexOf(o) < 0 && Math.abs(x - o.x - 0.5) <= 4.5 && y >= o.y - 4 && y <= o.y + 1) { seen.push(o); hurt(G, o, n[2]); }
       }
-      G.fx.push({k: 'ray', x: x0, y: y0, x2: x, y2: y, t: 0.4, T: 0.4}); dust(G, x, y, 6, '#ff4d4d');
+      G.fx.push({k: 'ray', x: x0, y: y0, x2: x, y2: y, w: n[0], c: t.w.col, t: 0.4, T: 0.4}); dust(G, x, y, 6, t.w.col);
+      if (n[3]) t.vx = (cx < 0 ? 1 : -1) * n[3];
+    },
+    /** A charge that throws off whatever lies on the gunner: a widening wedge of ground above it is gone. n: how high. */
+    riot(G, t) {
+      const R = t.w.n;
+      for (let dy = 0; dy <= R; dy++) cutBox(G, t.x - 5 - dy * 0.7, t.y - dy, t.x + 5 + dy * 0.7, t.y - dy, dy < R);
+      G.fx.push({k: 'pop', x: t.x, y: t.y - 3, t: 0.35, T: 0.35, R}); dust(G, t.x, t.y - 4, 10, '#ffffff');
     },
     /** The ground under the gunner rises and lifts it. */
     rise(G, t) { const h = Math.min(14, t.y - 14); if (h > 0) { addBox(G, t.x - 6, t.y - h + 1, t.x + 6, t.y, 1, DIRT); t.y -= h; dust(G, t.x, t.y + h, 10, css(DIRT)); } },
@@ -437,24 +498,29 @@
     G.tanks = []; G.shells = []; G.blasts = []; G.parts = []; G.pend = []; G.trail = []; G.fx = [];
     G.wind = (G.rng() * 2 - 1) * 8; G.turn = -1; G.phase = 'settle'; G.pt = 0.6; G.pow = 0; G.win = null; G.age = 0;
     const r = G.rng, W = G.W, H = G.H, order = TANKS.slice().sort(() => r() - 0.5);
+    // every place a tank could stand, on any level: tile tops under open sky, tile tops inside the channels between
+    // rows of tiles, the hills. Sorted into levels so the tanks are spread over them.
+    const levels = {};
+    for (let x = 8; x < W - 8; x += 3) for (let y = 8; y < H; y++) if (solid(G, x, y) && !solid(G, x, y - 1)) {
+      let free = true; for (let dy = 1; dy <= 6 && free; dy++) for (let dx = -4; dx <= 4; dx++) if (solid(G, x + dx, y - dy)) { free = false; break; }
+      if (free) (levels[y / 14 | 0] = levels[y / 14 | 0] || []).push(x, y);
+    }
+    const keys = Object.keys(levels).sort(() => r() - 0.5);
     for (let i = 0; i < G.n; i++) {
       let x = 0, y = 0, ok = false;
-      for (let k = 0; k < 300 && !ok; k++) {
-        x = 8 + r() * (W - 16) | 0;
-        if (G.tanks.some(t => Math.abs(t.x - x) < (k < 150 ? W / (G.n * 1.6) : 14))) continue;
-        // the first ground under open sky in this column: a tile's top or a hill, never a channel between two tiles
-        for (y = 0; y < H && !solid(G, x, y); y++);
-        ok = y >= 8 && y < H;
-        for (let dy = 1; dy <= 7 && ok; dy++) for (let dx = -4; dx <= 4; dx++) if (solid(G, x + dx, y - dy)) ok = false;
+      for (let k = 0; k < 60 && keys.length && !ok; k++) {
+        const L = levels[keys[(i + (k / 12 | 0)) % keys.length]], j = (r() * L.length / 2 | 0) * 2;
+        x = L[j]; y = L[j + 1];
+        ok = !G.tanks.some(t => Math.abs(t.x - x) < 22 && Math.abs(t.y - y) < 40);
       }
-      if (ok) y = Math.max(5, y - 30);  // it drops in from above
+      if (ok) { let up = 0; while (up < 30 && y - 7 - up > 2 && !solid(G, x, y - 7 - up)) up++; y = y - 1 - up; }  // it drops in from as high as there is room
       else { x = 12 + r() * (W - 24) | 0; y = 12 + r() * (H * 0.5) | 0; cut(G, x, y, 8, 8, true); }  // a dashboard with no open top anywhere: blast a pocket to land in
       // the hull is drawn once, here, and stamped every frame
       const col = order[i][1], spr = document.createElement('canvas'); spr.width = 9; spr.height = 5;
       const sg = spr.getContext('2d'); sg.fillStyle = css(col); sg.fillRect(0, 3, 9, 1); sg.fillRect(2, 1, 5, 1); sg.fillRect(3, 0, 3, 1); sg.fillStyle = css(col, 1.4); sg.fillRect(0, 2, 9, 1); sg.fillRect(3, 0, 2, 1);
       sg.fillStyle = '#10121e'; sg.fillRect(0, 4, 9, 1); sg.fillStyle = css(col, 0.55); for (let k = 1; k < 9; k += 2) sg.fillRect(k, 4, 1, 1);
       // its own few special weapons for this round, so no two rounds are fought the same way
-      const kit = [], pool = PICK.filter(n => PLAIN.indexOf(n) < 0);
+      const kit = [], pool = PICK.filter(n => PLAIN.indexOf(n) < 0 && !DEF[n].tool);
       for (let k = 0; k < 6; k++) { let sum = 0; for (const n of pool) sum += DEF[n].wt; let at = r() * sum, j = 0; while (j < pool.length - 1 && (at -= DEF[pool[j]].wt) > 0) j++; kit.push(pool.splice(j, 1)[0]); }
       G.tanks.push({x, y, hp: 100, name: order[i][0], col, spr, kit, w: DEF.shell, a: Math.PI / 2, ga: 0, gp: 0, fy: 0, vy: 0, vx: 0, sx: 0, fell: 0, slip: 40, fresh: true, dead: false, shield: 0, mem: null});
     }
@@ -469,40 +535,81 @@
     return d;
   }
   /** Where this weapon's projectile would end up, fired at this angle and power, and how far that is from the target.
-   *  It runs the very same step the real projectile will. */
+   *  It runs the very same step the real projectile will. The end point is left in G.ex, G.ey. */
   function trace(G, t, d, a, v, who) {
     const p = launch(t, d, a, v);
-    for (let i = 0; i < 1400; i++) { const e = advance(G, p, 1 / Math.max(40, Math.abs(p.vx) + Math.abs(p.vy), Math.abs(p.rv)), true); if (e === 1 || e === 2) break; }
+    let e = 0;
+    for (let i = 0; i < 1400; i++) { e = advance(G, p, 1 / Math.max(40, Math.abs(p.vx) + Math.abs(p.vy), Math.abs(p.rv)), true); if (e === 1 || e === 2) break; }
+    if (e === 1 && d.bore && !p.tank) {  // a burrower goes on from where it meets the ground
+      const way = d.bore[0], n = d.bore[1], l = Math.hypot(p.vx, p.vy) || 1;
+      if (way === 'fwd') { p.x += p.vx / l * n; p.y += p.vy / l * n; } else if (way === 'side') p.x += p.vx < 0 ? -n : n; else p.y += way === 'up' ? -n : n;
+    }
+    G.ex = p.x; G.ey = p.y;
     return p.tank === who ? 0 : Math.hypot(p.x - who.x, p.y - who.y);
   }
-  /** The aiming, like a person finding the range: the tank works out the shot that would land closest, then is off
-   *  by a fair bit on its first try at a target and by less each time after, so a hit takes two or three shells. */
+  /** The best this weapon can do against this target from here: tries the elevations roughly, then closer around the best. */
+  function range(G, t, d, who, dir, els) {
+    const k0 = G.rng() * els.length | 0, a = {score: 1e9, el: els[0], v: 100, ex: t.x, ey: t.y};
+    const tryIt = (e, p) => { const q = trace(G, t, d, dir > 0 ? e : Math.PI - e, p, who); if (q < a.score) { a.score = q; a.el = e; a.v = p; a.ex = G.ex; a.ey = G.ey; } };
+    for (let k = 0; k < els.length; k++) for (let p = 30; p <= VMAX; p += 10) tryIt(els[(k + k0) % els.length], p);
+    for (let p = Math.max(25, a.v - 7), top = Math.min(VMAX, a.v + 8), e = a.el; p <= top; p += 3) tryIt(e, p);
+    return a;
+  }
+  /** How far a weapon's blast reaches, its children's included. */
+  function blastR(d) {
+    let R = 0;
+    for (const h of d.hit || []) { const k = h[0]; if (k === 'boom' || k === 'nuke' || k === 'cboom' || k === 'burst') R = Math.max(R, h[1]); else if (k === 'split' || k === 'scatter') R = Math.max(R, blastR(DEF[h[1]])); }
+    return R;
+  }
+  /** How many cells of air a tank has over its head: 99 for open sky. */
+  function roof(G, t) { for (let n = 0; n < 60; n++) { if (t.y - 5 - n < 0) return 99; if (solid(G, t.x, t.y - 5 - n)) return n; } return 99; }
+  /** Dirt on top of it, or dirt right through it: not merely standing in a dip. */
+  function buried(G, t) { return !!(solid(G, t.x, t.y - 2) || (solid(G, t.x, t.y - 5) && (solid(G, t.x - 3, t.y - 3) || solid(G, t.x + 3, t.y - 3)))); }
+  /** The gunner. It picks a weapon, then finds the shot that would land closest, the way a person finds the range:
+   *  off by a fair bit on its first try at a target and by less each time after. What it does depends on where it
+   *  stands: under dirt it first throws the dirt off; under a roof it tries something flat, rolling or burrowing,
+   *  and if nothing reaches it opens the roof a shot at a time until it has sky. It mostly will not fire something
+   *  whose blast would take it in as well. Mostly. */
   function plan(G, t) {
-    const r = G.rng, foes = alive(G).filter(o => o !== t), d = t.w = choose(G, t);
-    let m = t.mem;
-    if (!m || m.who.dead) { let who = foes[0]; for (const f of foes) if (Math.abs(f.x - t.x) < Math.abs(who.x - t.x)) who = f; if (r() < 0.3) who = foes[r() * foes.length | 0]; m = t.mem = {who, shots: 0}; }
+    const r = G.rng, foes = alive(G).filter(o => o !== t), forced = G.opts.w != null && G.opts.w !== '';
+    let d = choose(G, t), m = t.mem;
+    if (!m || m.who.dead) { let who = foes[0]; for (const f of foes) if (Math.abs(f.x - t.x) + Math.abs(f.y - t.y) < Math.abs(who.x - t.x) + Math.abs(who.y - t.y)) who = f; if (r() < 0.3) who = foes[r() * foes.length | 0]; m = t.mem = {who, shots: 0}; }
     const dir = m.who.x < t.x ? -1 : 1, off = [0.2, 0.08, 0.03, 0.012][Math.min(3, m.shots++)] * (r() < 0.5 ? -1 : 1) * (0.5 + r() * 0.5);
-    if (d.inst) {  // nothing to range: a laser is simply pointed, the others only need the barrel somewhere
+    const over = roof(G, t), boxed = over < 45, low = [0.2, 0.5, 0.9, 1.3];
+    if (!forced && buried(G, t)) d = DEF[r() < 0.6 ? 'shrug' : 'heave'];
+    t.w = d;
+    if (d.inst) {  // nothing to range: a beam is simply pointed, the others only need the barrel somewhere
       t.ga = d.inst === 'laser' ? Math.atan2(t.y - m.who.y, m.who.x - t.x) + off * 0.6 : t.a; t.gp = 0.5;
       if (t.ga < 0) t.ga += 6.2832;
       return;
     }
-    const els = d.els || [1, 1.2, 1.42], k0 = r() * els.length | 0;
-    let best = 1e9, el = els[0], v = 100;
-    const tryIt = (e, p) => { const q = trace(G, t, d, dir > 0 ? e : Math.PI - e, p, m.who); if (q < best) { best = q; el = e; v = p; } };
-    for (let k = 0; k < els.length; k++) for (let p = 30; p <= VMAX; p += 10) tryIt(els[(k + k0) % els.length], p);  // roughly, then closer around the best
-    for (let p = Math.max(25, v - 7), top = Math.min(VMAX, v + 8), e = el; p <= top; p += 3) tryIt(e, p);
-    v = U.clamp(v * (1 + off), 25, VMAX);
-    t.ga = dir > 0 ? el : Math.PI - el; t.gp = v / VMAX;
+    let a = range(G, t, d, m.who, dir, d.els || (boxed ? low : [1, 1.2, 1.42]));
+    if (!forced && a.score > 30) {
+      // this will not get there: is there something flat, rolling or burrowing in the kit that would?
+      let tries = 0;
+      for (const n of t.kit) { const q = DEF[n]; if ((q.flat || q.bore) && tries++ < 2) { const b = range(G, t, q, m.who, dir, q.els || low); if (b.score < a.score - 10) { a = b; d = q; } } }
+      if (a.score > 30 && boxed) {  // nothing reaches from under this roof: open it, a shot at a time, until there is sky
+        if (!blastR(d) || d.apex || d.roll) d = DEF[PLAIN[r() * PLAIN.length | 0]];
+        a = {score: 99, el: 1.35, v: 90, ex: t.x + dir * 2, ey: t.y - 5 - over};
+      }
+    }
+    const R = blastR(d), close = Math.hypot(a.ex - t.x, a.ey - t.y + 2) < R + 5;
+    if (!forced && close && r() > (boxed ? 0.33 : 0.17)) {  // that blast would reach the gunner itself: think again (it does not always)
+      if (boxed) { d = DEF.sprout; a = {score: 99, el: 1.35, v: 90, ex: t.x, ey: t.y - 60}; }  // bore up through the roof instead
+      else { const b = range(G, t, DEF.pea, m.who, dir, [1, 1.2, 1.42]); if (Math.hypot(b.ex - t.x, b.ey - t.y + 2) >= 11) { d = DEF.pea; a = b; } }
+    }
+    t.w = d;
+    if (d.name === 'chalk') m.shots = 3;  // a ranging shot: the next one, fired for real, is close
+    t.ga = dir > 0 ? a.el : Math.PI - a.el; t.gp = U.clamp(a.v * (1 + off), 25, VMAX) / VMAX;
   }
   function next(G) {
     const n = G.tanks.length;
     for (let i = 1; i <= n; i++) { const k = (G.turn + i) % n; if (!G.tanks[k].dead) { if (k <= G.turn) G.wind = (G.rng() * 2 - 1) * 8; G.turn = k; break; } }  // new wind every time round
     for (const t of G.tanks) t.slip = 40;
     plan(G, G.tanks[G.turn]); G.phase = 'aim'; G.pow = 0;
-    if (G.age > 200) {  // a round that will not end: the sky loses patience and drops rocks on someone every turn
-      const a = alive(G), v = a[G.rng() * a.length | 0];
-      for (let i = 0; i < 2; i++) G.shells.push(shot(DEF.rock, v.x + (G.rng() - 0.5) * 8, -6 - i * 30, 0, 80, null, true));
+    if (G.age > 200) {  // a round that will not end: rocks come down on someone every turn, from just under whatever roof it has
+      const a = alive(G), v = a[G.rng() * a.length | 0], over = roof(G, v);
+      for (let i = 0; i < 2; i++) later(G, i * 0.35, () => G.shells.push(shot(DEF.rock, v.x + (Math.random() - 0.5) * 6, over > 60 ? -6 : v.y - 4 - over, 0, 80, null, true)));
     }
   }
   function fire(G, t) {
@@ -514,9 +621,11 @@
   function fly(G, p, dt) {
     const d = p.d, sp = p.bore > 0 ? 50 : p.roll ? Math.abs(p.rv) : Math.hypot(p.vx, p.vy), n = U.clamp(Math.ceil(sp * dt), 1, 60), h = dt / n, tr = d.trail || 'dot';
     for (let i = 0; i < n; i++) {
-      if (p.bore > 0) {  // boring through the ground in a straight line
-        p.x += p.vx * h; p.y += p.vy * h; p.bore -= 50 * h; cut(G, p.x, p.y, d.bore[2], d.bore[2], true);
-        if (p.bore <= 0 || hitTank(G, p) || p.x < 2 || p.x > G.W - 3 || p.y > G.H - 3) { go(G, p); return false; }
+      if (p.bore > 0) {  // boring through the ground in a straight line, until its length is used up or it comes out into the air
+        p.x += p.vx * h; p.y += p.vy * h; p.bore -= 50 * h; p.dug += 50 * h;
+        if (d.bore[2]) cut(G, p.x, p.y, d.bore[2], d.bore[2], true); else cutBox(G, p.x, p.y, p.x, p.y + 1, true);
+        const out = p.dug > 8 && !solid(G, p.x + p.vx * 0.06, p.y + p.vy * 0.06) && !solid(G, p.x + p.vx * 0.1, p.y + p.vy * 0.1);
+        if (p.bore <= 0 || out || hitTank(G, p) || p.x < 2 || p.x > G.W - 3 || p.y > G.H - 3 || p.y < 2) { go(G, p); return false; }
         continue;
       }
       const e = advance(G, p, h, false);
@@ -525,7 +634,7 @@
       if (e === 1) {
         if (d.bore && !p.bored && !p.tank && solid(G, p.x, p.y) && p.y < G.H - 3) {
           const v = Math.hypot(p.vx, p.vy) || 1, way = d.bore[0];
-          p.bored = 1; p.bore = d.bore[1]; p.vx = way === 'down' ? 0 : way === 'side' ? (p.vx < 0 ? -50 : 50) : p.vx * 50 / v; p.vy = way === 'down' ? 50 : way === 'side' ? 0 : p.vy * 50 / v;
+          p.bored = 1; p.bore = d.bore[1]; p.vx = way === 'fwd' ? p.vx * 50 / v : way === 'side' ? (p.vx < 0 ? -50 : 50) : 0; p.vy = way === 'fwd' ? p.vy * 50 / v : way === 'down' ? 50 : way === 'up' ? -50 : 0;
           dust(G, p.x, p.y, 4, css(colourAt(G, p.x | 0, p.y | 0))); continue;
         }
         go(G, p); return false;
@@ -534,7 +643,7 @@
         p.tr = 0;
         if (tr === 'smoke') part(G, 2, p.x, p.y, (Math.random() - 0.5) * 8, -4, 0.6, '#9aa3b8');
         else if (tr === 'spark') part(G, 0, p.x, p.y, (Math.random() - 0.5) * 10, 0, 0.35, '#ffd23c');
-        else { G.trail.push(p.x, p.y, tr === 'line' ? 1 : 0); if (G.trail.length > 210) G.trail.splice(0, 3); }
+        else { G.trail.push(p.x, p.y, tr === 'line' ? 1 : 0); if (G.trail.length > 165) G.trail.splice(0, 3); }
       }
     }
     return true;
@@ -574,7 +683,7 @@
     for (let i = G.pend.length - 1; i >= 0; i--) { const p = G.pend[i]; if ((p.t -= dt) <= 0) { G.pend.splice(i, 1); p.f(); } }
     settle(G);
     for (let i = G.blasts.length - 1; i >= 0; i--) if ((G.blasts[i].t += dt) >= G.blasts[i].dur) G.blasts.splice(i, 1);
-    for (let i = G.fx.length - 1; i >= 0; i--) if ((G.fx[i].t -= dt) <= 0) G.fx.splice(i, 1);
+    for (let i = G.fx.length - 1; i >= 0; i--) { const f = G.fx[i]; if (f.k === 'cloud') { f.y -= 13 * dt; f.x += G.wind * 0.7 * dt; } if ((f.t -= dt) <= 0) G.fx.splice(i, 1); }
     for (let i = G.parts.length - 1; i >= 0; i--) {
       const p = G.parts[i]; p.life -= dt;
       if (p.k === 1) {
@@ -591,8 +700,23 @@
           else break;
         }
         if (p.x < 0 || p.x >= G.W) p.life = 0;
-        for (const t of G.tanks) if (!t.dead && Math.abs(p.x - t.x) <= 5 && Math.abs(p.y - t.y + 2) <= 5) hurt(G, t, 0.45 * dt, true);
+        for (const t of G.tanks) if (!t.dead && Math.abs(p.x - t.x) <= 5 && Math.abs(p.y - t.y + 2) <= 5) hurt(G, t, 0.45 * p.h * dt, true);
         if (p.life <= 0 && !p.air && p.y + 1 < G.H && solid(G, p.x, p.y + 1)) cutBox(G, p.x, p.y + 1, p.x, p.y + 1, true);  // it burns away the bit it sat on
+      } else if (p.k === 4) {
+        fires++;
+        if (p.air) {
+          p.vy += GRAV * dt; const nx = p.x + p.vx * dt, ny = p.y + p.vy * dt;
+          if (solid(G, nx, ny) || ny >= G.H - 1) { p.air = 0; p.x = Math.floor(p.x); p.y = Math.floor(p.y); } else { p.x = nx; p.y = ny; }
+        } else for (let k = 0; k < 4 && p.life > 0; k++) {  // down, else diagonally down, else along the flat for a while, else it sets
+          const x = p.x, y = p.y, d = p.d;
+          if (!solid(G, x, y + 1)) p.y++;
+          else if (!solid(G, x + d, y) && !solid(G, x + d, y + 1)) { p.x += d; p.y++; }
+          else if (!solid(G, x - d, y) && !solid(G, x - d, y + 1)) { p.x -= d; p.y++; p.d = -d; }
+          else if (!solid(G, x + d, y) && p.sp-- > 0) p.x += d;
+          else p.life = 0;
+        }
+        if (p.x < 1 || p.x >= G.W - 1) p.life = 0;
+        if (p.life <= 0 && !p.air) addBox(G, p.x - 1, p.y - 1, p.x + 1, p.y, 1, DIRT);
       } else if (p.k === 2) { p.x += p.vx * dt; p.y += p.vy * dt; }
       else if (p.k === 3) { p.vy += GRAV * 0.35 * dt; p.vx *= 0.9; p.vy *= 0.9; p.x += p.vx * dt; p.y += p.vy * dt; }
       else { p.vy += GRAV * 1.5 * dt; p.x += p.vx * dt; p.y += p.vy * dt; if (p.vy > 0 && solid(G, p.x, p.y)) p.life = 0; }
@@ -621,15 +745,15 @@
   function paint(g, G, ctx, t) {
     const S = G.S, px = (x, y, w, h) => g.fillRect(Math.round(x) * S, Math.round(y) * S, w * S, h * S);
     /** A projectile's own little shape; also used as the weapon's icon by the power bar. */
-    const sprite = (d, x, y, wide) => {
-      const z = d.sz || 2, sh = d.shape || 'dot'; g.fillStyle = d.col;
+    const sprite = (d, x, y, wide, col) => {
+      const z = d.sz || 2, sh = d.shape || 'dot'; g.fillStyle = col || d.col;
       if (sh === 'dot') px(x - (z >> 1), y - (z >> 1), z, z);
       else if (sh === 'diamond') { px(x - z, y, z * 2 + 1, 1); px(x, y - z, 1, z * 2 + 1); if (z > 1) px(x - 1, y - 1, 3, 3); }
       else if (sh === 'ring') { px(x - 1, y - 2, 3, 1); px(x - 1, y + 2, 3, 1); px(x - 2, y - 1, 1, 3); px(x + 2, y - 1, 1, 3); }
       else if (sh === 'bar') { if (wide) px(x - 2, y, 5, z > 1 ? 2 : 1); else px(x, y - 2, z > 1 ? 2 : 1, 5); }
       else { px(x, y, 1, 1); px(x - 1, y - 1, 1, 1); px(x + 1, y - 1, 1, 1); px(x - 1, y + 1, 1, 1); px(x + 1, y + 1, 1, 1); if (z > 1) { px(x - 2, y - 2, 1, 1); px(x + 2, y + 2, 1, 1); px(x + 2, y - 2, 1, 1); px(x - 2, y + 2, 1, 1); } }
     };
-    const disc = (x, y, rx, ry, c) => { if (rx < 1 || ry < 1) return; g.fillStyle = c; for (let dy = -ry; dy < ry; dy += 2) { const half = Math.round(rx / ry * Math.sqrt(Math.max(0, ry * ry - (dy + 1) * (dy + 1))) / 2) * 2; if (half > 0) px(x - half, y + dy, half * 2, 2); } };
+    const disc = (x, y, rx, ry, c) => { if (rx < 1 || ry < 1) return; const q = rx > 26 ? 4 : 2; g.fillStyle = c; for (let dy = -ry; dy < ry; dy += q) { const half = Math.round(rx / ry * Math.sqrt(Math.max(0, ry * ry - (dy + q / 2) * (dy + q / 2))) / q) * q; if (half > 0) px(x - half, y + dy, half * 2, q); } };  // a very big one is drawn in bigger blocks
     const ring = (x, y, r, c) => { g.fillStyle = c; const n = U.clamp(r * 1.2 | 0, 8, 28); for (let i = 0; i < n; i++) { const a = i / n * 6.283; px(x + Math.cos(a) * r, y + Math.sin(a) * r, 2, 2); } };
     g.fillStyle = 'rgba(6,8,24,.62)'; g.fillRect(0, 0, ctx.w, ctx.h);  // dusk over the backdrop so the bright pixels carry
     g.imageSmoothingEnabled = false; g.drawImage(G.cv, 0, 0, G.W * S, G.H * S);
@@ -654,16 +778,17 @@
     for (const p of G.shells) {
       const d = p.d;
       if (p.y < 0) { g.fillStyle = d.col; px(p.x - 2, 3, 5, 1); px(p.x - 1, 2, 3, 1); px(p.x, 1, 1, 1); continue; }  // above the screen: a mark on the top edge follows it
-      sprite(d, p.x, p.y, Math.abs(p.vx) > Math.abs(p.vy));
+      sprite(d, p.x, p.y, Math.abs(p.vx) > Math.abs(p.vy), p.col);
       if (p.open) { g.fillStyle = '#ffffff'; px(p.x - 3, p.y - 7, 7, 1); px(p.x - 4, p.y - 6, 9, 2); g.fillStyle = '#9aa3b8'; px(p.x - 4, p.y - 4, 1, 2); px(p.x + 4, p.y - 4, 1, 2); }  // its parachute
       else if (d.float && p.age < d.float) { g.fillStyle = '#ff6ad5'; px(p.x - 2, p.y - 9, 5, 5); px(p.x - 1, p.y - 10, 3, 7); g.fillStyle = '#ffffff'; px(p.x - 1, p.y - 8, 1, 1); px(p.x, p.y - 3, 1, 2); }  // its balloon
     }
     for (const p of G.parts) {
-      if (p.k === 1) { const f = Math.random() * 3 | 0; g.fillStyle = f ? '#ff5a1e' : '#ffd23c'; px(p.x, p.y - f, 1, f + 1); }  // a flame licks up and down
+      if (p.k === 1) { const f = Math.random() * (p.h > 1 ? 5 : 3) | 0; g.fillStyle = f ? (p.h > 1 ? '#ffd23c' : '#ff5a1e') : (p.h > 1 ? '#ffffff' : '#ffd23c'); px(p.x, p.y - f, 1, f + 1); }  // a flame licks up and down; the hotter kind burns taller and paler
+      else if (p.k === 4) { g.fillStyle = p.col; px(p.x - 1, p.y - 1, 3, 2); }
       else { g.fillStyle = p.col; px(p.x, p.y, p.k === 2 ? 2 : 1, p.k === 2 ? 2 : 1); }
     }
     for (const b of G.blasts) {
-      const k = b.t / b.dur, c = BLAST[b.s], grow = b.s === 'in' ? 1.1 - k : 0.45 + 0.75 * k, rx = Math.round(b.R * grow), ry = Math.round(b.ry * grow);
+      const k = b.t / b.dur, c = b.c || BLAST[b.s], grow = b.s === 'in' ? 1.1 - k : 0.45 + 0.75 * k, rx = Math.round(b.R * grow), ry = Math.round(b.ry * grow);
       g.globalAlpha = k > 0.75 ? 0.6 : 1;
       if (b.s === 'in') { ring(b.x, b.y, rx, c[0]); disc(b.x, b.y, Math.round(b.R * 0.5 * k), Math.round(b.R * 0.5 * k), c[1]); }
       else { disc(b.x, b.y, rx, ry, c[0]); if (k < 0.8) disc(b.x, b.y, Math.round(rx * 0.68), Math.round(ry * 0.68), c[1]); if (k < 0.5) disc(b.x, b.y, Math.round(rx * 0.36), Math.round(ry * 0.36), c[2]); }
@@ -671,13 +796,23 @@
     }
     for (const f of G.fx) {
       const k = 1 - f.t / f.T;
-      if (f.k === 'pop') ring(f.x, f.y, (f.R || 9) * (0.3 + 0.7 * k), '#ffffff');
+      if (f.k === 'flash') { g.fillStyle = '#ffffff'; g.fillRect(0, 0, ctx.w, ctx.h); }
+      else if (f.k === 'cloud') {  // a stalk and a cap in a few big blocks: hot at first, then smoke
+        const s = Math.round(f.R * (0.6 + 0.4 * Math.min(1, k * 3))), hot = k < 0.3;
+        g.globalAlpha = k > 0.75 ? (1 - k) * 4 : 1;
+        g.fillStyle = hot ? '#ff9a2e' : '#6b7286'; px(f.x - s * 0.22, f.y, Math.max(2, Math.round(s * 0.44)), Math.max(1, Math.round(f.y0 - f.y)));
+        g.fillStyle = hot ? '#ff5a1e' : '#6b7286'; px(f.x - s, f.y - s * 0.35, s * 2, Math.round(s * 0.55));
+        g.fillStyle = hot ? '#ffd23c' : '#9aa3b8'; px(f.x - s * 0.72, f.y - s * 0.75, Math.round(s * 1.44), Math.round(s * 0.5)); px(f.x - s * 0.35, f.y - s, Math.round(s * 0.7), Math.round(s * 0.3));
+        g.fillStyle = hot ? '#ffffff' : '#cfd6ee'; px(f.x - s * 0.5, f.y - s * 0.68, Math.round(s * 0.5), Math.max(1, Math.round(s * 0.14)));
+        g.globalAlpha = 1;
+      }
+      else if (f.k === 'pop') ring(f.x, f.y, (f.R || 9) * (0.3 + 0.7 * k), '#ffffff');
       else if (f.k === 'bolt') { for (let i = 0; i < f.pts.length; i += 2) { g.fillStyle = (i + (t * 20 | 0)) % 4 ? '#3fe0ff' : '#ffffff'; px(f.pts[i], f.pts[i + 1], 2, 2); if (i) px((f.pts[i] + f.pts[i - 2]) / 2, (f.pts[i + 1] + f.pts[i - 1]) / 2, 2, 2); } }
       else if (f.k === 'mark') { if (t * 8 % 1 < 0.5) { g.fillStyle = '#ff4d4d'; px(f.x - 3, f.y - 1, 7, 1); px(f.x, f.y - 4, 1, 7); } }
       else if (f.k === 'col') { g.globalAlpha = 1 - k * 0.7; g.fillStyle = f.c; px(f.x - f.w, f.y0, f.w * 2 + 1, Math.round(f.y - f.y0)); g.fillStyle = '#ffffff'; px(f.x - (f.w >> 1), f.y0, (f.w >> 1) * 2 + 1, Math.round(f.y - f.y0)); g.globalAlpha = 1; }
       else {  // the laser: the one thing here that is a line, not blocks
         g.globalAlpha = 1 - k * 0.8; g.lineCap = 'butt';
-        for (const w of [[S * 3, '#ff4d4d'], [S, '#ffffff']]) { g.strokeStyle = w[1]; g.lineWidth = w[0]; g.beginPath(); g.moveTo(f.x * S, f.y * S); g.lineTo(f.x2 * S, f.y2 * S); g.stroke(); }
+        for (const w of [[S * (f.w * 2 + 1), f.c], [S * f.w, '#ffffff']]) { g.strokeStyle = w[1]; g.lineWidth = w[0]; g.beginPath(); g.moveTo(f.x * S, f.y * S); g.lineTo(f.x2 * S, f.y2 * S); g.stroke(); }
         g.globalAlpha = 1;
       }
     }
