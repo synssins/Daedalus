@@ -9,3 +9,5 @@ AGENTS.md
 .impeccable/mocks/
 .impeccable/questions/
 .impeccable/review/
+design.json
+web/design.js

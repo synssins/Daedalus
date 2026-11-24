@@ -14,6 +14,12 @@ ssh @ssh "rm -rf $tmp && mkdir -p $tmp"
 $cfg = Join-Path $PSScriptRoot 'config.json'
 if (Test-Path $cfg) { scp @scp $cfg "mobile@${Ip}:$tmp/config.json" }
 
+# The design the app draws: this home's design.json (git-ignored) if present, else the sample.
+# Wrapped as a script because a bundled page cannot fetch() local files. Later the add-on supplies it.
+$design = Join-Path $PSScriptRoot 'design.json'
+if (-not (Test-Path $design)) { $design = Join-Path $PSScriptRoot 'design.sample.json' }
+[IO.File]::WriteAllText((Join-Path $PSScriptRoot 'web\design.js'), 'window.HP_DESIGN = ' + [IO.File]::ReadAllText($design) + ';')
+
 if ($WebOnly) {
     scp @scp -r (Join-Path $PSScriptRoot 'web') "mobile@${Ip}:$tmp/web"
     $install = "sudo rm -rf $app/web && sudo cp -R $tmp/web $app/web"
