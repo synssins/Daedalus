@@ -376,73 +376,324 @@
   });
 
   // ---------- Train ----------
-  // A toy train on a thin track. The track is drawn once; each car sits on two points of the route (its two axles), so
-  // it swings round the curves the way a real one does.
-  const WAGON = ['#e2483d', '#f0b429', '#3b82d6', '#4caf6a'];
+  // Toy trains on a little railway of thin track: one circuit, or a network with points and crossings. The track is
+  // drawn once; each car sits on two points of the route (its two axles), so it swings round the curves the way a real
+  // one does.
+  // The track is cut into sections, as on a real railway. A train holds every section and junction its length covers
+  // and may only run on when everything up to the next place it can stand is free; otherwise it brakes, stands at the
+  // signal and pulls away when the way clears. Two trains never hold the same thing, so they can never touch.
+  const WAGON = ['#e2483d', '#f0b429', '#3b82d6', '#4caf6a'], BOILER = ['#2f9e5e', '#3b6fd6', '#8a4fc9', '#d9822b'];
+  const STOP = 22, CLEAR = 30;  // a train stands this far short of the end of its track; a section is given back once the tail is this far past it
+  /** One closed circuit through the network, chosen from the seed: its corners and junctions in order, as node numbers.
+   *  Several are tried; the winner runs partly round the border and partly through the gaps, with a handful of bends. */
+  function circuit(net, ctx) {
+    const N = net.nodes, E = net.edges, r = ctx.rand, m = net.m;
+    const rim = e => { const A = N[e.a]; return e.v ? Math.abs(A.x - m) < 3 || Math.abs(A.x - ctx.w + m) < 3 : Math.abs(A.y - m) < 3 || Math.abs(A.y - ctx.h + m) < 3; };
+    const P = 2 * (ctx.w + ctx.h) - 8 * m, lo = P * 0.7, hi = P * 1.2;
+    let best = null, bs = -1e9;
+    for (let k = 0; k < 14; k++) {
+      const s = E[net.coreList[Math.floor(r() * net.coreList.length)]].a, path = [s], via = [], used = new Set(path); let len = 0, steps = 0;
+      // wander without crossing the own trail (straight on more often than not), back up from dead ends, stop on getting home
+      const go = n => {
+        if (++steps > 2500) return false;
+        const last = via.length ? E[via[via.length - 1]] : null, es = N[n].core.map(i => [i, r() - (last && E[i].v === last.v ? 0.7 : 0)]).sort((a, b) => a[1] - b[1]);
+        for (const x of es) {
+          const i = x[0], e = E[i], q = other(e, n);
+          if (last === e) continue;
+          if (q === s) { if (path.length > 3 && len + e.len >= lo) { via.push(i); len += e.len; return true; } continue; }
+          if (used.has(q) || len + e.len > hi) continue;
+          used.add(q); path.push(q); via.push(i); len += e.len;
+          if (go(q)) return true;
+          used.delete(q); path.pop(); via.pop(); len -= e.len;
+        }
+        return false;
+      };
+      if (!go(s)) continue;
+      let inner = 0, bends = 0, tight = 0;
+      via.forEach((i, j) => {
+        const e = E[i], b0 = E[via[(j + via.length - 1) % via.length]].v !== e.v, b1 = E[via[(j + 1) % via.length]].v !== e.v;
+        if (!rim(e)) inner += e.len; if (b1) bends++; if (b0 && b1 && e.len < 60) tight++;
+      });
+      const score = -Math.abs(inner / len - 0.45) * 12 - Math.abs(bends - 8) * 0.4 - tight * 4;
+      if (score > bs) { bs = score; best = path.slice(); }
+    }
+    if (best) return best;
+    // nothing found in the gaps: once round the border, which is always a loop
+    const path = []; let n = E[net.coreList.filter(i => rim(E[i]))[0]].a, prev = -1;
+    do { path.push(n); const here = n, i = N[n].core.find(j => rim(E[j]) && j !== prev); if (i == null) break; prev = i; n = other(E[i], here); } while (n !== path[0] && path.length < 400);
+    return path;
+  }
+  /** The track plan. Starts from the circuit; a network then gets a few branches: each leaves the track at points,
+   *  runs through gaps nobody uses yet (straight over a line in its way: a diamond crossing) and joins the track again
+   *  somewhere else, so nothing is a dead end. All track is one way, so two trains never meet head on.
+   *  The track between two junctions is a "line". A line long enough is cut into sections a whole train (length T) can
+   *  stand in; a shorter one is a single section that trains only pass through.
+   *  Returns null when there is no room for a train to stand in at least two places, or some track could never be left. */
+  function railway(net, ctx, path, T, loop) {
+    const N = net.nodes, E = net.edges, r = ctx.rand, out = N.map(() => []), inn = N.map(() => []), taken = new Set(), cross = {};
+    const link = (a, b) => { out[a].push(b); inn[b].push(a); taken.add(N[a].core.find(i => other(E[i], a) === b)); };
+    path.forEach((n, i) => link(n, path[(i + 1) % path.length]));
+    const plain = n => out[n].length === 1 && inn[n].length === 1;
+    if (!loop) {
+      let total = 0, len = 0, crossings = 0; for (const i of net.coreList) { total += E[i].len; if (taken.has(i)) len += E[i].len; }
+      for (let tries = 0, left = 2 + Math.floor(r() * 2); tries < 60 && left; tries++) {
+        const cand = []; N.forEach((_, i) => { if (plain(i)) cand.push(i); });
+        const u = cand[Math.floor(r() * cand.length)], nodes = [u], via = [], xs = [], min = 140, max = Math.min(1400, total * 0.6 - len); let l = 0, steps = 0;
+        const go = n => {
+          if (++steps > 400) return false;
+          const last = via.length ? E[via[via.length - 1]] : null, es = N[n].core.filter(i => !taken.has(i) && E[i] !== last).map(i => [i, r() - (last && E[i].v === last.v ? 0.5 : 0)]).sort((a, b) => a[1] - b[1]);
+          for (const x of es) {
+            const i = x[0], e = E[i], q = other(e, n);
+            if (nodes.indexOf(q) >= 0) continue;
+            if (!out[q].length) { if (l + e.len > max) continue; nodes.push(q); via.push(i); l += e.len; if (go(q)) return true; nodes.pop(); via.pop(); l -= e.len; continue; }
+            if (!plain(q)) continue;
+            // a line in the way: where it runs straight across, sometimes carry on over it; otherwise join it, if the branch is long enough
+            const A = N[inn[q][0]], B = N[out[q][0]], Q = N[q], across = e.v ? Math.abs(A.y - Q.y) < 1 && Math.abs(B.y - Q.y) < 1 : Math.abs(A.x - Q.x) < 1 && Math.abs(B.x - Q.x) < 1;
+            const i2 = across && crossings + xs.length < 2 && r() < 0.9 ? N[q].core.find(j => j !== i && E[j].v === e.v && !taken.has(j) && !out[other(E[j], q)].length && nodes.indexOf(other(E[j], q)) < 0) : null;
+            if (i2 != null && l + e.len + E[i2].len <= max) {
+              const add = e.len + E[i2].len; nodes.push(q, other(E[i2], q)); via.push(i, i2); xs.push(q); l += add;
+              if (go(nodes[nodes.length - 1])) return true;
+              nodes.length -= 2; via.length -= 2; xs.pop(); l -= add;
+            }
+            if (l + e.len >= min) { nodes.push(q); via.push(i); l += e.len; return true; }
+          }
+          return false;
+        };
+        if (max < min || !go(u)) continue;
+        for (let i = 0; i < nodes.length - 1; i++) link(nodes[i], nodes[i + 1]);
+        for (const x of xs) cross[x] = true;
+        crossings += xs.length; len += l; left--;
+      }
+    }
+    // lines: from each junction (or, on a plain loop, from its first point) along the track to the next one
+    const starts = [], at0 = {}, from = {}, into = {}, segs = [];
+    N.forEach((_, i) => { if (out[i].length + inn[i].length > 2) starts.push(i); });
+    if (!starts.length) starts.push(path[0]);
+    starts.forEach((n, i) => { at0[n] = i + 1; from[n] = []; into[n] = []; });
+    let S = 0, M = 0;
+    for (const n of starts) for (const m of out[n]) {
+      const p = [{x: N[n].x, y: N[n].y}], c = [0]; let cur = m;
+      for (;;) { const P = N[cur], l = p[p.length - 1]; c.push(c[c.length - 1] + Math.hypot(P.x - l.x, P.y - l.y)); p.push({x: P.x, y: P.y}); if (at0[cur]) break; cur = out[cur][0]; }
+      const len = c[c.length - 1], q = p.length - 1, l1 = len - c[q - 1], k = Math.min(Math.floor(len / (T + 60)), Math.max(2, Math.floor(len / 300)));
+      // ox, oy: which way it leaves its first point; ix, iy: which way it arrives at its last; l0, l1: the lengths of those two legs
+      from[n].push(segs.length); into[cur].push(segs.length);
+      segs.push({a: n, b: cur, p, c, len, k, s0: S, l0: c[1], l1, ox: (p[1].x - p[0].x) / c[1], oy: (p[1].y - p[0].y) / c[1], ix: (p[q].x - p[q - 1].x) / l1, iy: (p[q].y - p[q - 1].y) / l1, used: 0, routes: []});
+      S += Math.max(1, k); M += k;
+    }
+    /** May a train go from line X on to line Y? Always at points; on a diamond crossing only straight over. */
+    const ok = (X, Y) => !cross[Y.a] || X.ix * Y.ox + X.iy * Y.oy > 0.9;
+    // routes: from the end of each line a train can stand on, every way on to the next line it can stand on, with all
+    // it has to hold on the way: each junction passed (numbered after the sections) and each section
+    const next = segs.map(() => []);
+    segs.forEach((X, xi) => {
+      if (!X.k) return;
+      const go = (W, list, seen) => {
+        for (const o of from[W.b]) {
+          const Y = segs[o]; if (X.routes.length >= 12 || !ok(W, Y)) continue;
+          if (Y.k) { const all = list.concat(o), ids = []; for (const i of all) ids.push(S + at0[segs[i].a] - 1, segs[i].s0); X.routes.push({segs: all, ids}); if (next[xi].indexOf(o) < 0) next[xi].push(o); }
+          else if (list.length < 8 && seen.indexOf(Y.b) < 0) go(Y, list.concat(o), seen.concat(Y.b));
+        }
+      };
+      go(X, [], [X.b]);
+    });
+    // every standing place must lead to every other one, or a train could be shut in
+    const stand = []; segs.forEach((X, i) => { if (X.k) stand.push(i); });
+    const reach = fwd => { const seen = [stand[0]]; for (let i = 0; i < seen.length; i++) for (const j of stand) if (seen.indexOf(j) < 0 && (fwd ? next[seen[i]].indexOf(j) >= 0 : next[j].indexOf(seen[i]) >= 0)) seen.push(j); return seen.length; };
+    if (M < 2 || reach(true) < stand.length || reach(false) < stand.length) return null;
+    return {segs, S, M, starts, at0, from, into, cross, ok, own: new Array(S + starts.length).fill(-1), go: new Array(S).fill(-1)};
+  }
+  /** Where line X runs on into line Y through their junction: the three points of the curve the cars follow there. */
+  function join(N, X, Y, R) {
+    const n = N[Y.a], e1 = Math.min(R, X.l1 / 2), e0 = Math.min(R, Y.l0 / 2);
+    return [n.x - X.ix * e1, n.y - X.iy * e1, n.x, n.y, n.x + Y.ox * e0, n.y + Y.oy * e0];
+  }
+  /** Train T (number ti) wants more track. In the middle of a line that is the next section; at the end of a line it is
+   *  a whole route: the junctions, any short sections and the next section it can stand in, all free, taken together.
+   *  So a train never stops across a junction, and a train that stands holds one section only. With more standing
+   *  places than trains somebody can always move: no jam. Returns true when the train got its track. */
+  function ahead(st, T, ti) {
+    const own = st.own, X = st.segs[T.seg], w = T.w, sig = X.s0 + T.j;
+    if (T.j < X.k - 1) {
+      if (own[sig + 1] >= 0) return false;
+      own[sig + 1] = ti; T.j++; T.sig.push(sig, T.end); st.go[sig] = ti; T.end += X.len / X.k; T.held.push(sig + 1, T.end); return true;
+    }
+    // of the routes that are free, mostly the one used longest ago, so trains get round all of the track
+    let best = null, bs = 1e18;
+    for (const R of X.routes) {
+      if (R.ids.some(id => own[id] >= 0)) continue;
+      let s = Math.random() * 3; for (const i of R.segs) s += st.segs[i].used / R.segs.length;
+      if (s < bs) { bs = s; best = R; }
+    }
+    if (!best) return false;
+    T.sig.push(sig, T.end); st.go[sig] = ti; st.tick++;
+    let prev = X;
+    for (const i of best.segs) {
+      const Y = st.segs[i], c0 = w.c[w.c.length - 1], node = st.S + st.at0[Y.a] - 1;
+      own[node] = own[Y.s0] = ti; T.held.push(node, c0); Y.used = st.tick;
+      if (st.pts[Y.a]) st.pts[Y.a] = join(st.N, prev, Y, st.R);  // the points go over for this train
+      for (let q = 1; q < Y.p.length; q++) { w.p.push(Y.p[q]); w.c.push(c0 + Y.c[q]); }
+      if (Y.k) { T.seg = i; T.j = 0; T.end = c0 + Y.len / Y.k; }
+      T.held.push(Y.s0, Y.k ? T.end : c0 + Y.len); prev = Y;
+    }
+    return true;
+  }
   HP.fx.add('train', {
     label: 'Train', live: true, fps: 12,
-    options: [{key: 'speed', label: 'Speed', type: 'range', min: 0.4, max: 2, step: 0.1, default: 1}],
+    options: [{key: 'trains', label: 'Trains', type: 'range', min: 1, max: 4, step: 1, default: 2},
+      {key: 'cars', label: 'Cars', type: 'range', min: 1, max: 8, step: 1, default: 4},
+      {key: 'speed', label: 'Speed', type: 'range', min: 0.4, max: 2, step: 0.1, default: 1},
+      {key: 'track', label: 'Track', type: 'select', choices: [['network', 'Network'], ['loop', 'Loop']], default: 'network'}],
     create(ctx) {
-      const net = network(ctx), r = ctx.rand, N = net.nodes, still = sheet(ctx), g = still.getContext('2d'), R = 12, o = 2.6;
-      // sleepers first, rails on top
+      const net = network(ctx), r = ctx.rand, N = net.nodes, still = sheet(ctx), g = still.getContext('2d'), R = 12, o = 2.6, q = {x: 0, y: 0, a: 0};
+      const path = circuit(net, ctx); let L = 0; path.forEach((n, i) => { const m = N[path[(i + 1) % path.length]]; L += Math.hypot(N[n].x - m.x, N[n].y - m.y); });
+      // no train longer than half the circuit, so a plain loop always has two places for it to stand
+      const nc = Math.min(U.clamp(Math.round(ctx.opts.cars), 1, 8), Math.max(1, Math.floor((L / 2 - 84) / 20))), len = 24 + 20 * nc;
+      const rw = (ctx.opts.track !== 'loop' && railway(net, ctx, path, len, false)) || railway(net, ctx, path, len, true);
+      const st = {still, N, R, trains: [], sig: [], pts: {}, puffs: [], tick: 0, o1: {x: 0, y: 0, a: 0}, o2: {x: 0, y: 0, a: 0}};
+      if (!rw) return st;  // a screen too small for any train
+      const segs = rw.segs, lamp = rgb => dot(20, [[0, 'rgba(' + rgb + ',1)'], [0.3, 'rgba(' + rgb + ',.55)'], [1, 'rgba(' + rgb + ',0)']]);
+      // sleepers first, rails on top, both along the very curve the cars follow; a line's rails stop short of its
+      // junctions, where each way a train can take through gets its own rails (straight or curved)
       g.strokeStyle = 'rgba(150,112,80,.42)'; g.lineWidth = 1.6; g.beginPath();
-      for (const i of net.coreList) { const E = net.edges[i], A = N[E.a]; for (let s = 4; s < E.len; s += 8) { if (E.v) { g.moveTo(A.x - 4.6, A.y + s); g.lineTo(A.x + 4.6, A.y + s); } else { g.moveTo(A.x + s, A.y - 4.6); g.lineTo(A.x + s, A.y + 4.6); } } }
+      for (const X of segs) for (let s = 4; s < X.len; s += 8) { at(X, s, R, q); const nx = -Math.sin(q.a) * 4.6, ny = Math.cos(q.a) * 4.6; g.moveTo(q.x - nx, q.y - ny); g.lineTo(q.x + nx, q.y + ny); }
       g.stroke();
       g.strokeStyle = 'rgba(222,226,236,.42)'; g.lineWidth = 1; g.beginPath();
-      for (const i of net.coreList) { const E = net.edges[i], A = N[E.a], B = N[E.b]; for (let sd = -1; sd <= 1; sd += 2) { if (E.v) { g.moveTo(A.x + sd * o, A.y); g.lineTo(B.x + sd * o, B.y); } else { g.moveTo(A.x, A.y + sd * o); g.lineTo(B.x, B.y + sd * o); } } }
-      // curved rails for every turn a train can take at a junction (same curve the cars follow)
-      N.forEach((n, ni) => {
-        for (let a = 0; a < n.core.length; a++) for (let b = a + 1; b < n.core.length; b++) {
-          const E1 = net.edges[n.core[a]], E2 = net.edges[n.core[b]]; if (E1.v === E2.v) continue;
-          const P = N[other(E1, ni)], Q = N[other(E2, ni)], x1 = (P.x - n.x) / E1.len, y1 = (P.y - n.y) / E1.len, x2 = (Q.x - n.x) / E2.len, y2 = (Q.y - n.y) / E2.len, rr = Math.min(R, E1.len / 2, E2.len / 2);
-          for (let sd = -1; sd <= 1; sd += 2) { const k = sd * o; g.moveTo(n.x + x1 * rr + x2 * k, n.y + y1 * rr + y2 * k); g.quadraticCurveTo(n.x + (x1 + x2) * k, n.y + (y1 + y2) * k, n.x + x2 * rr + x1 * k, n.y + y2 * rr + y1 * k); }
+      const rail = (sd, first) => { const x = q.x - Math.sin(q.a) * o * sd, y = q.y + Math.cos(q.a) * o * sd; if (first) g.moveTo(x, y); else g.lineTo(x, y); };
+      for (let sd = -1; sd <= 1; sd += 2) {
+        for (const X of segs) { const a = Math.min(R, X.l0 / 2), b = X.len - Math.min(R, X.l1 / 2); for (let s = a; ; s += 4) { at(X, Math.min(s, b), R, q); rail(sd, s === a); if (s >= b) break; } }
+        for (const n of rw.starts) for (const xi of rw.into[n]) for (const yi of rw.from[n]) if (rw.ok(segs[xi], segs[yi])) {
+          const j = join(N, segs[xi], segs[yi], R); q.a = Math.atan2(j[5] - j[1], j[4] - j[0]);
+          for (let i = 0; i <= 6; i++) { bez(j[0], j[1], j[2], j[3], j[4], j[5], i / 6, q); rail(sd, !i); }
+        }
+      }
+      g.stroke();
+      // points: which way each set lies is drawn every frame as a bright line down the middle of that way
+      for (const n of rw.starts) if (rw.into[n].length + rw.from[n].length === 3) st.pts[n] = join(N, segs[rw.into[n][0]], segs[rw.from[n][0]], R);
+      // a signal beside the track at the end of every section a train can stand in (on whichever side is on the screen)
+      const places = [];
+      segs.forEach((X, xi) => {
+        for (let j = 0; j < X.k; j++) {
+          places.push([xi, j]);
+          at(X, (j + 1) * X.len / X.k - 15, R, q); let x = q.x - Math.sin(q.a) * 9.5, y = q.y + Math.cos(q.a) * 9.5;
+          if (x < 5 || y < 5 || x > ctx.w - 5 || y > ctx.h - 5) { x = 2 * q.x - x; y = 2 * q.y - y; }
+          st.sig.push({x, y, seg: xi, j, id: X.s0 + j});
+          g.fillStyle = '#15161a'; g.strokeStyle = 'rgba(205,220,240,.6)'; g.lineWidth = 0.9; g.beginPath(); g.arc(x, y, 3.8, 0, TAU); g.fill(); g.stroke();
         }
       });
-      g.stroke();
-      const w = start(net, net.coreList[Math.floor(r() * net.coreList.length)], r() < 0.5, true), wagons = 3 + (r() < 0.5 ? 1 : 0), first = Math.floor(r() * 4);
-      w.d = 160; grow(w, w.d, 130);
-      const cars = [{len: 24, back: 12}];  // back: how far the car's middle is behind the engine's nose
-      for (let i = 0; i < wagons; i++) cars.push({len: 17, back: 24 + 3 + 8.5 + i * 20, col: WAGON[(first + i) % 4]});
-      for (const c of cars) { c.x = c.y = c.a = 0; }
-      return {net, still, w, cars, v: 0, puffs: [], em: 0, R, steam: dot(32, [[0, 'rgba(255,255,255,.9)'], [0.5, 'rgba(245,247,252,.45)'], [1, 'rgba(240,244,250,0)']]), o1: {x: 0, y: 0, a: 0}, o2: {x: 0, y: 0, a: 0}};
+      // always one standing place more than there are trains
+      const nt = U.clamp(Math.round(ctx.opts.trains), 1, rw.M - 1);
+      for (let i = 0; i < nt; i++) {
+        const pl = places[Math.floor(i * places.length / nt)], X = segs[pl[0]], bl = X.len / X.k, end = (pl[1] + 1) * bl, first = Math.floor(r() * 4), cars = [{len: 24, back: 12}];  // back: how far the car's middle is behind the engine's nose
+        for (let j = 0; j < nc; j++) cars.push({len: 17, back: 24 + 3 + 8.5 + j * 20, col: WAGON[(first + j) % 4]});
+        for (const car of cars) { car.x = car.y = car.a = 0; }
+        // each train has its own pace, so a quick one catches a slow one up and has to follow it from signal to signal
+        // w: the train's own route, grown ahead and cut off behind; d: where its nose is along it; end: where the section it may run to ends
+        // held: what it holds, as pairs (number, where along the route that ends); sig: the signals it has been cleared past, the same way
+        rw.own[X.s0 + pl[1]] = i;
+        st.trains.push({w: {p: X.p.slice(), c: X.c.slice()}, d: end - STOP - r() * (bl - len - 60), v: 0, top: 55 * ([1.18, 0.8, 1.02, 0.9][i % 4] + (r() - 0.5) * 0.08), seg: pl[0], j: pl[1], end, held: [X.s0 + pl[1], end], sig: [], len, cars, em: r() * 0.17, toot: 0, boil: BOILER[i % 4]});
+      }
+      // Headlight. The cone is painted once, lamp at (4, 64) pointing right, fading with distance and towards its sides.
+      // "lit" is a scratch canvas the same size: each frame the tile edges in front of an engine are drawn into it and cut
+      // down to the cone's shape and strength, which is what makes the light fall on the tiles.
+      const cone = document.createElement('canvas'), lit = document.createElement('canvas'); cone.width = lit.width = 176; cone.height = lit.height = 128;
+      const cg = cone.getContext('2d'), beam = cg.createRadialGradient(4, 64, 0, 4, 64, 168);
+      beam.addColorStop(0, 'rgba(255,228,165,.24)'); beam.addColorStop(0.35, 'rgba(255,220,150,.11)'); beam.addColorStop(1, 'rgba(255,214,140,0)');
+      cg.fillStyle = beam;
+      // seven wedges, each narrower, so the sides fade out softly
+      for (let h = 0.34; h > 0.09; h -= 0.04) { cg.beginPath(); cg.moveTo(4, 64); cg.arc(4, 64, 168, -h, h); cg.closePath(); cg.fill(); }
+      st.cone = cone; st.lit = lit; st.tiles = net.solid;
+      return Object.assign(st, {segs, S: rw.S, at0: rw.at0, own: rw.own, go: rw.go, red: lamp('255,72,56'), green: lamp('80,235,120'),
+        steam: dot(32, [[0, 'rgba(255,255,255,.9)'], [0.5, 'rgba(245,247,252,.45)'], [1, 'rgba(240,244,250,0)']])});
+    },
+    press(st, rect) {  // the engine nearest the pressed tile whistles
+      let best = null, bd = 1e9;
+      for (const T of st.trains) { const e = T.cars[0], d = Math.hypot(e.x - rect.x - rect.w / 2, e.y - rect.y - rect.h / 2); if (d < bd) { bd = d; best = T; } }
+      if (best) best.toot = 3;
     },
     draw(g, st, ctx, t, dt) {
-      const w = st.w, top = 55 * ctx.opts.speed;
+      const own = st.own;
       g.drawImage(st.still, 0, 0, ctx.w, ctx.h);
-      // slow for the turn ahead (and until the engine is round it), a touch for any junction; ease to the new speed
-      let f = 1;
-      for (let k = 1; k < w.p.length - 1; k++) {
-        const gap = w.c[k] - (w.d - 10), near = gap > 0 ? gap / 90 : -gap / 45, nd = w.p[k].n >= 0 ? w.net.nodes[w.p[k].n] : null;
-        if (w.p[k].sharp) f = Math.min(f, near); else if (nd && nd.core.length > 2) f = Math.min(f, 0.72 + near * 0.28);
-      }
-      st.v += (top * (0.36 + 0.64 * U.span(f, 0, 1)) - st.v) * Math.min(1, dt * 2.2);
-      w.d += st.v * dt; grow(w, w.d, 130); w.d -= trim(w, w.d, 130);
-      for (const c of st.cars) {
-        const p = at(w, w.d - c.back + c.len * 0.32, st.R, st.o1), q = at(w, w.d - c.back - c.len * 0.32, st.R, st.o2);
-        c.x = (p.x + q.x) / 2; c.y = (p.y + q.y) / 2; c.a = Math.atan2(p.y - q.y, p.x - q.x);
-      }
-      g.strokeStyle = '#1c1d22'; g.lineWidth = 1.6; g.beginPath(); st.cars.forEach((c, i) => { if (i) g.lineTo(c.x, c.y); else g.moveTo(c.x, c.y); }); g.stroke();  // couplings
-      for (let i = st.cars.length - 1; i >= 0; i--) {
-        const c = st.cars[i]; g.save(); g.translate(c.x, c.y); g.rotate(c.a);
-        if (i) {
-          g.fillStyle = c.col; g.strokeStyle = 'rgba(20,20,30,.75)'; g.lineWidth = 0.9; rbox(g, -8.5, -4.3, 17, 8.6, 1.6); g.fill(); g.stroke();
-          g.fillStyle = 'rgba(0,0,0,.28)'; g.fillRect(-6.3, -2.5, 12.6, 5); g.fillStyle = 'rgba(255,255,255,.3)'; g.fillRect(-6.3, -2.5, 12.6, 1.1);
-        } else {
-          g.fillStyle = '#20232a'; rbox(g, -12, -4.5, 24, 9, 1.8); g.fill();                    // frame
-          g.fillStyle = '#2f9e5e'; rbox(g, -3, -3.5, 14.2, 7, 3); g.fill();                      // boiler
-          g.fillStyle = 'rgba(255,255,255,.28)'; g.fillRect(-2, -1, 12, 1.2);
-          g.fillStyle = '#c8372d'; rbox(g, -11.5, -4.4, 9, 8.8, 1.4); g.fill();                  // cab
-          g.fillStyle = '#e8695d'; g.fillRect(-10.2, -3, 6.4, 6);
-          g.fillStyle = '#e8b93c'; g.beginPath(); g.arc(2.6, 0, 1.6, 0, TAU); g.fill();          // dome
-          g.fillStyle = '#15161a'; g.beginPath(); g.arc(7.6, 0, 2.2, 0, TAU); g.fill();          // chimney
-          g.strokeStyle = '#8b8f99'; g.lineWidth = 0.9; g.stroke();
-          g.fillStyle = '#c8372d'; g.fillRect(11.2, -4.2, 1.4, 8.4);                             // buffer beam
+      st.trains.forEach((T, ti) => {
+        const w = T.w, p = w.p;
+        // slow for a bend ahead (and until the engine is round it); ease to the new speed
+        let f = 1;
+        for (let k = 1; k < p.length - 1; k++) if (Math.abs((p[k].x - p[k - 1].x) * (p[k + 1].y - p[k].y) - (p[k].y - p[k - 1].y) * (p[k + 1].x - p[k].x)) > 1) { const gap = w.c[k] - T.d + 10; f = Math.min(f, gap > 0 ? gap / 90 : -gap / 45); }
+        // more track is asked for once within braking distance of the end of what the train has; without it, that end is as far as it may go
+        let room = T.end - STOP - T.d;
+        if (room < T.v * T.v / 68 + 30 && ahead(st, T, ti)) room = T.end - STOP - T.d;
+        T.v += U.clamp(T.top * ctx.opts.speed * (0.45 + 0.55 * U.span(f, 0, 1)) - T.v, -70 * dt, 22 * dt);
+        T.v = Math.min(T.v, Math.sqrt(Math.max(0, 68 * room)));  // never faster than it can stop in the room it has
+        T.d += Math.min(T.v * dt, Math.max(0, room));
+        while (T.held.length > 2 && T.d - T.len - CLEAR > T.held[1]) { own[T.held[0]] = -1; T.held.splice(0, 2); }  // the tail is well clear of a section or junction: give it back
+        while (T.sig.length && T.d > T.sig[1]) { st.go[T.sig[0]] = -1; T.sig.splice(0, 2); }
+        const cut = trim(w, T.d, T.len + 40);
+        if (cut) { T.d -= cut; T.end -= cut; for (let i = 1; i < T.held.length; i += 2) T.held[i] -= cut; for (let i = 1; i < T.sig.length; i += 2) T.sig[i] -= cut; }
+        for (const c of T.cars) {
+          const a = at(w, T.d - c.back + c.len * 0.32, st.R, st.o1), b = at(w, T.d - c.back - c.len * 0.32, st.R, st.o2);
+          c.x = (a.x + b.x) / 2; c.y = (a.y + b.y) / 2; c.a = Math.atan2(a.y - b.y, a.x - b.x);
         }
-        g.restore();
+      });
+      g.strokeStyle = 'rgba(255,236,170,.85)'; g.lineWidth = 1.5; g.lineCap = 'round'; g.beginPath();
+      for (const n in st.pts) { const j = st.pts[n]; g.moveTo(j[0], j[1]); g.quadraticCurveTo(j[2], j[3], j[4], j[5]); }
+      g.stroke(); g.lineCap = 'butt';
+      // signals: green when the train may go on (track kept for it, or free for whoever comes), red when what lies ahead is taken
+      for (const s of st.sig) {
+        const X = st.segs[s.seg], red = st.go[s.id] < 0 && (s.j < X.k - 1 ? own[s.id + 1] >= 0 : !X.routes.some(R => !R.ids.some(id => own[id] >= 0)));
+        g.drawImage(red ? st.red : st.green, s.x - 8, s.y - 8, 16, 16);
+        g.fillStyle = red ? '#ff5a48' : '#5cf08a'; g.beginPath(); g.arc(s.x, s.y, 2.1, 0, TAU); g.fill();
       }
-      // steam: puffs are left where the chimney was and swell and thin out as the train moves on
-      const e = st.cars[0]; st.em += dt * (0.5 + st.v / 55);
-      if (st.em > 0.17 && st.puffs.length < 14) { st.em = 0; st.puffs.push({x: e.x + Math.cos(e.a) * 7.6, y: e.y + Math.sin(e.a) * 7.6, t: 0, r: 3 + Math.random() * 2, vx: (Math.random() - 0.5) * 8, vy: -5 - Math.random() * 5}); }
+      // headlights: barely there by day, growing as the sun sinks (from 8 degrees up to 4 below), full at night
+      const env = ctx.env, k = env.night ? 1 : typeof env.elevation === 'number' ? 0.18 + 0.82 * U.span(8 - env.elevation, 0, 12) : 0.18, lg = st.lit ? st.lit.getContext('2d') : null;
+      for (const T of st.trains) {
+        const e = T.cars[0], co = Math.cos(e.a), si = Math.sin(e.a), lx = e.x + co * 12, ly = e.y + si * 12;
+        // the sides of nearby tiles that face the lamp, drawn as the lamp sees them (lamp at (4, 64), beam to the right)
+        lg.setTransform(1, 0, 0, 1, 0, 0); lg.globalCompositeOperation = 'source-over'; lg.clearRect(0, 0, 176, 128);
+        lg.translate(4, 64); lg.rotate(-e.a); lg.translate(-lx, -ly); lg.beginPath();
+        for (const b of st.tiles) {
+          const x2 = b.x + b.w, y2 = b.y + b.h, dx = Math.max(b.x - lx, 0, lx - x2), dy = Math.max(b.y - ly, 0, ly - y2);
+          if (dx * dx + dy * dy > 28224 || (!dx && !dy) || Math.max(co * (b.x - lx), co * (x2 - lx)) + Math.max(si * (b.y - ly), si * (y2 - ly)) < 0) continue;  // out of reach, or all of it behind the lamp
+          const rr = Math.min(b.r || 0, b.w / 2, b.h / 2);
+          if (ly < b.y) { lg.moveTo(b.x, b.y + rr); lg.arcTo(b.x, b.y, b.x + rr, b.y, rr); lg.lineTo(x2 - rr, b.y); lg.arcTo(x2, b.y, x2, b.y + rr, rr); }
+          if (ly > y2) { lg.moveTo(b.x, y2 - rr); lg.arcTo(b.x, y2, b.x + rr, y2, rr); lg.lineTo(x2 - rr, y2); lg.arcTo(x2, y2, x2, y2 - rr, rr); }
+          if (lx < b.x) { lg.moveTo(b.x + rr, b.y); lg.arcTo(b.x, b.y, b.x, b.y + rr, rr); lg.lineTo(b.x, y2 - rr); lg.arcTo(b.x, y2, b.x + rr, y2, rr); }
+          if (lx > x2) { lg.moveTo(x2 - rr, b.y); lg.arcTo(x2, b.y, x2, b.y + rr, rr); lg.lineTo(x2, y2 - rr); lg.arcTo(x2, y2, x2 - rr, y2, rr); }
+        }
+        lg.lineWidth = 7; lg.strokeStyle = 'rgba(255,208,130,.38)'; lg.stroke(); lg.lineWidth = 1.8; lg.strokeStyle = 'rgba(255,240,205,.95)'; lg.stroke();  // a wide faint glow under a thin bright rim
+        lg.setTransform(1, 0, 0, 1, 0, 0); lg.globalCompositeOperation = 'destination-in'; lg.drawImage(st.cone, 0, 0);
+        // the beam itself stays faint, so it does not seem to shine through the tiles; the lit edges carry it
+        g.save(); g.translate(lx, ly); g.rotate(e.a); g.globalCompositeOperation = 'lighter';
+        g.globalAlpha = 0.34 * k; g.drawImage(st.cone, -4, -64); g.globalAlpha = k; g.drawImage(st.lit, -4, -64); g.restore();
+      }
+      for (const T of st.trains) {
+        g.strokeStyle = '#1c1d22'; g.lineWidth = 1.6; g.beginPath(); T.cars.forEach((c, i) => { if (i) g.lineTo(c.x, c.y); else g.moveTo(c.x, c.y); }); g.stroke();  // couplings
+        for (let i = T.cars.length - 1; i >= 0; i--) {
+          const c = T.cars[i]; g.save(); g.translate(c.x, c.y); g.rotate(c.a);
+          if (i) {
+            g.fillStyle = c.col; g.strokeStyle = 'rgba(20,20,30,.75)'; g.lineWidth = 0.9; rbox(g, -8.5, -4.3, 17, 8.6, 1.6); g.fill(); g.stroke();
+            g.fillStyle = 'rgba(0,0,0,.28)'; g.fillRect(-6.3, -2.5, 12.6, 5); g.fillStyle = 'rgba(255,255,255,.3)'; g.fillRect(-6.3, -2.5, 12.6, 1.1);
+          } else {
+            g.fillStyle = '#20232a'; rbox(g, -12, -4.5, 24, 9, 1.8); g.fill();                    // frame
+            g.fillStyle = T.boil; rbox(g, -3, -3.5, 14.2, 7, 3); g.fill();                         // boiler
+            g.fillStyle = 'rgba(255,255,255,.28)'; g.fillRect(-2, -1, 12, 1.2);
+            g.fillStyle = '#c8372d'; rbox(g, -11.5, -4.4, 9, 8.8, 1.4); g.fill();                  // cab
+            g.fillStyle = '#e8695d'; g.fillRect(-10.2, -3, 6.4, 6);
+            g.fillStyle = '#e8b93c'; g.beginPath(); g.arc(2.6, 0, 1.6, 0, TAU); g.fill();          // dome
+            g.fillStyle = '#15161a'; g.beginPath(); g.arc(7.6, 0, 2.2, 0, TAU); g.fill();          // chimney
+            g.strokeStyle = '#8b8f99'; g.lineWidth = 0.9; g.stroke();
+            g.fillStyle = '#c8372d'; g.fillRect(11.2, -4.2, 1.4, 8.4);                             // buffer beam
+          }
+          g.restore();
+        }
+        // the lamp itself, and at night a dim red one on the last car
+        const hd = T.cars[0], tl = T.cars[T.cars.length - 1];
+        g.globalCompositeOperation = 'lighter'; g.globalAlpha = 0.45 + 0.55 * k; g.drawImage(st.steam, hd.x + Math.cos(hd.a) * 11.5 - 5, hd.y + Math.sin(hd.a) * 11.5 - 5, 10, 10);
+        if (k > 0.6) { g.globalAlpha = 0.8; g.drawImage(st.red, tl.x - Math.cos(tl.a) * 8.5 - 5, tl.y - Math.sin(tl.a) * 8.5 - 5, 10, 10); }
+        g.globalAlpha = 1; g.globalCompositeOperation = 'source-over';
+        // steam: puffs are left where the chimney was and swell and thin out as the train moves on; a whistle is three big ones
+        const e = T.cars[0]; T.em += dt * (0.5 + T.v / 55);
+        if ((T.em > 0.17 || T.toot > 0) && st.puffs.length < 8 * st.trains.length) { T.em = 0; const big = T.toot-- > 0 ? 2.2 : 1; st.puffs.push({x: e.x + Math.cos(e.a) * 7.6, y: e.y + Math.sin(e.a) * 7.6, t: 0, r: (3 + Math.random() * 2) * big, vx: (Math.random() - 0.5) * 8, vy: -5 - Math.random() * 5}); }
+        if (T.toot < 0) T.toot = 0;
+      }
       for (let i = st.puffs.length - 1; i >= 0; i--) {
         const p = st.puffs[i]; p.t += dt; if (p.t > 1.8) { st.puffs.splice(i, 1); continue; }
         p.x += p.vx * dt; p.y += p.vy * dt; const s = (p.r + p.t * 8) * 2; g.globalAlpha = 0.6 * Math.pow(1 - p.t / 1.8, 1.3); g.drawImage(st.steam, p.x - s / 2, p.y - s / 2, s, s);
@@ -588,55 +839,121 @@
   });
 
   // ---------- String lights ----------
-  // A wire swagged along the top of each row of buttons, one bulb hanging over each button: lit when the button is on.
-  // Another string across the top of the screen is always lit. Drawn rarely; the engine redraws it when a button changes.
+  // One long string of festoon lights. It runs along the gap above each row of tiles, sagging between its hanging points,
+  // drops down the side of the screen and comes back along the next gap, and so on down the screen. Bulbs sit at a set
+  // distance along it. A bulb beside a tile that is on shines brightly; the others glow softly and twinkle slowly.
+  // "One per tile" is the older look: a string along the top of each row with one bulb over each tile, dark until the
+  // tile is on, and an always lit string across the top of the screen.
+  // The wire and the glass are drawn once; a frame only stamps the glows.
   const BULBS = ['255,84,72', '255,190,64', '96,220,116', '84,164,255', '238,116,222'], WARM = '255,206,120';
   HP.fx.add('lightstring', {
-    label: 'String lights',
-    options: [{key: 'colour', label: 'Colour', type: 'select', choices: [['warm', 'Warm'], ['coloured', 'Coloured']], default: 'warm'}],
+    label: 'String lights', live: true, fps: 6,
+    options: [{key: 'spacing', label: 'Spacing', type: 'range', min: 28, max: 90, step: 2, default: 46},
+      {key: 'layout', label: 'Layout', type: 'select', choices: [['zigzag', 'Back and forth'], ['tile', 'One per tile']], default: 'zigzag'},
+      {key: 'colour', label: 'Colour', type: 'select', choices: [['warm', 'Warm'], ['coloured', 'Coloured']], default: 'warm'}],
     create(ctx) {
-      const r = ctx.rand, warm = ctx.opts.colour !== 'coloured', solid = ctx.rects.filter(b => !b.hidden && !b.flat).slice().sort((a, b) => (a.y - b.y) || (a.x - b.x));
+      const r = ctx.rand, W = ctx.w, H = ctx.h, warm = ctx.opts.colour !== 'coloured', solid = ctx.rects.filter(b => !b.hidden && !b.flat).slice().sort((a, b) => (a.y - b.y) || (a.x - b.x));
       const swags = [], bulbs = [], ends = []; let hue = Math.floor(r() * 5);
-      const swag = (x1, y1, x2, y2, sag, rect) => { swags.push({x1, y1, x2, y2, cy: (y1 + y2) / 2 + 2 * sag}); bulbs.push({x: (x1 + x2) / 2, y: (y1 + y2) / 2 + sag, rect, col: warm ? WARM : BULBS[hue++ % 5]}); };
-      // buttons whose tops line up, next to each other, share a string
-      const used = new Set();
-      for (const b of solid) {
-        if (used.has(b)) continue;
-        const run = [b]; used.add(b);
-        for (const c of solid) { const l = run[run.length - 1]; if (!used.has(c) && Math.abs(c.y - b.y) < 8 && c.x >= l.x + l.w - 2 && c.x - (l.x + l.w) < 40) { run.push(c); used.add(c); } }
-        let x = run[0].x + 3, y = run[0].y - 8; ends.push(x, y);
-        run.forEach((c, i) => {
-          const n = run[i + 1], x2 = n ? (c.x + c.w + n.x) / 2 : c.x + c.w - 3, y2 = (n ? Math.min(c.y, n.y) : c.y) - 8;
-          swag(x, y, x2, y2, U.clamp(c.w * 0.06, 6, 9), c); x = x2; y = y2;
+      // a bulb: x, y is the middle of its glass. base: 0 dark until its tile is on, 1 glows softly, 2 always lit
+      const bulb = (x, y, rect, base) => bulbs.push({x, y: y + 7.4, rect, base, col: warm ? WARM : BULBS[hue++ % 5], ph: r() * TAU, sp: 0.5 + r() * 0.9});
+      if (ctx.opts.layout === 'tile') {
+        const swag = (x1, y1, x2, y2, sag, rect) => { swags.push({x1, y1, x2, y2, cx: (x1 + x2) / 2, cy: (y1 + y2) / 2 + 2 * sag}); bulb((x1 + x2) / 2, (y1 + y2) / 2 + sag, rect, rect ? 0 : 2); };
+        // buttons whose tops line up, next to each other, share a string
+        const used = new Set();
+        for (const b of solid) {
+          if (used.has(b)) continue;
+          const run = [b]; used.add(b);
+          for (const c of solid) { const l = run[run.length - 1]; if (!used.has(c) && Math.abs(c.y - b.y) < 8 && c.x >= l.x + l.w - 2 && c.x - (l.x + l.w) < 40) { run.push(c); used.add(c); } }
+          let x = run[0].x + 3, y = run[0].y - 8; ends.push(x, y);
+          run.forEach((c, i) => {
+            const n = run[i + 1], x2 = n ? (c.x + c.w + n.x) / 2 : c.x + c.w - 3, y2 = (n ? Math.min(c.y, n.y) : c.y) - 8;
+            swag(x, y, x2, y2, U.clamp(c.w * 0.06, 6, 9), c); x = x2; y = y2;
+          });
+          ends.push(x, y);
+        }
+        // the string across the top of the screen: no button to follow, so these stay lit
+        const n = Math.max(3, Math.round(W / 118));
+        for (let i = 0; i < n; i++) swag(-6 + (W + 12) * i / n, 3 + (i ? r() * 2 : 0), -6 + (W + 12) * (i + 1) / n, 3 + r() * 2, 9 + r() * 4, null);
+      } else {
+        // a row gap is a height where at least three quarters of the screen's width is clear of tiles; the string hangs
+        // near its lower edge, just above the tiles below (the strip under the last row is left alone)
+        const ys = []; let from = -1;
+        for (let y = 0; y <= H; y += 2) {
+          let cov = 0; for (const b of solid) if (y >= b.y && y <= b.y + b.h) cov += b.w;
+          if (cov < W * 0.25 && y < H) { if (from < 0) from = y; } else if (from >= 0) { if (y < H) ys.push(Math.max((from + y) / 2, y - 9)); from = -1; }
+        }
+        if (!ys.length) ys.push(10);
+        const m = 12; let px = 0, py = 0;
+        ys.forEach((y, k) => {
+          // hanging points: the screen's sides and the joins between the tiles below; long spans get more, crowded ones fewer
+          let xs = [m, W - m];
+          for (const b of solid) if (b.y > y - 4 && b.y < y + 40) xs.push(b.x - 5, b.x + b.w + 5);
+          xs = xs.filter(x => x >= m && x <= W - m).sort((a, b) => a - b);
+          const pts = [m];
+          for (const x of xs) { if (x - pts[pts.length - 1] >= 56 && W - m - x >= 56) pts.push(x); }
+          pts.push(W - m);
+          const hang = [];
+          for (let i = 0; i < pts.length - 1; i++) { const parts = Math.ceil((pts[i + 1] - pts[i]) / 190); for (let j = 0; j < parts; j++) hang.push(pts[i] + (pts[i + 1] - pts[i]) * j / parts); }
+          hang.push(W - m);
+          if (k % 2) hang.reverse();
+          hang.forEach((x, i) => {
+            const hy = y - 3 + (r() - 0.5) * 3;
+            if (!i && k) swags.push({x1: px, y1: py, x2: x, y2: hy, cx: x + (x < W / 2 ? -9 : 9), cy: (py + hy) / 2});  // down the side to the next row
+            else if (i) swags.push({x1: px, y1: py, x2: x, y2: hy, cx: (px + x) / 2, cy: (py + hy) / 2 + 2 * U.clamp(Math.abs(x - px) * 0.075, 6, 12)});
+            else ends.push(x, hy);
+            px = x; py = hy;
+          });
         });
-        ends.push(x, y);
+        ends.push(px, py);
+        // bulbs every so far along the string, wherever that lands; each belongs to the nearest tile within reach
+        const gap = U.clamp(+ctx.opts.spacing || 46, 20, 200); let next = gap / 2, lx = 0, ly = 0;
+        for (const s of swags) for (let i = 0; i <= 16; i++) {
+          const t = i / 16, u = 1 - t, x = u * u * s.x1 + 2 * u * t * s.cx + t * t * s.x2, y = u * u * s.y1 + 2 * u * t * s.cy + t * t * s.y2;
+          if (i) {
+            next -= Math.hypot(x - lx, y - ly);
+            if (next <= 0) {
+              next += gap; const by = y + 7.4; let rect = null, bd = 30;
+              for (const b of solid) {
+                const d = Math.hypot(Math.max(b.x - x, 0, x - b.x - b.w), Math.max(b.y - by, 0, by - b.y - b.h));
+                if (d < bd) { bd = d; rect = b; }
+              }
+              bulb(x, y, rect, 1);
+            }
+          }
+          lx = x; ly = y;
+        }
       }
-      // the string across the top of the screen: no button to follow, so these stay lit
-      const n = Math.max(3, Math.round(ctx.w / 118));
-      for (let i = 0; i < n; i++) swag(-6 + (ctx.w + 12) * i / n, 3 + (i ? r() * 2 : 0), -6 + (ctx.w + 12) * (i + 1) / n, 3 + r() * 2, 9 + r() * 4, null);
-      const glows = {}; for (const c of (warm ? [WARM] : BULBS)) glows[c] = dot(64, [[0, 'rgba(' + c + ',.75)'], [0.35, 'rgba(' + c + ',.26)'], [1, 'rgba(' + c + ',0)']]);
-      return {swags, bulbs, ends, glows};
-    },
-    draw(g, st) {
-      // the wire, dark with a thin pale edge so it shows on any backdrop
-      const wire = () => { g.beginPath(); for (const s of st.swags) { g.moveTo(s.x1, s.y1); g.quadraticCurveTo((s.x1 + s.x2) / 2, s.cy, s.x2, s.y2); } g.stroke(); };
+      // the part that never changes: the wire, dark with a thin pale edge so it shows on any backdrop, then sockets and glass
+      const still = sheet(ctx), g = still.getContext('2d');
+      const wire = () => { g.beginPath(); for (const s of swags) { g.moveTo(s.x1, s.y1); g.quadraticCurveTo(s.cx, s.cy, s.x2, s.y2); } g.stroke(); };
       g.lineCap = 'round';
       g.strokeStyle = 'rgba(225,235,230,.28)'; g.lineWidth = 2.6; wire();
       g.strokeStyle = '#14201a'; g.lineWidth = 1.5; wire();
-      g.fillStyle = '#14201a'; g.beginPath(); for (let i = 0; i < st.ends.length; i += 2) { g.moveTo(st.ends[i] + 2, st.ends[i + 1]); g.arc(st.ends[i], st.ends[i + 1], 2, 0, TAU); } g.fill();
+      g.fillStyle = '#14201a'; g.beginPath(); for (let i = 0; i < ends.length; i += 2) { g.moveTo(ends[i] + 2, ends[i + 1]); g.arc(ends[i], ends[i + 1], 2, 0, TAU); } g.fill();
+      for (const b of bulbs) {
+        g.fillStyle = '#26332b'; g.fillRect(b.x - 2.4, b.y - 8.2, 4.8, 3.6);  // the socket
+        g.beginPath(); g.ellipse(b.x, b.y, 4, 5.2, 0, 0, TAU);
+        g.fillStyle = 'rgba(34,42,54,.86)'; g.fill(); g.fillStyle = 'rgba(' + b.col + (b.base ? ',.72)' : ',.2)'); g.fill();
+        g.lineWidth = 0.8;
+        if (b.base) { g.strokeStyle = 'rgba(90,45,0,.45)'; g.stroke(); g.fillStyle = 'rgba(255,255,240,.5)'; g.beginPath(); g.ellipse(b.x, b.y - 0.4, 1.8, 2.8, 0, 0, TAU); g.fill(); }
+        else { g.strokeStyle = 'rgba(205,220,240,.55)'; g.stroke(); g.strokeStyle = 'rgba(255,255,255,.45)'; g.beginPath(); g.arc(b.x, b.y, 2.7, Math.PI * 1.05, Math.PI * 1.5); g.stroke(); }  // dark glass with a glint
+      }
+      const glows = {}; for (const c of (warm ? [WARM] : BULBS)) glows[c] = dot(64, [[0, 'rgba(' + c + ',.75)'], [0.35, 'rgba(' + c + ',.26)'], [1, 'rgba(' + c + ',0)']]);
+      return {still, bulbs, glows};
+    },
+    draw(g, st, ctx, t) {
+      g.drawImage(st.still, 0, 0, ctx.w, ctx.h);
+      const lit = b => b.base === 2 || (b.rect && b.rect.on);
+      g.globalCompositeOperation = 'lighter';
       for (const b of st.bulbs) {
-        const lit = !b.rect || b.rect.on, y = b.y + 7.4;
-        if (lit) { g.globalCompositeOperation = 'lighter'; g.drawImage(st.glows[b.col], b.x - 27, y - 27, 54, 54); g.globalCompositeOperation = 'source-over'; }
-        g.fillStyle = '#26332b'; g.fillRect(b.x - 2.4, b.y - 0.8, 4.8, 3.6);  // the socket
-        g.beginPath(); g.ellipse(b.x, y, 4, 5.2, 0, 0, TAU);
-        if (lit) {
-          g.fillStyle = 'rgb(' + b.col + ')'; g.fill(); g.strokeStyle = 'rgba(90,45,0,.45)'; g.lineWidth = 0.8; g.stroke();  // a rim, or it is lost on a lit button
-          g.fillStyle = 'rgba(255,255,240,.88)'; g.beginPath(); g.ellipse(b.x, y - 0.4, 2.2, 3.3, 0, 0, TAU); g.fill();
-        } else {  // dark glass, with a hint of its colour and a glint
-          g.fillStyle = 'rgba(34,42,54,.86)'; g.fill(); g.fillStyle = 'rgba(' + b.col + ',.2)'; g.fill();
-          g.strokeStyle = 'rgba(205,220,240,.55)'; g.lineWidth = 0.8; g.stroke();
-          g.strokeStyle = 'rgba(255,255,255,.45)'; g.beginPath(); g.arc(b.x, y, 2.7, Math.PI * 1.05, Math.PI * 1.5); g.stroke();
-        }
+        const on = lit(b); if (!on && !b.base) continue;
+        const s = on ? 58 : 30; g.globalAlpha = on ? 1 : 0.5 + 0.25 * Math.sin(t * b.sp + b.ph);
+        g.drawImage(st.glows[b.col], b.x - s / 2, b.y - s / 2, s, s);
+      }
+      g.globalAlpha = 1; g.globalCompositeOperation = 'source-over';
+      for (const b of st.bulbs) if (lit(b)) {  // the few at full brightness get bright glass on top
+        g.fillStyle = 'rgb(' + b.col + ')'; g.beginPath(); g.ellipse(b.x, b.y, 4, 5.2, 0, 0, TAU); g.fill(); g.strokeStyle = 'rgba(90,45,0,.45)'; g.lineWidth = 0.8; g.stroke();  // a rim, or it is lost on a lit button
+        g.fillStyle = 'rgba(255,255,240,.88)'; g.beginPath(); g.ellipse(b.x, b.y - 0.4, 2.2, 3.3, 0, 0, TAU); g.fill();
       }
     },
   });

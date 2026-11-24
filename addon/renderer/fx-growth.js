@@ -276,79 +276,106 @@
   });
 
   // ---------------------------------------------------------------------------------------------------------------
-  // Moss: many small soft cushions in several greens along the buttons' lower edges, in the gaps and up from the
-  // bottom of the screen, with pale lichen patches. Each cushion is one stamp of a soft dot made once per colour.
-  const MOSS = [[28, 58, 22], [44, 86, 32], [68, 118, 42], [107, 154, 50], [155, 187, 76], [150, 172, 140], [186, 196, 170]];   // five greens, two lichens
-  function cushion(q, flat) {
-    const cv = document.createElement('canvas'); cv.width = cv.height = 32;
-    const d = cv.getContext('2d'); let gr = d.createRadialGradient(16, 16, 0, 16, 16, 16);
-    gr.addColorStop(0, rgb(q, 1)); gr.addColorStop(flat ? 0.6 : 0.3, rgb(q, 0.95)); gr.addColorStop(1, rgb(q, 0));
-    d.fillStyle = gr; d.fillRect(0, 0, 32, 32);
-    // a little light on the upper left of each one makes a pile of them look like cushions and not like spots
-    gr = d.createRadialGradient(12, 11, 0, 12, 11, 9); gr.addColorStop(0, 'rgba(255,255,215,' + (flat ? 0.04 : 0.16) + ')'); gr.addColorStop(1, 'rgba(255,255,215,0)');
-    d.globalCompositeOperation = 'source-atop'; d.fillStyle = gr; d.fillRect(0, 0, 32, 32);
+  // Moss: ragged velvety patches that creep over the tiles' lower edges and corners, into the gaps and up from the
+  // bottom of the screen, with pale lichen and, late on, a few spore stalks. A patch is many small overlapping
+  // tufts, dark ones underneath and lighter ones on top; each tuft is a stamp of a tiny picture drawn once in create().
+  const MOSS = [[26, 52, 20], [36, 68, 24], [50, 90, 28], [76, 120, 36], [112, 150, 46], [160, 188, 78], [150, 170, 140], [198, 206, 172]];   // six greens from deep shade to lit tips, two lichens
+  /** One tuft, 40 pixels square. Kind 0: a dark lumpy cushion with a frayed edge. 1: a fan of short leafy strokes.
+   *  2: a sprinkle of lit tips. 3: a lobed lichen crust. None of them is round, so a pile of them never looks like beads. */
+  function tuft(q, kind, r) {
+    const cv = document.createElement('canvas'); cv.width = cv.height = 40;
+    const d = cv.getContext('2d'), tone = k => rgb(q.map(v => Math.round(U.clamp(v * k, 0, 255))), 1);
+    d.lineCap = 'round';
+    if (kind === 0 || kind === 3) {   // lumps of uneven size round an off-centre middle
+      d.fillStyle = tone(1); d.beginPath();
+      for (let i = 0, n = kind ? 7 : 9; i < n; i++) { const a = r() * TAU, e = r() * 8, R = kind ? 2.5 + r() * 3.5 : 3.5 + r() * 4.5, x = 20 + Math.cos(a) * e, y = 20 + Math.sin(a) * e * 0.8; d.moveTo(x + R, y); d.arc(x, y, R, 0, TAU); }
+      d.fill();
+    }
+    if (kind === 3) {   // lichen: paler lobes on top and a few dark dots, the way a crust looks close up
+      d.globalCompositeOperation = 'source-atop';
+      d.fillStyle = tone(1.14); d.beginPath(); for (let i = 0; i < 5; i++) { const x = 12 + r() * 12, y = 11 + r() * 10; d.moveTo(x + 3, y); d.arc(x, y, 2 + r() * 2.5, 0, TAU); } d.fill();
+      d.fillStyle = tone(0.62); d.beginPath(); for (let i = 0; i < 6; i++) { const x = 12 + r() * 16, y = 13 + r() * 14; d.moveTo(x + 1, y); d.arc(x, y, 0.8 + r() * 0.7, 0, TAU); } d.fill();
+      return cv;
+    }
+    for (let i = 0, n = [26, 22, 9][kind]; i < n; i++) {
+      const a = r() * TAU, e = Math.sqrt(r()) * [11, 9, 10][kind], x = 20 + Math.cos(a) * e, y = 20 + Math.sin(a) * e * 0.85;
+      const b = kind ? -Math.PI / 2 + (r() - 0.5) * 2.4 : a, l = [3, 4.5, 3][kind] * (0.5 + r());   // the cushion frays outward; leaves and tips reach up
+      d.strokeStyle = tone(0.78 + r() * 0.5); d.lineWidth = [3.2, 2.6, 2][kind];
+      d.beginPath(); d.moveTo(x, y); d.lineTo(x + Math.cos(b) * l, y + Math.sin(b) * l); d.stroke();
+    }
     return cv;
   }
   HP.fx.add('moss', {
     label: 'Moss', grows: true, days: 60,
     options: [amount()],
     create(c) {
-      const r = c.rand, amt = c.opts.amount, nz = U.noise(c.seed + 5), stamps = [], sprouts = [];
+      const r = c.rand, amt = c.opts.amount, nz = U.noise(c.seed + 5), stamps = [], sprouts = [], seen = {};
       const put = (x, y, size, tone, at) => {
         if (x < -4 || x > c.w + 4 || y < 0 || y > c.h + 4 || buried(c.rects, x, y)) return false;
-        stamps.push({x, y, r: size, tone, at: U.clamp(at, 0, 0.9)}); return true;
+        const v = Math.floor(r() * 3) % 3;
+        stamps.push({x, y, r: size, tone, sp: tone < 6 ? tone * 3 + v : 18 + (tone - 6) * 2 + v % 2, sq: 0.72 + r() * 0.5, at: U.clamp(at, 0, 0.9)}); return true;
       };
-      // a tuft: one dark cushion underneath and a few small light ones on top, so a patch reads as moss and not as beads
-      const tuft = (x, y, size, at) => {
-        if (!put(x, y, size * 1.25, r() < 0.5 ? 0 : 1, at)) return;
-        for (let i = 0, n = 1 + Math.floor(r() * 2.4); i < n; i++) put(x + (r() - 0.5) * size * 1.4, y - r() * size * 0.8, size * (0.4 + r() * 0.3), 2 + Math.floor(r() * 3), at + 0.02 + r() * 0.05);
+      // a clump: a dark cushion low down, leafy tufts over it, and often a few lit tips toward the light (upper left)
+      const clump = (x, y, size, at) => {
+        if (!put(x + 0.8, y + 1.2, size * 1.3, r() < 0.55 ? 0 : 1, at)) return;
+        for (let i = 0, n = 1 + Math.floor(r() * 2); i < n; i++) put(x + (r() - 0.5) * size * 1.3, y + (r() - 0.6) * size, size * (0.7 + r() * 0.4), r() < 0.5 ? 2 : 3, at + 0.02 + r() * 0.05);
+        if (r() < 0.65) put(x - size * 0.3 + (r() - 0.5) * size, y - size * 0.45, size * (0.5 + r() * 0.35), r() < 0.65 ? 4 : 5, at + 0.05 + r() * 0.06);
       };
       // up from the bottom of the screen: a bank of uneven height, thickest and earliest at the very bottom
-      for (let x = 0; x < c.w; x += 8 / amt) {
-        const top = 12 + 36 * (0.5 + 0.5 * nz(x / 80));
-        for (let i = 0; i < 2; i++) { const up = r() * r() * top; tuft(x + (r() - 0.5) * 8, c.h - 1 - up, 4 + r() * 3.5, 0.02 + up / 55 * 0.6 + r() * 0.12); }
+      for (let x = 0; x < c.w; x += 10 / amt) {
+        const top = 10 + 40 * (0.5 + 0.5 * nz(x / 70)) * (0.6 + 0.4 * nz(x / 17 + 30));
+        for (let i = 0; i < 2; i++) { const up = r() * r() * top; clump(x + (r() - 0.5) * 12, c.h - 1 - up, 3 + r() * 4.5, 0.02 + up / 55 * 0.6 + r() * 0.12); }
       }
-      // along each button's lower edge and a little way up its sides; lower buttons get more, and get it sooner
+      // over each tile's lower edge and a little way up its sides, in patches of uneven depth; the lower corners hold
+      // the damp and get the most. Lower tiles get more, and get it sooner.
       c.rects.forEach((b, n) => {
         if (!solid(b)) return;
         const low = (b.y + b.h) / c.h, wgt = amt * (0.2 + 0.8 * low * low), base = 0.55 * (1 - low), cr = creep(b), bot = b.y + b.h;
         rim(b, 7).forEach((q, i) => {
-          const patch = 0.5 + 0.5 * nz(i * 0.11 + n * 9.7), up = (bot - q.y) / b.h, want = q.ny > 0.3 ? 1 : q.ny > -0.3 && up < 0.5 ? 1 - up * 2 : 0;
-          const dens = U.clamp((patch - 0.7 + 0.7 * wgt) * 4, 0, 1) * want;   // moss comes in patches: thick here, none there
+          const corner = q.ny > 0 ? Math.min(1, Math.abs(q.nx * q.ny) * 2.4) : 0, patch = 0.5 + 0.5 * nz(i * 0.105 + n * 9.7), fine = 0.5 + 0.5 * nz(i * 0.55 + n * 3.1);
+          const up = (bot - q.y) / b.h, want = q.ny > 0.3 ? 1 : q.ny > -0.3 && up < 0.55 ? 1 - up * 1.8 : 0;
+          const dens = U.clamp((patch - 0.72 + 0.7 * wgt + 0.35 * corner) * 3.5, 0, 1) * want;   // moss comes in patches: thick here, none there
           if (dens <= 0) return;
-          for (let j = 0; j < 2; j++) if (r() < dens) {
-            const o = 4 - r() * (4 + cr * dens);
-            tuft(q.x + q.nx * o + (r() - 0.5) * 5, q.y + q.ny * o + (r() - 0.5) * 3, 3.2 + 2.6 * dens, base + (1 - dens) * 0.25 + up * 0.4 + r() * 0.15);
+          for (let j = 0; j < 2; j++) if (r() < dens * (0.5 + 0.5 * fine)) {
+            const o = 5 - r() * (5 + cr * dens * fine), s = (r() - 0.5) * 9;   // from just outside the edge to as far in as this patch is thick
+            clump(q.x + q.nx * o - q.ny * s, q.y + q.ny * o + q.nx * s, 2.6 + 3.8 * dens * (0.4 + 0.6 * fine) + r() * 1.2, base + (1 - dens) * 0.25 + up * 0.4 + r() * 0.15);
           }
         });
       });
       for (const q of c.gaps) {
         const len = Math.hypot(q.x2 - q.x1, q.y2 - q.y1);
-        for (let d = 0; d < len; d += 7) { const x = U.lerp(q.x1, q.x2, d / len), y = U.lerp(q.y1, q.y2, d / len), low = y / c.h, dens = U.clamp((0.5 + 0.5 * nz(d * 0.025 + q.x1 + q.y1) - 0.8 + 0.5 * amt * (0.15 + 0.85 * low * low)) * 4, 0, 1); if (r() < dens * 0.7) tuft(x + (r() - 0.5) * 7, y + (r() - 0.5) * 7, 3 + r() * 2, 0.2 + 0.55 * (1 - low) + r() * 0.25); }
+        for (let d = 0; d < len; d += 7) { const x = U.lerp(q.x1, q.x2, d / len), y = U.lerp(q.y1, q.y2, d / len), low = y / c.h, dens = U.clamp((0.5 + 0.5 * nz(d * 0.025 + q.x1 + q.y1) - 0.8 + 0.5 * amt * (0.15 + 0.85 * low * low)) * 4, 0, 1); if (r() < dens * 0.7) clump(x + (r() - 0.5) * 9, y + (r() - 0.5) * 9, 2.5 + r() * 3, 0.2 + 0.55 * (1 - low) + r() * 0.25); }
+        // where channels meet, a thicker knot of it
+        for (const e of [[q.x1, q.y1], [q.x2, q.y2]]) {
+          const key = Math.round(e[0] / 14) + ':' + Math.round(e[1] / 14), low = e[1] / c.h; if (seen[key]) continue; seen[key] = 1;
+          if (r() < amt * (0.15 + 0.85 * low * low)) for (let i = 0, m = 3 + Math.floor(r() * 4); i < m; i++) clump(e[0] + (r() - 0.5) * 20, e[1] + (r() - 0.5) * 20, 3 + r() * 3.5, 0.15 + 0.5 * (1 - low) + r() * 0.25);
+        }
       }
       const bs = c.rects.filter(solid);
-      if (bs.length) for (let i = 0, n = Math.round(16 * amt); i < n; i++) {   // lichen: pale flat patches, on any edge
-        const b = pick(r, bs), q = pick(r, rim(b, 6)), at = 0.3 + r() * 0.5, cr = creep(b);
-        for (let j = 0, m = 9 + Math.floor(r() * 8); j < m; j++) { const o = 3 - r() * (3 + cr * 0.8), s = (r() - 0.5) * 16; put(q.x + q.nx * o - q.ny * s, q.y + q.ny * o + q.nx * s, 2.4 + r() * 2.2, 5 + Math.floor(r() * 2), at + r() * 0.12); }
+      if (bs.length) for (let i = 0, n = Math.round(16 * amt); i < n; i++) {   // lichen: pale flat crusts, on any edge, late
+        const b = pick(r, bs), q = pick(r, rim(b, 6)), at = 0.45 + r() * 0.4, cr = creep(b);
+        for (let j = 0, m = 6 + Math.floor(r() * 6); j < m; j++) { const o = 3 - r() * (3 + cr * 0.8), s = (r() - 0.5) * 22; put(q.x + q.nx * o - q.ny * s, q.y + q.ny * o + q.nx * s, 3.2 + r() * 3, 6 + Math.floor(r() * 2), at + r() * 0.12); }
       }
       const green = stamps.filter(s => s.tone < 2);
       for (let i = 0, n = Math.round(18 * amt); i < n && green.length; i++) { const s = pick(r, green); sprouts.push({x: s.x, y: s.y - 1, h: 6 + r() * 8, lean: (r() - 0.5) * 0.9, at: U.clamp(s.at + 0.3, 0.7, 0.86) + r() * 0.04}); }
       stamps.sort((a, b) => a.tone - b.tone);   // dark underneath, light on top
-      return {stamps, sprouts, dots: MOSS.map((q, i) => cushion(q, i > 4))};
+      const sr = U.rng(c.seed + 77), dots = [];
+      MOSS.forEach((q, i) => { for (let v = 0, n = i < 6 ? 3 : 2; v < n; v++) dots.push(tuft(q, i < 2 ? 0 : i < 4 ? 1 : i < 6 ? 2 : 3, sr)); });
+      return {stamps, sprouts, dots};
     },
     draw(g, st, c) {
       const p = c.progress;
       for (const s of st.stamps) {
         const k = U.span(p, s.at, s.at + 0.1); if (k < 0.05) continue;
-        const R = s.r * (0.35 + 0.65 * k) * 1.35; g.drawImage(st.dots[s.tone], s.x - R, s.y - R, 2 * R, 2 * R);
+        const R = s.r * (0.35 + 0.65 * k) * 1.5; g.drawImage(st.dots[s.sp], s.x - R, s.y - R * s.sq, 2 * R, 2 * R * s.sq);
       }
-      g.lineCap = 'round'; g.lineWidth = 1.1; g.strokeStyle = '#86b944'; g.fillStyle = '#b2dc62';
+      // spore stalks: a hair-thin stem with a small capsule nodding at the top
+      g.lineCap = 'round'; g.lineWidth = 0.8; g.strokeStyle = '#a9743a'; g.fillStyle = '#d6a052';
       for (const s of st.sprouts) {
         const k = U.span(p, s.at, s.at + 0.1); if (k < 0.05) continue;
         const h = s.h * k, tx = s.x + s.lean * h, ty = s.y - h;
-        g.beginPath(); g.moveTo(s.x, s.y); g.quadraticCurveTo(s.x, s.y - h * 0.6, tx, ty); g.stroke();
-        g.beginPath(); g.ellipse(tx - 2 * k, ty - 0.6, 2.5 * k, 1.2 * k, 0.5, 0, TAU); g.fill();
-        g.beginPath(); g.ellipse(tx + 2 * k, ty - 0.6, 2.5 * k, 1.2 * k, -0.5, 0, TAU); g.fill();
+        g.beginPath(); g.moveTo(s.x, s.y); g.quadraticCurveTo(s.x, s.y - h * 0.7, tx, ty); g.stroke();
+        g.beginPath(); g.ellipse(tx + s.lean * 1.2, ty, 1.9 * k, 0.9 * k, s.lean, 0, TAU); g.fill();
       }
     },
   });

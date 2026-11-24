@@ -25,20 +25,32 @@
       if (!o.always && !e.night) amt *= 0.5;
       amt *= o.amount;
       if (amt <= 0.01) return;
-      g.lineCap = 'round'; g.strokeStyle = 'rgba(225,242,255,.62)';
-      const fern = (x, y, a, len, depth, rnd) => {
-        if (len < 5 || depth > 4) return;
-        const n = Math.max(3, Math.floor(len / 9)); let px = x, py = y;
-        g.lineWidth = Math.max(0.5, 2.2 - depth * 0.55);
-        g.beginPath(); g.moveTo(x, y);
-        for (let i = 1; i <= n; i++) { a += (rnd() - 0.5) * 0.22; px += Math.cos(a) * len / n; py += Math.sin(a) * len / n; g.lineTo(px, py);
-          if (i % 2 === 0 && rnd() < 0.85) { const side = rnd() < 0.5 ? 1 : -1, bl = len * (0.42 - i / n * 0.25); st.q.push([px, py, a + side * (0.7 + rnd() * 0.3), bl, depth + 1]); } }
-        g.stroke();
+      // Ice grows as feathers: a rib, a few smaller ribs off it, and short straight barbs down both sides of each that
+      // shrink toward the tip. Every line goes into one of four lots by how fine it is, and a lot is drawn in one go.
+      // A rib's last stretch goes into the next finer lot, so tips fade out instead of stopping.
+      const lots = [[], [], [], []];
+      let room = 4000;  // the most path segments one drawing may spend: the tablet is slow
+      const rib = (x, y, a, len, lot, rnd) => {
+        const n = Math.max(2, Math.round(len / 8)), sl = len / n, curl = (rnd() - 0.5) * 0.05;
+        let line = [x, y]; lots[lot].push(line);
+        for (let i = 1; i <= n && room > 0; i++) {
+          a += curl + (rnd() - 0.5) * 0.14; x += Math.cos(a) * sl; y += Math.sin(a) * sl; line.push(x, y); room--;
+          if (i === Math.ceil(n * 0.6)) { line = [x, y]; lots[lot + 1].push(line); }
+          const k = 1 - i / (n + 1);
+          for (const s of [-1, 1]) {
+            const bl = len * 0.17 * k * (0.5 + rnd()), ba = a + s * (0.85 + rnd() * 0.3);
+            if (bl > 2.5) { lots[Math.min(3, lot + 2)].push([x, y, x + Math.cos(ba) * bl, y + Math.sin(ba) * bl]); room--; }
+          }
+          if (!lot && i % 4 === 0 && i < n) rib(x, y, a + (rnd() < 0.5 ? 1 : -1) * (0.75 + rnd() * 0.3), len * (0.44 - i / n * 0.26), 1, rnd);
+        }
       };
-      for (const f of st.ferns) {
-        const rnd = U.rng(f.seed); st.q = [[f.x, f.y, f.a, f.len * amt, 0]];
-        while (st.q.length) { const q = st.q.shift(); fern(q[0], q[1], q[2], q[3], q[4], rnd); }
-      }
+      for (const f of st.ferns) rib(f.x, f.y, f.a, f.len * amt, 0, U.rng(f.seed));
+      g.lineCap = 'round';
+      [[1.1, 0.52], [0.8, 0.44], [0.6, 0.36], [0.45, 0.26]].forEach((s, i) => {
+        g.lineWidth = s[0]; g.strokeStyle = 'rgba(228,244,255,' + s[1] + ')'; g.beginPath();
+        for (const l of lots[i]) { g.moveTo(l[0], l[1]); for (let j = 2; j < l.length; j += 2) g.lineTo(l[j], l[j + 1]); }
+        g.stroke();
+      });
       // a pale bloom over the whole glass, stronger toward the corners
       const v = g.createRadialGradient(ctx.w / 2, ctx.h / 2, Math.min(ctx.w, ctx.h) * 0.25, ctx.w / 2, ctx.h / 2, Math.max(ctx.w, ctx.h) * 0.75);
       v.addColorStop(0, 'rgba(220,240,255,0)'); v.addColorStop(1, 'rgba(220,240,255,' + (0.20 * amt).toFixed(3) + ')');

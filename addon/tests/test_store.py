@@ -89,4 +89,8 @@ with tempfile.TemporaryDirectory() as tmp:
         pass
     lib = s.save_library({"themes": [{"id": "a", "name": "Glass", "buttons": [], "backgrounds": []}]})
     assert lib["themes"][0]["name"] == "Glass" and s.get_theme("a")["id"] == "a" and s.get_theme("zz") is None
+    # overlay playlists sit beside the themes; saving one part leaves the other as it was
+    lib = s.save_library({"playlists": [{"id": "p", "name": "Winter", "mode": "day", "items": [{"kind": "snow"}]}]})
+    assert lib["themes"][0]["id"] == "a" and s.get_playlist("p")["name"] == "Winter" and s.get_playlist(None) is None
+    assert s.save_library({"themes": []})["playlists"][0]["id"] == "p"
     print("store: all checks passed")

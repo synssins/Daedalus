@@ -1,8 +1,9 @@
 'use strict';
 // HomePanel Studio: devices, panels, themes, and (in editor.js) the grid editor. No framework.
 // Words used on screen: a Panel is a finished set of dashboards; a Dashboard is one screen of buttons; a Device is
-// a tablet running a panel; a Theme is a set of backgrounds and button designs that panels can follow.
-// In the code and on disk a panel is still a "design", a dashboard a "page" and a button a "tile".
+// a tablet running a panel; a Theme is a set of backgrounds and tile designs that panels can follow.
+// Everything placed on a dashboard is a Tile; a Button is one kind of tile (others: Camera, Clock, ...).
+// In the code and on disk a panel is still a "design" and a dashboard a "page".
 
 // ---------- small helpers ----------
 const ICON = Object.assign({}, window.HP_ICONS, {
@@ -137,7 +138,7 @@ function rail() {
       : [h('div', {class: 'none'}, 'None yet')]),
     ...group('themes', 'Themes', 'palette', [
       item('Backgrounds', null, A.view === 'backgrounds', () => go('backgrounds'), '', 'sub'),
-      item('Buttons', null, A.view === 'buttons', () => go('buttons'), '', 'sub')]),
+      item('Tiles', null, A.view === 'buttons', () => go('buttons'), '', 'sub')]),
     h('span', {class: 'sp'}),
     item('Settings', 'cog', A.view === 'settings', () => go('settings')));
 }
@@ -238,6 +239,7 @@ function viewPanel() {
     h('div', {class: 'head'},
       h('input', {type: 'text', class: 'title', value: d.name, 'aria-label': 'Panel name', onchange: async e => { try { const rec = await api('designs/' + d.id); await send('PUT', 'designs/' + d.id, {name: e.target.value.trim() || d.name, design: rec.design}); setState(await api('state')); } catch (err) { fail(err); } }}),
       h('span', {class: 'sp'}), screenPick(sc, s => { A.screen = s; viewPanel(); }),
+      btn('Screenshot', null, () => snap(stage.querySelector('iframe'), fileName(d.name))),
       btn('Edit', 'pencil', () => openDesign(d.id), 'go'), btn('', 'chevron-down', ev => { ev.stopPropagation(); const r = ev.currentTarget.getBoundingClientRect(); panelMenu({preventDefault() {}, clientX: r.left, clientY: r.bottom + 4}, d); }, 'icon more')),
     h('div', {class: 'body panelview'},
       h('div', {class: 'side'}, h('h2', null, 'Devices'), assign.children.length ? assign : h('p', {class: 'note'}, 'No approved devices yet.')),
@@ -331,6 +333,57 @@ function colourIn(val, set, fallback, clear) {
   return [col, al, clear && val ? h('button', {type: 'button', class: 'btn icon mini', title: clear.title, 'aria-label': clear.title, html: icon('undo'), onclick: clear.fn}) : null];
 }
 /** Every slider shows its measurement: percent for 0-1 amounts, pixels for the rest. */
+/** A picture of a preview frame as it is drawn right now, at the device's own size, saved as a file.
+ *  A web page cannot photograph itself, so the page is copied into an SVG image and that is drawn: every picture,
+ *  font and canvas it shows is first packed into the copy. */
+async function snap(frame, name) {
+  const doc = frame.contentDocument, W = +frame.width, H = +frame.height, memo = {};
+  const scale = (A.state.tablets.find(t => t.width === W && t.height === H) || {}).scale || 1;
+  const data = url => memo[url] || (memo[url] = fetch(url).then(r => r.blob()).then(b => new Promise(ok => { const f = new FileReader(); f.onload = () => ok(f.result); f.onerror = () => ok(''); f.readAsDataURL(b); })).catch(() => ''));
+  const packCss = async (css, base) => {
+    const urls = [...new Set([...css.matchAll(/url\((['"]?)([^'")]+)\1\)/g)].map(m => m[2]).filter(u => !u.startsWith('data:') && !u.startsWith('#')))];
+    for (const u of urls) { const d = await data(new URL(u, base).href); if (d) css = css.split(u).join(d); }
+    return css;
+  };
+  try {
+    let css = '';
+    for (const sh of doc.styleSheets) { let own = ''; try { for (const r of sh.cssRules) own += r.cssText + '\n'; } catch (e) {} css += await packCss(own, sh.href || doc.baseURI); }
+    const root = doc.documentElement.cloneNode(true), live = sel => [[...doc.querySelectorAll(sel)], [...root.querySelectorAll(sel)]];
+    // canvases and video frames become plain pictures of what they show now
+    for (const sel of ['canvas', 'video']) { const [a, b] = live(sel); a.forEach((el, i) => {
+      let src = ''; try { if (sel === 'canvas') src = el.toDataURL(); else { const c = document.createElement('canvas'); c.width = el.videoWidth; c.height = el.videoHeight; c.getContext('2d').drawImage(el, 0, 0); src = c.toDataURL(); } } catch (e) {}
+      const r = el.getBoundingClientRect(), im = doc.createElement('img'); im.className = b[i].className; im.id = b[i].id; im.setAttribute('style', (b[i].getAttribute('style') || '') + `;width:${r.width}px;height:${r.height}px;object-fit:${sel === 'video' ? getComputedStyle(el).objectFit : 'fill'}`);
+      if (src && src.length > 10) im.src = src; b[i].replaceWith(im); }); }
+    for (const im of root.querySelectorAll('img')) if (im.getAttribute('src') && !im.getAttribute('src').startsWith('data:')) im.setAttribute('src', await data(new URL(im.getAttribute('src'), doc.baseURI).href));
+    for (const el of root.querySelectorAll('[style*="url("]')) el.setAttribute('style', await packCss(el.getAttribute('style'), doc.baseURI));
+    root.querySelectorAll('script, link, style, iframe').forEach(x => x.remove());
+    const st = doc.createElement('style'); st.textContent = css; root.querySelector('head').append(st);
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"><foreignObject x="0" y="0" width="${W}" height="${H}">${new XMLSerializer().serializeToString(root)}</foreignObject></svg>`;
+    const img = new Image(); img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg); await img.decode();
+    const c = document.createElement('canvas'); c.width = Math.round(W * scale); c.height = Math.round(H * scale); c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    c.toBlob(b => { const a = h('a', {href: URL.createObjectURL(b), download: name + '.png'}); a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); }, 'image/png');
+  } catch (e) { toast('No screenshot: ' + e.message, true); }
+}
+const fileName = s => (s || 'panel').replace(/[^\w -]+/g, '').trim() || 'panel';
+
+/** Sections of a long form fold away under their headings. Which are open is remembered per heading; a form
+ *  seen for the first time opens its first section only. */
+function fold(box, scope) {
+  let mem = {}; try { mem = JSON.parse(localStorage.getItem('hp:fold')) || {}; } catch (e) {}
+  [...box.children].filter(x => x.tagName === 'H2').forEach((hd, n) => {
+    const key = scope + '/' + (hd.dataset.fold || hd.textContent), sec = h('div', {class: 'sec'});
+    for (let x = hd.nextSibling; x && x.tagName !== 'H2';) { const nx = x.nextSibling; sec.append(x); x = nx; }
+    hd.after(sec);
+    const set = open => { sec.hidden = !open; hd.setAttribute('aria-expanded', open); };
+    const flip = () => { const open = sec.hidden; set(open); mem[key] = open; try { localStorage.setItem('hp:fold', JSON.stringify(mem)); } catch (e) {} if (open) hd.dispatchEvent(new CustomEvent('unfold')); };
+    hd.classList.add('fold'); hd.tabIndex = 0; hd.setAttribute('role', 'button');
+    hd.addEventListener('click', flip); hd.addEventListener('keydown', ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); flip(); } });
+    set(key in mem ? mem[key] : n === 0);
+  });
+}
+/** Mark a section to be open the next time its form is drawn (something was just added to it). */
+function unfold(key) { try { const m = JSON.parse(localStorage.getItem('hp:fold')) || {}; m[key] = true; localStorage.setItem('hp:fold', JSON.stringify(m)); } catch (e) {} }
+
 function sliderValues(box) {
   box.querySelectorAll('input[type=range]').forEach(r => {
     if (r.nextElementSibling && r.nextElementSibling.classList.contains('val')) return;
@@ -365,7 +418,7 @@ function lookFields(s, set, o) {
     row('On text colour', h('input', {type: 'color', value: (rgba(s.textOn) || {hex: '#2b1400'}).hex, 'aria-label': 'Text colour when on', oninput: ev => set('textOn', ev.target.value)})),
     row('Font', h('select', {'aria-label': 'Font', onchange: ev => set('font', ev.target.value || null, true)}, ...FONTS.map(f => h('option', {value: f[0], selected: (s.font || '') === f[0]}, f[1])))),
     h('h2', null, 'Shape'),
-    row('Shape', h('select', {'aria-label': 'Shape', onchange: ev => set('shape', ev.target.value || null, true)}, h('option', {value: '', selected: s.shape !== 'tab'}, 'Button'), h('option', {value: 'tab', selected: s.shape === 'tab'}, 'Tab'))),
+    row('Shape', h('select', {'aria-label': 'Shape', onchange: ev => set('shape', ev.target.value || null, true)}, h('option', {value: '', selected: s.shape !== 'tab'}, 'Tile'), h('option', {value: 'tab', selected: s.shape === 'tab'}, 'Tab'))),
     row('Corner radius', num('radius', 0, 60, o.base && o.base.radius != null ? o.base.radius : 22)),
     row('Border', ...colourIn(s.border, v => set('border', v), 'rgba(255,255,255,.4)', cl('border'))),
     row('Border width', num('borderWidth', 0, 8, 1)),
@@ -395,7 +448,7 @@ function demoPush() { const f = $('.demo iframe'); if (f && A.th && f.dataset.re
 function viewTheme() {
   const kind = A.view;  // 'backgrounds' or 'buttons'
   if (!A.th || !themeBy(A.th.id) && !A.th.dirty) openTheme(A.th && A.th.id);
-  const head = extra => h('div', {class: 'head'}, h('h1', null, kind === 'buttons' ? 'Buttons' : 'Backgrounds'), ...extra);
+  const head = extra => h('div', {class: 'head'}, h('h1', null, kind === 'buttons' ? 'Tiles' : 'Backgrounds'), ...extra);
   if (!A.th) {
     return $('#main').replaceChildren(head([h('span', {class: 'sp'}), btn('Import theme', 'upload', importTheme)]),
       h('div', {class: 'body'}, h('div', {class: 'empty'}, h('b', null, 'No themes'),
@@ -428,7 +481,7 @@ function viewTheme() {
   let form = [];
   if (cur && kind === 'buttons') {
     const set = (k, v, re) => { if (v == null || v === '') delete cur.style[k]; else cur.style[k] = v; touch(); if (re) viewTheme(); };
-    form = [row('Name', h('input', {type: 'text', value: cur.name, 'aria-label': 'Button design name', oninput: ev => { cur.name = ev.target.value; touch(); }, onchange: () => viewTheme()})), ...lookFields(cur.style, set)];
+    form = [row('Name', h('input', {type: 'text', value: cur.name, 'aria-label': 'Tile design name', oninput: ev => { cur.name = ev.target.value; touch(); }, onchange: () => viewTheme()})), ...lookFields(cur.style, set)];
   } else if (cur) {
     const set = (k, v, re) => { if (v == null || v === '') delete cur[k]; else cur[k] = v; touch(); if (re) viewTheme(); };
     form = [row('Name', h('input', {type: 'text', value: cur.name, 'aria-label': 'Background name', oninput: ev => { cur.name = ev.target.value; touch(); }, onchange: () => viewTheme()})),

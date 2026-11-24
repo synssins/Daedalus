@@ -170,16 +170,26 @@ class Store:
 
     # ---- theme library and settings ----
     def get_library(self) -> dict:
-        return {"themes": self._read(self._library_file, {}).get("themes") or []}
+        lib = self._read(self._library_file, {})
+        return {"themes": lib.get("themes") or [], "playlists": lib.get("playlists") or []}
+
+    def get_playlist(self, pid: str | None) -> dict | None:
+        return next((p for p in self.get_library()["playlists"] if p.get("id") == pid), None) if pid else None
 
     def get_theme(self, tid: str | None) -> dict | None:
         return next((t for t in self.get_library()["themes"] if t.get("id") == tid), None) if tid else None
 
     def save_library(self, lib: dict) -> dict:
-        themes = lib.get("themes") if isinstance(lib, dict) else None
-        if not isinstance(themes, list) or not all(isinstance(t, dict) and t.get("id") for t in themes):
+        # Each part is replaced only when it is sent: saving a theme leaves the overlay playlists alone, and back.
+        cur = self.get_library()
+        if not isinstance(lib, dict):
             raise ValueError("not a theme library")
-        self._write(self._library_file, {"themes": themes})
+        for part in ("themes", "playlists"):
+            items = lib.get(part, cur[part])
+            if not isinstance(items, list) or not all(isinstance(t, dict) and t.get("id") for t in items):
+                raise ValueError("not a theme library")
+            cur[part] = items
+        self._write(self._library_file, cur)
         return self.get_library()
 
     def get_settings(self) -> dict:

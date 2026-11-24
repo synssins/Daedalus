@@ -28,8 +28,10 @@
 //   drag(state, x, y, ctx)    // optional; a finger is moving here
 //   press(state, rect, ctx)   // optional; the button with this rectangle was pressed
 // });
-// ctx: {w, h, rects: [{x, y, w, h, r, on, flat, type}], gaps: [{x1, y1, x2, y2}], env, opts, seed, progress, days,
-//       rand() (seeded), util, redraw()}
+// ctx: {w, h, rects: [{x, y, w, h, r, on, flat, type, el, tile}], gaps: [{x1, y1, x2, y2}], env, opts, seed, progress, days,
+//       rand() (seeded), util, redraw(), page, pages}
+// rects[i].el is the tile's own element and rects[i].tile its settings: for the rare kind that moves a real tile.
+// ctx.page names the dashboard on screen and ctx.pages every dashboard this device has, for kinds that roam.
 // ctx.env: {night, elevation (sun, degrees), weather ('rainy', 'snowy', 'clear-night', ...), temp (outdoor, in the
 //           house's own unit), cold (true at or below freezing), month (1-12), date: Date}
 (() => {
@@ -86,7 +88,20 @@
 
   // ---------- the engine ----------
   let host = null, slow = null, live = null, items = [], rects = [], gaps = [], env = {date: new Date(), month: new Date().getMonth() + 1}, preview = null;
-  let W = 0, H = 0, raf = 0, last = 0, t0 = performance.now(), slowTimer = 0, config = [], key = '';
+  let W = 0, H = 0, raf = 0, last = 0, t0 = performance.now(), slowTimer = 0, config = [], key = '', pages = [];
+
+  // Weather as people say it, each covering several of Home Assistant's states.
+  const WEATHER = {clear: ['sunny', 'clear-night'], cloudy: ['cloudy', 'partlycloudy'], rain: ['rainy', 'pouring', 'lightning', 'lightning-rainy', 'hail'],
+    snow: ['snowy', 'snowy-rainy'], fog: ['fog'], wind: ['windy', 'windy-variant']};
+  /** Does this overlay's "when" fit today: weekdays, a span of dates (month-day, may wrap the new year), weather. */
+  function fits(c) {
+    const w = c.when; if (!w || HP.preview) return true;  // the Studio shows what is being edited whatever the day
+    const d = new Date(), md = ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
+    if (w.days && w.days.length && w.days.indexOf(d.getDay()) < 0) return false;
+    if (w.from && w.to && !(w.from <= w.to ? md >= w.from && md <= w.to : md >= w.from || md <= w.to)) return false;
+    if (w.weather && w.weather.length && !w.weather.some(k => (WEATHER[k] || []).indexOf(env.weather) >= 0)) return false;
+    return true;
+  }
 
   function canvases() {
     if (host) return;
@@ -121,8 +136,9 @@
     config.forEach((c, n) => {
       const def = kinds[c.kind]; if (!def) return;
       const opts = {}; (def.options || []).forEach(o => { opts[o.key] = o.default; }); Object.assign(opts, c);
+      if (HP.fx.demo) opts.now = 1;  // the Studio's Preview: kinds that wait (a goose's visit, the tank battle) start at once
       const seed = U.hash(key + '/' + c.kind + '/' + n + '/' + (opts.start || ''));
-      const ctx = {w: W, h: H, rects, gaps, env, opts, seed, util: U, rand: U.rng(seed), redraw, progress: def.grows ? progressOf(def, opts) : 1, days: +opts.days || def.days || 7};
+      const ctx = {w: W, h: H, rects, gaps, env, opts, seed, util: U, rand: U.rng(seed), redraw, page: key, pages, progress: def.grows ? progressOf(def, opts) : 1, days: +opts.days || def.days || 7};
       let st = null; try { st = def.create ? def.create(ctx) : {}; } catch (e) { fail(c.kind, e); return; }
       items.push({def, ctx, st, kind: c.kind});
     });
@@ -165,7 +181,19 @@
     kinds, util: U,
     add(name, def) { kinds[name] = def; },
     /** Which overlays this dashboard has: [{kind, ...options}]. seedKey makes each dashboard's plants its own. */
-    use(list, seedKey, wait) { canvases(); config = (list || []).filter(c => c && kinds[c.kind]); key = seedKey || ''; if (!wait) build(); },  // wait: a layout() follows at once and builds
+    use(list, seedKey, wait, all) { canvases(); config = (list || []).filter(c => c && kinds[c.kind]); key = seedKey || ''; pages = all || [key]; if (!wait) build(); },  // wait: a layout() follows at once and builds
+    /** Today's overlays: the panel's own, plus what its playlist plays today. A playlist shows all its overlays,
+     *  or one per day or week: in turn, or picked from the date so that every tablet picks the same one. */
+    pick(own, pl) {
+      const out = (own || []).filter(fits);
+      if (pl && pl.items) {
+        const it = pl.items.filter(fits), d = new Date(), day = Math.floor((d.getTime() - d.getTimezoneOffset() * 60000) / 864e5), n = /week/.test(pl.mode) ? Math.floor((day + 3) / 7) : day;
+        if (!pl.mode || pl.mode === 'all') out.push(...it);
+        else if (it.length) out.push(it[(/^rand/.test(pl.mode) ? U.hash((pl.id || '') + n) : n) % it.length]);
+      }
+      return out;
+    },
+    weather: WEATHER,
     /** The buttons' rectangles, after every layout. */
     layout(list) {
       canvases(); W = window.innerWidth; H = window.innerHeight;

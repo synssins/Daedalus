@@ -148,6 +148,128 @@
     },
   };
 
+  // ---------- kelp ----------
+  // Kelp does not climb round the tiles like the other plants. Each frond is one long ribbon: it rises through the
+  // open lanes between tiles, leans round a tile in a wide curve where one is in its way, and waves from side to side
+  // all the way up, so the still picture looks caught in a swell. Fronds root along the bottom of the screen and in
+  // the gaps on top of tiles.
+  const KELP = ['#7d7a2a', '#5f6b2c', '#8b7830', '#6a5c24', '#74803a'], KS = 8;
+  function kelpGrow(ctx, st, btn, d, dens) {
+    const r = ctx.rand, W = ctx.w, H = ctx.h, used = {}, fronds = st.fronds = [];
+    let room = 6800 * (0.4 + 0.6 * dens);  // ribbon to share out, in pixels: what keeps one drawing cheap on the tablet
+    const hit = (x, y) => btn.some(b => inside(b, x, y, 0));
+    const clear = (x, y) => { let v = 40; for (const b of btn) v = Math.min(v, Math.hypot(Math.max(b.x - x, 0, x - b.x - b.w), Math.max(b.y - y, 0, y - b.y - b.h))); return v; };
+    const frond = (x, y, want, tuft) => {
+      if (!tuft) { if (room < 40) return; want = Math.min(want, room); }  // tufts are too small to count
+      const way = [[x, y]];
+      let left = want;
+      if (tuft) way.push([x, y - want]);
+      else for (let turn = 0; turn < 8 && left > 12; turn++) {
+        // straight up as far as the first tile overhead
+        let top = -1e9, cb = null;
+        for (const b of btn) if (x > b.x - d + 1 && x < b.x + b.w + d - 1 && b.y + b.h <= y + 1 && b.y + b.h > top) { top = b.y + b.h; cb = b; }
+        const ny = Math.min(y, Math.max(cb ? top + d : 14, y - left));
+        left -= y - ny; y = ny; way.push([x, y]);
+        if (!cb || y > top + d + 1) break;
+        // under a tile: sideways along the gap to the lane at one of its ends, if that is near, open and not crowded
+        const lane = xe => { const k = Math.round(xe) + '/' + Math.round(y); return xe > 6 && xe < W - 6 && Math.abs(xe - x) <= Math.min(100, left) && !(used[k] > 1) && !hit(xe, y - d - 8) && !hit((x + xe) / 2, y) && !hit(x + (xe - x) * 0.25, y) && !hit(x + (xe - x) * 0.75, y); };
+        const xl = cb.x - d, xr = cb.x + cb.w + d, a = lane(xl), b = lane(xr);
+        if (!a && !b) break;
+        const xe = a && b ? ((Math.abs(xl - x) < Math.abs(xr - x)) === (r() < 0.8) ? xl : xr) : a ? xl : xr, k = Math.round(xe) + '/' + Math.round(y);
+        used[k] = (used[k] || 0) + 1; left -= Math.abs(xe - x); x = xe; way.push([x, y]);
+      }
+      // the route as points a fixed distance apart
+      const P = [];
+      for (let i = 1; i < way.length; i++) {
+        const a = way[i - 1], b = way[i], n = Math.max(1, Math.round(Math.hypot(b[0] - a[0], b[1] - a[1]) / KS));
+        for (let j = i === 1 ? 0 : 1; j <= n; j++) P.push([a[0] + (b[0] - a[0]) * j / n, a[1] + (b[1] - a[1]) * j / n]);
+      }
+      const n = P.length; if (n < (tuft ? 4 : 7)) return;  // too short to read as a frond
+      // Corners into wide curves: each point becomes the average of its neighbours, twice over. The root stays put.
+      if (!tuft) for (let pass = 0; pass < 2; pass++) {
+        const Q = P.map(q => q.slice());
+        for (let i = 1; i < n; i++) { let sx = 0, sy = 0; for (let j = -3; j <= 3; j++) { const q = Q[U.clamp(i + j, 0, n - 1)]; sx += q[0]; sy += q[1]; } P[i][0] = sx / 7; P[i][1] = sy / 7; }
+      }
+      // The sway: a long wave and a shorter one across the route, growing from nothing at the root. It swings wide
+      // where there is open water and stays small in a lane, so a blade only ever laps a tile's rim.
+      const wl = 90 + r() * 80, wl2 = 38 + r() * 22, ph = r() * TAU, lean = (r() - 0.3) * 0.5, amp = P.map(q => U.clamp(clear(q[0], q[1]) * 0.6 + 1.5, 4, 17)), pts = [];
+      for (let i = 0; i < n; i++) {
+        const a = P[Math.max(0, i - 1)], b = P[Math.min(n - 1, i + 1)], dl = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1, s = i * KS;
+        const am = (amp[Math.max(0, i - 2)] + amp[i] + amp[Math.min(n - 1, i + 2)]) / 3 * Math.min(1, s / 50);
+        const off = (Math.sin(s / wl * TAU + ph) + 0.35 * Math.sin(s / wl2 * TAU + ph * 2) + lean * i / n) * (tuft ? 3 : am);
+        pts.push({x: P[i][0] + (b[1] - a[1]) / dl * off, y: P[i][1] - (b[0] - a[0]) / dl * off});
+      }
+      const cum = [0];
+      for (let i = 0; i < n; i++) {
+        const a = pts[Math.max(0, i - 1)], b = pts[Math.min(n - 1, i + 1)], dl = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+        pts[i].nx = (b.y - a.y) / dl; pts[i].ny = -(b.x - a.x) / dl;
+        if (i) cum.push(cum[i - 1] + Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y));
+      }
+      // air bladders: small floats along the blade's edges, more of them toward the root
+      const bl = [];
+      if (!tuft) for (let i = 2 + Math.floor(r() * 3); i < n - 4; i += 4 + Math.floor(r() * 5)) bl.push({i, side: r() < 0.5 ? 1 : -1, rad: 2.4 + r() * 1.4});
+      const len = cum[n - 1];
+      if (!tuft) room -= len;
+      fronds.push({pts, cum, len, bl, hw: tuft ? 3.5 + r() * 1.5 : 5.5 + r() * 3.5, c: Math.floor(r() * KELP.length), t0: r() * 0.22, e1: r() * TAU, e2: r() * TAU, f1: 0.19 + r() * 0.07, f2: 0.15 + r() * 0.07});
+    };
+
+    // From the bottom of the screen: close to the foot of each lane between the lowest tiles, so the frond gets a long way up.
+    const low = btn.filter(b => !btn.some(c => c !== b && c.y >= b.y + b.h - 1 && c.x < b.x + b.w && c.x + c.w > b.x)), feet = [];
+    for (const b of low) for (const x of [b.x - d, b.x + b.w + d]) if (x > 6 && x < W - 6 && !feet.some(f => Math.abs(f - x) < 3)) feet.push(x);
+    for (let i = feet.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)), x = feet[i]; feet[i] = feet[j]; feet[j] = x; }
+    for (let i = 0, n = Math.round(4 + 6 * dens); i < n && feet.length; i++) frond(feet[i % feet.length] + (r() - 0.5) * 56, H + 6, 220 + r() * 380);
+    // From tile tops: beside a corner where a lane leads up, or anywhere along a top that has open water over it.
+    for (const b of btn) {
+      if (r() > 0.3 + 0.5 * dens) continue;
+      const rr = b.r || 0, open = !btn.some(c => c !== b && c.y + c.h <= b.y && c.y + c.h > b.y - 80 && c.x < b.x + b.w && c.x + c.w > b.x);
+      frond(open ? b.x + rr + r() * (b.w - 2 * rr) : r() < 0.5 ? b.x + rr + r() * 30 : b.x + b.w - rr - r() * 30, b.y + 1, 130 + r() * 270);
+    }
+    // short tufts along the very bottom, which may lap the rim of the tile above them
+    for (let i = 0, n = Math.round(W / 90 * dens); i < n; i++) {
+      const x = W * (i + 0.15 + r() * 0.7) / n; let top = 0, cb = null;
+      for (const b of btn) if (x > b.x && x < b.x + b.w && b.y + b.h > top) { top = b.y + b.h; cb = b; }
+      frond(x, H + 4, Math.min(30 + r() * 26, H + 4 - top + (cb ? Math.min(cb.w, cb.h) * 0.12 : 0)), true);
+    }
+    return st;
+  }
+  function kelpDraw(g, st, ctx) {
+    const p = ctx.progress, beads = [];
+    g.lineJoin = 'round'; g.lineCap = 'round';
+    for (const f of st.fronds) {
+      // a frond rises over most of the cycle and goes on broadening to the end
+      const vis = f.len * U.span(p, f.t0 * 0.6, f.t0 + 0.7), P = f.pts; if (vis < 8) continue;
+      const hw = f.hw * (0.5 + 0.5 * U.span(p, f.t0, 1));
+      let m = 0; while (m < P.length - 1 && f.cum[m + 1] <= vis) m++;
+      // the blade's two edges: full width a little way up from the root, narrowing to a point at the tip, each edge with its own ripple
+      const E = [], back = [];
+      for (let i = 0; i <= m; i++) {
+        const q = P[i], s = f.cum[i], w = hw * Math.min(1, 0.3 + s / 30) * Math.pow(Math.min(1, (vis - s) / (hw * 6)), 0.6);
+        const a = w * (1 + 0.3 * Math.sin(s * f.f1 + f.e1)), b = w * (1 + 0.3 * Math.sin(s * f.f2 + f.e2));
+        E.push(q.x + q.nx * a, q.y + q.ny * a); back.push(q.x - q.nx * b, q.y - q.ny * b);
+      }
+      const tip = Math.min(P.length - 1, m + 1), k = m < P.length - 1 ? (vis - f.cum[m]) / (f.cum[m + 1] - f.cum[m]) : 0;
+      E.push(P[m].x + (P[tip].x - P[m].x) * k, P[m].y + (P[tip].y - P[m].y) * k);
+      for (let i = back.length - 2; i >= 0; i -= 2) E.push(back[i], back[i + 1]);
+      g.beginPath(); g.moveTo(E[0], E[1]);
+      for (let i = 2; i < E.length - 2; i += 2) g.quadraticCurveTo(E[i], E[i + 1], (E[i] + E[i + 2]) / 2, (E[i + 1] + E[i + 3]) / 2);
+      g.lineTo(E[E.length - 2], E[E.length - 1]); g.closePath();
+      g.globalAlpha = 0.84; g.fillStyle = KELP[f.c]; g.fill();  // a little of the backdrop shows through, like a wet blade against the light
+      g.globalAlpha = 1; g.strokeStyle = 'rgba(38,40,12,.5)'; g.lineWidth = 0.9; g.stroke();
+      // the midrib, lighter than the blade and stopping short of the tip
+      g.beginPath(); g.moveTo(P[0].x, P[0].y);
+      for (let i = 1; i < m - 1; i++) g.quadraticCurveTo(P[i].x, P[i].y, (P[i].x + P[i + 1].x) / 2, (P[i].y + P[i + 1].y) / 2);
+      g.strokeStyle = 'rgba(226,216,140,.6)'; g.lineWidth = Math.max(1, hw * 0.22); g.stroke();
+      for (const b of f.bl) if (f.cum[b.i] < vis - hw * 5) { const q = P[b.i], o = hw * 0.95 * b.side; beads.push(q.x + q.nx * o, q.y + q.ny * o, b.rad * (0.6 + 0.4 * hw / f.hw)); }
+    }
+    // all the air bladders together: a pale olive bead with a glint
+    g.fillStyle = '#b9ad4e'; g.strokeStyle = 'rgba(52,50,14,.6)'; g.lineWidth = 0.8; g.beginPath();
+    for (let i = 0; i < beads.length; i += 3) { g.moveTo(beads[i] + beads[i + 2], beads[i + 1]); g.arc(beads[i], beads[i + 1], beads[i + 2], 0, TAU); }
+    g.fill(); g.stroke();
+    g.fillStyle = 'rgba(255,250,200,.75)'; g.beginPath();
+    for (let i = 0; i < beads.length; i += 3) g.rect(beads[i] - beads[i + 2] * 0.5, beads[i + 1] - beads[i + 2] * 0.55, beads[i + 2] * 0.5, beads[i + 2] * 0.5);
+    g.fill();
+  }
+
   HP.fx.add('vine', {
     label: 'Vine',
     grows: true, days: 7,
@@ -165,6 +287,7 @@
       let d = 8;
       for (const gp of ctx.gaps) { const mx = (gp.x1 + gp.x2) / 2, my = (gp.y1 + gp.y2) / 2; for (const b of btn) d = Math.min(d, Math.hypot(Math.max(b.x - mx, 0, mx - b.x - b.w), Math.max(b.y - my, 0, my - b.y - b.h))); }
       d = Math.max(3, d);
+      if (kelp) return kelpGrow(ctx, st, btn, d, dens);  // kelp is built and drawn its own way; nothing below is for it
       const rings = btn.map(b => ring(b, d)), all = [];
       rings.forEach((R, ri) => R.forEach((q, pi) => { q.ri = ri; q.pi = pi; q.bad = q.x < 2 || q.y < 2 || q.x > W - 2 || q.y > H - 2 || btn.some((b, i) => i !== ri && inside(b, q.x, q.y, 1)); all.push(q); }));
       // outline points sorted into coarse squares, so a stem looking for a neighbour only searches nearby (the tablet is slow)
@@ -319,6 +442,7 @@
 
     draw(g, st, ctx) {
       const p = ctx.progress, e = ctx.env, sp = st.sp, plant = st.plant, now = Date.now();
+      if (st.fronds) { if (p > 0.003) kelpDraw(g, st, ctx); return; }
       if (p <= 0.003 || !st.stems.length) return;
       // Stems reach full length at 60% of the cycle; the rest of the time belongs to leaves, buds and flowers.
       const reach = st.max * Math.pow(Math.min(1, p / 0.6), 0.75), arrive = (s, i) => 0.6 * Math.pow((s.birth + s.cum[i]) / st.max, 1 / 0.75);

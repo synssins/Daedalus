@@ -244,7 +244,7 @@ function show() {
     if (def.tap && !t.info) { el.classList.add('tap'); el.addEventListener('click', tap); }
     HP.live.push(inst);
   }
-  HP.fx.use(d.fx, ((HP.panels[HP.cur] || {}).id || '') + '/' + page.id, true);  // overlays; layout() below hands them the rectangles
+  fxUse.page = page.id; fxUse(true);  // overlays; layout() below hands them the rectangles
   layout();
   // create after layout so tiles know their pixel size
   HP.live.forEach(i => { i.data = i.def.create ? i.def.create(i.t, i.body, ctx, i) : null; });
@@ -254,22 +254,42 @@ function show() {
 /** Size each tile's type scale from its pixels, and cut the blurred backdrop to the tile shapes (cheap glass:
  *  one blurred layer for the whole screen instead of a backdrop filter per tile, which the Air 2 cannot afford). */
 function layout() {
-  const radius = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--radius')) || 0, off = $('grid').getBoundingClientRect();
-  let path = '';
+  const radius = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--radius')) || 0;
   const boxes = [];
   for (const i of HP.live) {
     const r = i.el.getBoundingClientRect();
     i.w = r.width; i.h = r.height;
-    boxes.push({x: r.left, y: r.top, w: r.width, h: r.height, r: Math.min(radius, r.width / 2, r.height / 2), on: i.el.classList.contains('on'), flat: i.el.classList.contains('flat'), hidden: i.el.hidden || !r.width, type: i.t.type});
+    boxes.push({x: r.left, y: r.top, w: r.width, h: r.height, r: Math.min(radius, r.width / 2, r.height / 2), on: i.el.classList.contains('on'), flat: i.el.classList.contains('flat'), hidden: i.el.hidden || !r.width, type: i.t.type, el: i.el, tile: i.t});
     i.el.style.setProperty('--u', U.unit(r.width, r.height).toFixed(1) + 'px');
     i.el.classList.toggle('wide', r.width / r.height > 2.4);
-    if (i.el.classList.contains('flat') || i.el.classList.contains('solid') || i.el.hidden || !r.width) continue;
+  }
+  cut();
+  HP.fx.layout(boxes);
+}
+/** Cut the blurred backdrop to the tiles' shapes. Also called by an overlay that takes a tile away for a while
+ *  (it hides the tile or stops it taking touches): that tile's frosted patch goes with it. */
+function cut() {
+  const radius = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--radius')) || 0, off = $('grid').getBoundingClientRect();
+  let path = '';
+  for (const i of HP.live) {
+    const r = {left: off.left + i.el.offsetLeft, top: off.top + i.el.offsetTop, width: i.el.offsetWidth, height: i.el.offsetHeight};
+    if (i.el.classList.contains('flat') || i.el.classList.contains('solid') || i.el.hidden || !r.width || i.el.style.visibility === 'hidden' || i.el.style.pointerEvents === 'none') continue;
     // measured relative to the grid, so the cut stays right while the grid is shifted by a swipe or by tilt
     const rr = Math.min(parseFloat(getComputedStyle(i.el).borderTopLeftRadius) || radius, r.width / 2, r.height / 2), x = r.left - off.left, y = r.top - off.top, w = r.width, h = r.height;
     path += `M${x + rr},${y}h${w - 2 * rr}a${rr},${rr} 0 0 1 ${rr},${rr}v${h - 2 * rr}a${rr},${rr} 0 0 1 ${-rr},${rr}h${-(w - 2 * rr)}a${rr},${rr} 0 0 1 ${-rr},${-rr}v${-(h - 2 * rr)}a${rr},${rr} 0 0 1 ${rr},${-rr}z`;
   }
   $('blurclip').style.clipPath = $('blurclip').style.webkitClipPath = path ? `path('${path}')` : 'inset(50%)';
-  HP.fx.layout(boxes);
+}
+HP.cut = cut;
+
+/** Hand the overlay engine today's overlays for the dashboard on screen. Called again when the day or the weather
+ *  changes what should show. */
+function fxUse(wait) {
+  const p = HP.panels[HP.cur] || {}, list = HP.fx.pick(HP.design.fx, p.fxlist), sig = JSON.stringify(list);
+  if (!wait && sig === fxUse.sig) return;
+  fxUse.sig = sig;
+  const all = []; HP.panels.forEach(q => q.design.pages.forEach(pg => all.push((q.id || '') + '/' + pg.id)));
+  HP.fx.use(list, (p.id || '') + '/' + fxUse.page, wait, all);
 }
 
 /** What the overlays know about the world outside: night, sun, weather, temperature, the month. */
@@ -282,6 +302,7 @@ function fxWorld() {
   HP.fx.env({night: sun ? sun.state === 'below_horizon' : hour >= 19 || hour < 7, elevation: sun ? sun.attributes.elevation : null, weather: w ? w.state : null,
     temp, freezing, cold: temp != null && temp <= freezing, month: new Date().getMonth() + 1, date: new Date()});
   HP.fx.lights(HP.live.map(i => i.el.classList.contains('on')));
+  if (HP.design && fxUse.page) fxUse();
 }
 
 function update() {
@@ -488,8 +509,9 @@ async function serverMode(server, cfg) {
       const m = ev.data || {}; if (m.type !== 'hp-design') return;
       // the Studio's theme pages also want to see the panel bar: m.bar is a list of tab names to show over the same design
       HP.bar = !!m.bar;
+      HP.fx.demo = !!m.demo;
       HP.fx.preview(m.grow == null ? null : m.grow);  // show growing overlays at a chosen point of their cycle
-      if (m.bar) HP.setPanels(m.bar.map((name, k) => ({id: 'demo' + k, name, design: m.design, theme: m.theme})), m.page); else HP.setDesign(m.design, m.page, m.theme);
+      if (m.bar) HP.setPanels(m.bar.map((name, k) => ({id: 'demo' + k, name, design: m.design, theme: m.theme})), m.page); else HP.setPanels([{id: '', design: m.design, theme: m.theme, fxlist: m.fxlist}], m.page);
     });
     if (window.parent !== window) window.parent.postMessage({type: 'hp-ready'}, '*');
     return;

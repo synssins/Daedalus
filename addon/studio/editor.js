@@ -2,7 +2,7 @@
 // The grid editor. The sheet is the real tablet renderer in an iframe (live house state), with a transparent
 // layer on top for selecting, dragging and right-clicking. Uses the helpers in studio.js.
 
-// ---------- what each kind of button is, and which fields it has ----------
+// ---------- what each kind of tile is, and which fields it has ----------
 const ORBS = [['ribbons', 'Orb'], ['ring', 'Ring'], ['veil', 'Veil']];
 const TYPES = {
   button: {label: 'Button', icon: 'gesture-tap', w: 14, h: 10, fields: []},
@@ -47,6 +47,13 @@ const ed = () => A.ed;
 const page = () => ed().design.pages.find(p => p.id === ed().page) || ed().design.pages[0];
 const tile = () => page().tiles[ed().sel];
 const edTheme = () => themeBy(ed().design.themeId);
+const playlists = () => A.state.library.playlists || (A.state.library.playlists = []);
+/** The overlay playlist this panel plays. For the preview, a playlist that plays one overlay at a time shows the
+ *  one whose section was opened last, so each can be looked at. */
+function edList(show) {
+  const pl = playlists().find(p => p.id === ed().design.fxList); if (!pl || !show) return pl || null;
+  return !pl.mode || pl.mode === 'all' ? pl : {id: pl.id, mode: 'all', items: pl.items.slice(ed().plShow || 0, (ed().plShow || 0) + 1)};
+}
 
 function mark() { const e = ed(); e.hist.push(JSON.stringify(e.design)); if (e.hist.length > 80) e.hist.shift(); e.redo = []; }
 /** Every change goes through here: remember the state before a run of edits, apply, redraw, tell the sheet. */
@@ -61,7 +68,7 @@ function change(fn, opts) {
 const settle = () => { if (ed()) ed().open = false; };
 function push() {
   if (push.q) return;
-  push.q = requestAnimationFrame(() => { push.q = 0; const f = $('.stage iframe'); if (f && ed() && ed().ready) f.contentWindow.postMessage({type: 'hp-design', design: ed().design, page: ed().page, theme: edTheme(), grow: ed().grow == null ? null : ed().grow}, '*'); });
+  push.q = requestAnimationFrame(() => { push.q = 0; const f = $('.stage iframe'); if (f && ed() && ed().ready) f.contentWindow.postMessage({type: 'hp-design', design: ed().design, page: ed().page, theme: edTheme(), fxlist: edList(true), demo: ed().use, grow: ed().grow == null ? null : ed().grow}, '*'); });
 }
 function travel(from, to) {
   const e = ed(); if (!from.length) return;
@@ -72,7 +79,8 @@ function travel(from, to) {
 }
 async function save() {
   const e = ed();
-  try { await send('PUT', 'designs/' + e.id, {name: e.name, design: e.design}); e.dirty = false; saveLabel(); toast('Saved.'); api('state').then(s => { A.state = s; rail(); }); }
+  try { if (e.libDirty) { await send('PUT', 'library', {playlists: playlists()}); e.libDirty = false; }
+    await send('PUT', 'designs/' + e.id, {name: e.name, design: e.design}); e.dirty = false; saveLabel(); toast('Saved.'); api('state').then(s => { A.state = s; rail(); }); }
   catch (err) { toast('Not saved: ' + err.message, true); }
 }
 /** Toolbar state: the saved/unsaved note, and buttons that have nothing to do right now are disabled. */
@@ -96,11 +104,13 @@ function viewEditor(keepFrame) {
     h('span', {class: 'sep'}), tabs, addPage, h('span', {class: 'sep'}),
     screenPick(e.screen, s => { e.screen = s; viewEditor(); }),
     btn(e.use ? 'Back to editing' : 'Preview', null, () => { e.use = !e.use; viewEditor(true); }, e.use ? 'on' : ''),
+    Object.assign(btn('Grid', null, () => { localStorage.setItem('hp:nogrid', gridOff() ? '' : '1'); viewEditor(true); }), {ariaPressed: String(!gridOff())}),
+    btn('Screenshot', null, () => snap($('.stage iframe'), fileName(e.name + ' ' + (page().name || page().id)))),
     h('span', {class: 'sep'}), undo, redo, h('span', {class: 'saved'}), saveB);
 
   const th = edTheme();
   const palette = h('div', {class: 'palette'},
-    ...(th ? [h('h2', null, 'Designs'), ...th.buttons.map(b => h('button', {type: 'button', title: 'Add a button with the design "' + b.name + '"', onclick: () => addTile('button', null, b.name), html: icon('gesture-tap') + `<span>${esc(b.name)}</span>`}))] : []),
+    ...(th ? [h('h2', null, 'Designs'), ...th.buttons.map(b => h('button', {type: 'button', title: 'Add a Button tile with the design "' + b.name + '"', onclick: () => addTile('button', null, b.name), html: icon('gesture-tap') + `<span>${esc(b.name)}</span>`}))] : []),
     h('h2', null, 'Add'),
     ...Object.keys(TYPES).map(k => h('button', {type: 'button', title: 'Add: ' + TYPES[k].label, onclick: () => addTile(k), html: icon(TYPES[k].icon) + `<span>${esc(TYPES[k].label)}</span>`})));
 
@@ -108,14 +118,14 @@ function viewEditor(keepFrame) {
     // Same panel, same sheet: swap the toolbar and redraw the edit layer only. Re-inserting the preview
     // frame would make the browser reload it and reconnect to the house on every dashboard switch or undo.
     const held = document.activeElement && document.activeElement.dataset.k;  // keep keyboard focus on Undo/Redo across the swap
-    $('.bar').replaceWith(bar); $('.palette').replaceWith(palette); $('.stage').classList.toggle('use', e.use);
+    $('.bar').replaceWith(bar); $('.palette').replaceWith(palette); $('.stage').classList.toggle('use', e.use); $('.over').classList.toggle('grid', !gridOff());
     if (held && !$('.bar [data-k=' + held + ']').disabled) $('.bar [data-k=' + held + ']').focus();
     saveLabel(); boxes(); inspector(); push();
     return;
   }
   e.ready = false;
   const frame = h('iframe', {title: 'Dashboard preview', src: 'renderer/engine.html?preview=1&key=studio-preview&design=' + encodeURIComponent(e.id)});
-  const over = h('div', {class: 'over grid'});
+  const over = h('div', {class: 'over' + (gridOff() ? '' : ' grid')});
   const stage = h('div', {class: 'stage' + (e.use ? ' use' : '')}, h('div', {class: 'frame'}, frame), over);
   const sheet = h('div', {class: 'sheet'}, h('div', {class: 'ruler top'}), h('div', {class: 'ruler left'}), stage);
   over.addEventListener('pointerdown', ev => { if (ev.target === over && ev.button === 0) { e.sel = -1; boxes(); inspector(); } });
@@ -123,6 +133,8 @@ function viewEditor(keepFrame) {
   $('#main').replaceChildren(bar, h('div', {class: 'ed'}, palette, h('div', {class: 'sheetwrap'}, sheet), h('aside', {class: 'insp', 'aria-label': 'Properties'})));
   saveLabel(); fit(); inspector();
 }
+
+const gridOff = () => { try { return !!localStorage.getItem('hp:nogrid'); } catch (e) { return false; } };
 
 /** Scale the sheet to the space available and draw the cell rulers. */
 function fit() {
@@ -144,7 +156,7 @@ function fit() {
 window.addEventListener('resize', () => { if (A.view === 'editor') fit(); });
 
 // ---------- the edit layer ----------
-/** Where a multi-item button keeps its items, in sheet pixels relative to the button. Mirrors the renderer's sizes. */
+/** Where a Button tile with several items keeps them, in sheet pixels relative to the button. Mirrors the renderer's sizes. */
 function innerArea(t) {
   const e = ed(), g = e.design.grid, th = edTheme(), look = (th && (th.buttons.find(b => b.id === th.button) || th.buttons[0] || {}).style) || (e.design.theme || {}).tile || {};
   const gap = look.gap == null ? 5 : look.gap, W = t.w * e.screen.w / g.cols - 2 * gap, H = t.h * e.screen.h / g.rows - 2 * gap;
@@ -158,12 +170,12 @@ function autoGrid(t, n) {
   return {cols, rows};
 }
 
-/** One box per button over the preview; the selected one shows its measurements and handles. */
+/** One box per tile over the preview; the selected one shows its measurements and handles. */
 function boxes() {
   const e = ed(), over = $('.over'); if (!over) return;
   const hadFocus = over.contains(document.activeElement);  // redrawing replaces the focused box: give focus back after
   over.replaceChildren(...page().tiles.map((t, i) => {
-    const b = h('div', {class: 'box' + (i === e.sel ? ' sel' : ''), tabIndex: 0, role: 'button', 'aria-label': `Button ${i + 1}, ${(TYPES[t.type] || {}).label || t.type}`, 'aria-pressed': i === e.sel, style: `left:${t.x * e.cw}px;top:${t.y * e.ch}px;width:${t.w * e.cw}px;height:${t.h * e.ch}px`, title: (TYPES[t.type] || {}).label || t.type},
+    const b = h('div', {class: 'box' + (i === e.sel ? ' sel' : ''), tabIndex: 0, role: 'button', 'aria-label': `Tile ${i + 1}, ${(TYPES[t.type] || {}).label || t.type}`, 'aria-pressed': i === e.sel, style: `left:${t.x * e.cw}px;top:${t.y * e.ch}px;width:${t.w * e.cw}px;height:${t.h * e.ch}px`, title: (TYPES[t.type] || {}).label || t.type},
       h('span', {class: 'tag'}, String(i + 1)), h('span', {class: 'dim' + (t.y + t.h > e.design.grid.rows - 3 ? ' up' : '')}, `${t.w} × ${t.h} at ${t.x}, ${t.y}`),
       ...['nw', 'ne', 'sw', 'se'].map(c => h('span', {class: 'hd ' + c, 'data-c': c})));
     b.addEventListener('pointerdown', ev => { if (ev.button === 0 && !ev.target.closest('.ibox')) drag(ev, i, b); });
@@ -253,8 +265,8 @@ function tileMenu(ev, i) {
 }
 function itemMenu(ev, t, k) {
   const it = t.items[k];
-  menu(ev, [['Rename', () => { const n = prompt('Name shown on the button', it.label || itemName(it)); if (n != null) { change(() => { if (n.trim()) it.label = n.trim(); else delete it.label; }, {inspect: true}); settle(); } }],
-    null, ['Remove from this button', () => { change(() => t.items.splice(k, 1), {inspect: true}); settle(); }, 'stop']]);
+  menu(ev, [['Rename', () => { const n = prompt('Name shown on the tile', it.label || itemName(it)); if (n != null) { change(() => { if (n.trim()) it.label = n.trim(); else delete it.label; }, {inspect: true}); settle(); } }],
+    null, ['Remove from this tile', () => { change(() => t.items.splice(k, 1), {inspect: true}); settle(); }, 'stop']]);
 }
 function sheetMenu(ev) {
   const e = ed(), r = $('.over').getBoundingClientRect(), at = {x: Math.floor((ev.clientX - r.left) / e.cw), y: Math.floor((ev.clientY - r.top) / e.ch)}, th = edTheme();
@@ -269,9 +281,9 @@ function inspector() {
   const e = ed(), box = $('.insp'); if (!box || !e) return;
   const tab = (id, label) => h('button', {type: 'button', role: 'tab', 'aria-selected': e.tab === id, onclick: () => { e.tab = id; inspector(); }}, label);
   const keep = box.scrollTop;
-  box.replaceChildren(h('div', {class: 'tabs', role: 'tablist', 'aria-label': 'Properties'}, tab('tile', 'Button'), tab('look', 'Look'), tab('page', 'Dashboard')),
+  box.replaceChildren(h('div', {class: 'tabs', role: 'tablist', 'aria-label': 'Properties'}, tab('tile', 'Tile'), tab('look', 'Look'), tab('page', 'Dashboard')),
     ...(e.tab === 'look' ? panelLook() : e.tab === 'page' ? pageFields() : tileFields()).filter(Boolean));
-  sliderValues(box); box.scrollTop = keep;
+  sliderValues(box); fold(box, e.tab); box.scrollTop = keep;
 }
 const textIn = (val, set, ph) => h('input', {type: 'text', value: val == null ? '' : val, placeholder: ph || '', oninput: ev => set(ev.target.value), onchange: settle});
 const HIDDEN_DOMAINS = ['update', 'event', 'zone', 'sun', 'tts', 'stt', 'conversation', 'automation', 'device_tracker', 'persistent_notification', 'number', 'select', 'text', 'time', 'date', 'datetime', 'image', 'todo', 'calendar', 'assist_satellite', 'wake_word', 'ai_task', 'notify'];
@@ -342,7 +354,7 @@ function buttonFields(t) {
       h('button', {type: 'button', class: 'bare tw', 'aria-expanded': open, 'aria-label': 'Entities of ' + d.name, html: icon(open ? 'chevron-down' : 'chevron-right'), onclick: toggle}),
       h('span', {class: 'nm'}, d.name),
       btn('', 'trash', () => { change(() => { t.devices = t.devices.filter(x => x !== d.id); t.items = items.filter(it => !d.entities.includes(it.entity)); }, {inspect: true}); settle(); }, 'icon mini')));
-    out[out.length - 1].lastChild.title = 'Remove this device and its entities from the button';
+    out[out.length - 1].lastChild.title = 'Remove this device and its entities from the tile';
     if (open) out.push(h('div', {class: 'checks ents'}, ...d.entities.map(id => h('label', null,
       h('input', {type: 'checkbox', checked: has(id), onchange: ev => { change(() => { if (ev.target.checked) addItem(t, id); else t.items = t.items.filter(it => it.entity !== id); }, {inspect: true}); settle(); }}),
       h('span', null, entName(id)), id === d.primary ? h('small', null, 'main') : null))));
@@ -363,7 +375,7 @@ function buttonFields(t) {
 
 function tileFields() {
   const e = ed(), t = tile(), d = e.design, th = edTheme();
-  if (!t) return [h('p', {class: 'note', style: 'margin-top:16px'}, 'No button selected.')];
+  if (!t) return [h('p', {class: 'note', style: 'margin-top:16px'}, 'No tile selected.')];
   const def = TYPES[t.type] || {label: t.type, fields: []}, live = {live: true, keepBoxes: true};
   const setp = (k, v, o) => change(() => { if (v == null || v === '') delete t[k]; else t[k] = v; }, o || live);
   const num = (k, min, max) => h('div', null, h('label', null, k.toUpperCase()), h('input', {type: 'number', min, max, value: t[k], 'aria-label': k,
@@ -398,9 +410,9 @@ function tileFields() {
   }
 
   out.push(h('h2', null, 'Appearance'));
-  if (th) out.push(row('Design', h('select', {'aria-label': 'Button design', onchange: ev => { setp('look', ev.target.value, {keepBoxes: true, inspect: true}); settle(); }},
+  if (th) out.push(row('Design', h('select', {'aria-label': 'Tile design', onchange: ev => { setp('look', ev.target.value, {keepBoxes: true, inspect: true}); settle(); }},
     h('option', {value: ''}, 'Theme default'), ...th.buttons.map(b => h('option', {value: b.name, selected: t.look === b.name}, b.name)))));
-  out.push(row('Background', h('input', {type: 'checkbox', checked: !t.flat, 'aria-label': 'Show the button background', onchange: ev => { setp('flat', ev.target.checked ? null : true, {keepBoxes: true, inspect: true}); settle(); }})));
+  out.push(row('Background', h('input', {type: 'checkbox', checked: !t.flat, 'aria-label': 'Show the tile background', onchange: ev => { setp('flat', ev.target.checked ? null : true, {keepBoxes: true, inspect: true}); settle(); }})));
   if (!t.flat) {
     // This one button's own changes, on top of its design. Each can be dropped to go back to the design's value.
     const s = t.style || {}, base = (th && ((th.buttons.find(b => b.name === t.look) || th.buttons.find(b => b.id === th.button) || {}).style)) || (d.theme || {}).tile || {};
@@ -428,7 +440,7 @@ function panelLook() {
       row('Colour', h('input', {type: 'color', value: (rgba(bg.color) || {hex: '#141a5c'}).hex, 'aria-label': 'Background colour', oninput: ev => set(bg, 'color', ev.target.value), onchange: settle})),
       row('Darken', h('input', {type: 'range', min: 0, max: 0.8, step: 0.01, value: bg.dim || 0, oninput: ev => set(bg, 'dim', +ev.target.value), onchange: settle})),
       row('Motion', h('select', {'aria-label': 'Motion', onchange: ev => set(bg, 'motion', ev.target.value === 'none' ? null : ev.target.value, true)}, ...MOTION.map(m => h('option', {value: m[0], selected: (bg.motion || 'none') === m[0]}, m[1])))),
-      h('h2', null, 'Buttons'), ...lookFields(tl, (k, v, re) => set(tl, k, v, re)).filter(Boolean));
+      h('h2', null, 'Tiles'), ...lookFields(tl, (k, v, re) => set(tl, k, v, re)).filter(Boolean));
   }
   out.push(h('h2', null, 'Day and night'),
     row('Mode', h('select', {'aria-label': 'Day and night', onchange: ev => set(night, 'mode', ev.target.value, true)},
@@ -443,26 +455,39 @@ function panelLook() {
     const mins = (k, label) => row(label, h('input', {type: 'number', min: 0, max: 180, step: 5, value: night[k] || 0, 'aria-label': label, onchange: ev => set(night, k, Math.max(0, Math.min(180, +ev.target.value || 0)) || null, true)}), h('span', {class: 'note'}, 'minutes'));
     out.push(mins('before', 'Before sunset'), night.mode === 'switch' ? mins('after', 'After sunrise') : null);
   }
-  out.push(...overlayFields(d));
-  out.push(h('h2', null, 'Depth'),
-    row('Tilt', h('input', {type: 'range', min: 0, max: 1, step: 0.01, value: own.depth || 0, oninput: ev => set(own, 'depth', +ev.target.value || null), onchange: settle})),
+  out.push(h('h2', null, 'Tilt'),
+    row('Depth', h('input', {type: 'range', min: 0, max: 1, step: 0.01, value: own.depth || 0, oninput: ev => set(own, 'depth', +ev.target.value || null), onchange: settle})),
     h('h2', null, 'Grid'),
     h('div', {class: 'f4'}, ...['cols', 'rows'].map(k => h('div', null, h('label', null, k === 'cols' ? 'Columns' : 'Rows'), h('input', {type: 'number', min: 8, max: 160, value: d.grid[k], 'aria-label': k,
       onchange: ev => { const v = Math.max(8, Math.min(160, Math.round(+ev.target.value || d.grid[k]))), f = v / d.grid[k], pos = k === 'cols' ? ['x', 'w'] : ['y', 'h'];
         // Buttons keep their share of the screen, so a panel moves between device sizes and orientations.
         change(() => { d.pages.forEach(p => p.tiles.forEach(t => { t[pos[0]] = Math.min(v - 2, Math.round(t[pos[0]] * f)); t[pos[1]] = Math.max(2, Math.min(v - t[pos[0]], Math.round(t[pos[1]] * f))); })); d.grid[k] = v; }); settle(); fit(); }})))));
+  out.push(...overlayFields(d));
   return out;
 }
 
-/** Overlays: drawing layers above the buttons. Each kind lists its own options (see the fx-*.js files). */
+/** Overlays: drawing layers above the tiles. Each kind lists its own options (see the fx-*.js files).
+ *  A panel has its own overlays and may also play a playlist: a named set kept in the library, usable by any panel. */
+const WEEK = ['S', 'M', 'T', 'W', 'T', 'F', 'S'], DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const SKY = [['clear', 'Clear'], ['cloudy', 'Cloudy'], ['rain', 'Rain'], ['snow', 'Snow'], ['fog', 'Fog'], ['wind', 'Wind']];
+const PLAYS = [['all', 'All together'], ['day', 'One a day'], ['week', 'One a week'], ['randday', 'Random each day'], ['randweek', 'Random each week']];
 function overlayFields(d) {
-  const e = ed(), kinds = (window.HP && HP.fx && HP.fx.kinds) || {}, list = d.fx || [], names = Object.keys(kinds).sort((a, b) => (kinds[a].label || a).localeCompare(kinds[b].label || b));
-  const out = [h('h2', null, 'Overlays')];
-  list.forEach((c, k) => {
-    const def = kinds[c.kind] || {options: []}, set = (key, v, re) => { change(() => { if (v == null || v === '') delete c[key]; else c[key] = v; }, re ? {keepBoxes: true, inspect: true} : {live: true, keepBoxes: true}); if (re) settle(); };
-    out.push(h('div', {class: 'item'},
-      h('select', {'aria-label': 'Overlay', onchange: ev => { change(() => { list[k] = start({kind: ev.target.value}); }, {inspect: true}); settle(); }}, ...names.map(n => h('option', {value: n, selected: n === c.kind}, kinds[n].label || n))),
-      btn('', 'trash', () => { change(() => { list.splice(k, 1); if (!list.length) delete d.fx; }, {inspect: true}); settle(); }, 'icon mini')));
+  const e = ed(), kinds = (window.HP && HP.fx && HP.fx.kinds) || {}, names = Object.keys(kinds).sort((x, y) => (kinds[x].label || x).localeCompare(kinds[y].label || y));
+  const pl = edList(), today = () => new Date().toISOString().slice(0, 10);
+  const start = c => { if ((kinds[c.kind] || {}).grows) c.start = today(); return c; };
+  const adder = (label, onpick) => h('select', {'aria-label': label, onchange: ev => { if (ev.target.value) onpick(ev.target.value); }}, h('option', {value: ''}, label), ...names.map(n => h('option', {value: n}, kinds[n].label || n)));
+  // one overlay's section. chg wraps change() so that edits to a playlist are also saved to the library.
+  const one = (list, k, pre, chg, drop) => {
+    const c = list[k], def = kinds[c.kind] || {options: []}, when = c.when || {};
+    const set = (key, v, re) => { chg(() => { if (v == null || v === '') delete c[key]; else c[key] = v; }, re ? {keepBoxes: true, inspect: true} : {live: true, keepBoxes: true}); if (re) settle(); };
+    const setWhen = (key, v) => { chg(() => { const w = Object.assign({}, c.when); if (v == null || v === '' || v.length === 0) delete w[key]; else w[key] = v; if (Object.keys(w).length) c.when = w; else delete c.when; }, {keepBoxes: true, inspect: true}); settle(); };
+    const flip = (key, v) => { const cur = when[key] || []; setWhen(key, cur.includes(v) ? cur.filter(x => x !== v) : [...cur, v].sort()); };
+    const md = key => h('input', {type: 'date', value: when[key] ? new Date().getFullYear() + '-' + when[key] : '', 'aria-label': key === 'from' ? 'From' : 'To', onchange: ev => setWhen(key, ev.target.value ? ev.target.value.slice(5) : null)});
+    const head = h('h2', {class: 'sub', 'data-fold': pre + k}, def.label || c.kind);
+    if (pre === 'pl') head.addEventListener('unfold', () => { e.plShow = k; push(); });
+    const out = [head, h('div', {class: 'item'},
+      h('select', {'aria-label': 'Overlay', onchange: ev => { chg(() => { list[k] = start(Object.assign({kind: ev.target.value}, c.when ? {when: c.when} : {})); }, {inspect: true}); settle(); }}, ...names.map(n => h('option', {value: n, selected: n === c.kind}, kinds[n].label || n))),
+      btn('', 'trash', () => { chg(() => drop(k), {inspect: true}); settle(); }, 'icon mini'))];
     for (const o of def.options || []) {
       const val = c[o.key] == null ? o.default : c[o.key];
       if (o.type === 'range') { const r = h('input', {type: 'range', min: o.min, max: o.max, step: o.step || (o.max <= 1 ? 0.01 : 1), value: val, oninput: ev => set(o.key, +ev.target.value)}); if (o.max > 1) r.dataset.unit = ''; out.push(row(o.label, r)); }
@@ -472,15 +497,40 @@ function overlayFields(d) {
     if (def.grows) out.push(
       row('Cycle', h('input', {type: 'number', min: 1, max: 730, value: c.days || def.days || 7, 'aria-label': 'Cycle length in days', onchange: ev => set('days', Math.max(1, Math.min(730, Math.round(+ev.target.value || 7))), true)}), h('span', {class: 'note'}, 'days')),
       row('At the end', h('select', {'aria-label': 'At the end', onchange: ev => set('loop', ev.target.value || null, true)}, h('option', {value: '', selected: c.loop !== 'stay'}, 'Start over'), h('option', {value: 'stay', selected: c.loop === 'stay'}, 'Stay'))),
-      row('Started', h('input', {type: 'date', value: (c.start || '').slice(0, 10), 'aria-label': 'Start date', onchange: ev => set('start', ev.target.value || null, true)}), btn('Today', null, () => set('start', new Date().toISOString().slice(0, 10), true), 'mini text')));
-  });
-  const pick = h('select', {'aria-label': 'Add overlay', onchange: ev => { if (!ev.target.value) return; change(() => { d.fx = [...list, start({kind: ev.target.value})]; }, {inspect: true}); settle(); }},
-    h('option', {value: ''}, 'Add overlay'), ...names.map(n => h('option', {value: n}, kinds[n].label || n)));
-  out.push(pick);
-  if (list.some(c => (kinds[c.kind] || {}).grows)) out.push(row('Preview', h('input', {type: 'range', min: 0, max: 1, step: 0.01, value: e.grow == null ? 1 : e.grow, 'aria-label': 'Preview growth', oninput: ev => { e.grow = +ev.target.value; push(); }}),
+      row('Started', h('input', {type: 'date', value: (c.start || '').slice(0, 10), 'aria-label': 'Start date', onchange: ev => set('start', ev.target.value || null, true)}), btn('Today', null, () => set('start', today(), true), 'mini text')));
+    out.push(
+      row('Days', h('div', {class: 'togs'}, ...WEEK.map((w, n) => h('button', {type: 'button', title: DAYS[n], 'aria-label': DAYS[n], 'aria-pressed': (when.days || []).includes(n), onclick: () => flip('days', n)}, w)))),
+      row('Weather', h('div', {class: 'togs'}, ...SKY.map(w => h('button', {type: 'button', 'aria-pressed': (when.weather || []).includes(w[0]), onclick: () => flip('weather', w[0])}, w[1])))),
+      row('From', md('from')), row('To', md('to')));
+    return out;
+  };
+  const own = d.fx || [], grows = l => l.some(c => (kinds[c.kind] || {}).grows);
+  const out = [h('h2', null, 'Overlays'),
+    adder('Add overlay', kind => { unfold('look/fx' + own.length); change(() => { d.fx = [...own, start({kind})]; }, {inspect: true}); settle(); }),
+    row('Playlist', h('select', {'aria-label': 'Playlist', onchange: ev => {
+      const v = ev.target.value;
+      change(() => {
+        if (v === '+') { const p = {id: uid(), name: 'Playlist ' + (playlists().length + 1), mode: 'day', items: []}; playlists().push(p); d.fxList = p.id; e.libDirty = true; unfold('look/Playlist'); }
+        else if (v) d.fxList = v; else delete d.fxList;
+        e.plShow = 0;
+      }, {inspect: true}); settle(); }},
+      h('option', {value: ''}, 'None'), ...playlists().map(p => h('option', {value: p.id, selected: p.id === d.fxList}, p.name)), h('option', {value: '+'}, 'New playlist')))];
+  if (grows(own) || (pl && grows(pl.items))) out.push(row('Preview', h('input', {type: 'range', min: 0, max: 1, step: 0.01, value: e.grow == null ? 1 : e.grow, 'aria-label': 'Preview growth', oninput: ev => { e.grow = +ev.target.value; push(); }}),
     e.grow == null ? null : btn('', 'undo', () => { e.grow = null; push(); inspector(); }, 'icon mini')));
+  own.forEach((c, k) => out.push(...one(own, k, 'fx', change, i => { own.splice(i, 1); if (!own.length) delete d.fx; })));
+  if (pl) {
+    const chg = (fn, o) => change(() => { fn(); e.libDirty = true; }, o);
+    out.push(h('h2', null, 'Playlist'),
+      row('Name', h('input', {type: 'text', value: pl.name, 'aria-label': 'Playlist name', oninput: ev => chg(() => { pl.name = ev.target.value; }, {live: true, keepBoxes: true}), onchange: () => { settle(); inspector(); }})),
+      row('Plays', h('select', {'aria-label': 'Plays', onchange: ev => { chg(() => { pl.mode = ev.target.value; }, {inspect: true}); settle(); }}, ...PLAYS.map(m => h('option', {value: m[0], selected: (pl.mode || 'all') === m[0]}, m[1])))),
+      adder('Add overlay', kind => { unfold('look/pl' + pl.items.length); e.plShow = pl.items.length; chg(() => { pl.items.push(start({kind})); }, {inspect: true}); settle(); }),
+      h('div', {class: 'apart'}, btn('Delete playlist', 'trash', () => {
+        if (!confirm('Delete the playlist "' + pl.name + '"?')) return;
+        chg(() => { A.state.library.playlists = playlists().filter(p => p !== pl); delete d.fxList; }, {inspect: true}); settle();
+      }, 'stop')));
+    pl.items.forEach((c, k) => out.push(...one(pl.items, k, 'pl', chg, i => { pl.items.splice(i, 1); e.plShow = 0; })));
+  }
   return out;
-  function start(c) { if ((kinds[c.kind] || {}).grows) c.start = new Date().toISOString().slice(0, 10); return c; }
 }
 
 function pageFields() {
@@ -492,7 +542,7 @@ function pageFields() {
       btn('Move left', null, () => { const i = d.pages.indexOf(p); if (i > 0) { change(() => { d.pages.splice(i, 1); d.pages.splice(i - 1, 0, p); }); settle(); viewEditor(true); } }),
       btn('Move right', null, () => { const i = d.pages.indexOf(p); if (i < d.pages.length - 1) { change(() => { d.pages.splice(i, 1); d.pages.splice(i + 1, 0, p); }); settle(); viewEditor(true); } }),
       btn('Delete', 'trash', () => {
-        if (!confirm('Delete the dashboard "' + (p.name || p.id) + '" and its buttons?')) return;
+        if (!confirm('Delete the dashboard "' + (p.name || p.id) + '" and its tiles?')) return;
         change(() => { d.pages = d.pages.filter(x => x !== p); if (d.start === p.id) d.start = d.pages[0].id; }); e.page = d.pages[0].id; e.sel = -1; viewEditor(true);
       }, 'stop')) : null];
 }

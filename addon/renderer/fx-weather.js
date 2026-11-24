@@ -116,19 +116,79 @@
   }
 
   // ---------- Rain ----------
-  // Small beads gather on the glass. In the open spaces some swell until they are too heavy and run down, wobbling
-  // and leaving a wet trail. A running drop that lands on a button follows its top edge to the nearer corner and
-  // goes down the gap beside it, so no trail is ever drawn across a button's face.
+  // Rain falls past the dashboard as slanted streaks at three depths: far ones short and faint, near ones long and
+  // bright. A near drop lands on a tile's top edge or on the bottom of the screen and leaves a small splash.
+  // On the glass itself a few beads gather; in the open spaces some swell until they are too heavy and run down,
+  // wobbling and leaving a wet trail. A running drop that lands on a button follows its top edge to the nearer corner
+  // and goes down the gap beside it, so no trail is ever drawn across a button's face.
+  // Kept cheap for the tablet: each depth is one path stroked once, and beads and splashes are stamped pictures.
   const RAIN = {rainy: 1, pouring: 1.6, lightning: 1.6, 'snowy-rainy': 0.6};
+  // far, middle, near: streak length, fall speed, line width, strength
+  const DEPTH = [[20, 380, 1, 0.3], [32, 520, 1.4, 0.44], [46, 680, 1.9, 0.62]];
+  /** A bead of water on glass: a clear body, a bright rim and a glint. */
+  function beadSprite() {
+    const c = canvas(24, 24), d = c.getContext('2d');
+    d.fillStyle = 'rgba(210,230,255,.28)'; d.strokeStyle = 'rgba(255,255,255,.55)'; d.lineWidth = 1.6;
+    d.beginPath(); d.arc(12, 12, 10.5, 0, TAU); d.fill(); d.stroke();
+    d.fillStyle = 'rgba(255,255,255,.85)'; d.fillRect(6, 5, 5, 5);
+    return c;
+  }
+  /** A splash seen from the side: a low ring of water thrown up and a few droplets flying off it. */
+  function splashSprite() {
+    const c = canvas(48, 24), d = c.getContext('2d');
+    d.strokeStyle = 'rgba(232,243,255,.9)'; d.lineWidth = 3; d.lineCap = 'round';
+    d.beginPath(); d.moveTo(4, 22); d.quadraticCurveTo(9, 12, 15, 21); d.moveTo(44, 22); d.quadraticCurveTo(39, 12, 33, 21); d.moveTo(18, 21); d.lineTo(30, 21); d.stroke();
+    d.fillStyle = 'rgba(240,248,255,.95)'; d.beginPath();
+    for (const q of [[7, 8, 2.8], [24, 4, 3], [41, 9, 2.8], [16, 11, 2.2], [33, 12, 2.2]]) { d.moveTo(q[0] + q[2], q[1]); d.arc(q[0], q[1], q[2], 0, TAU); }
+    d.fill();
+    return c;
+  }
   HP.fx.add('rain', {
     label: 'Rain',
     live: true, fps: 12,
     options: [{key: 'always', label: 'Whatever the weather', type: 'bool', default: false}, amount],
-    create(ctx) { return {solid: solidOf(ctx), beads: [], runs: [], t: 0}; },
+    create(ctx) {
+      const drops = [];
+      for (let i = 0; i < 110; i++) drops.push({x: Math.random() * ctx.w * 1.2, y: Math.random() * ctx.h, z: i % 3, sp: 0.85 + Math.random() * 0.3, land: ctx.h + 60});
+      return {solid: solidOf(ctx), beads: [], runs: [], t: 0, drops, splashes: [], bead: beadSprite(), splash: splashSprite(), odd: false};
+    },
     draw(g, st, ctx, t, dt) {
       const hard = RAIN[ctx.env.weather] || (ctx.opts.always ? 1 : 0), w = ctx.w, h = ctx.h;
-      if (!hard && !st.beads.length && !st.runs.length) return;
-      const wantBeads = Math.min(44, Math.round(44 * ctx.opts.amount * hard)), wantRuns = hard ? Math.round(6 * ctx.opts.amount * hard) + 1 : 0;
+      if (!hard && !st.beads.length && !st.runs.length && !st.splashes.length) return;
+      const wantBeads = Math.min(12, Math.round(12 * ctx.opts.amount * hard)), wantRuns = hard ? Math.min(3, Math.round(2 * ctx.opts.amount * hard) + 1) : 0;
+      // The streaks. At most 60 in rain and 110 when it pours: that is plenty to read as rain, and each is one line.
+      if (hard) {
+        const heavy = hard > 1, n = Math.round((heavy ? 110 : 60 * hard) * Math.min(1, ctx.opts.amount / 0.7)), slant = heavy ? 0.24 : 0.14, long = heavy ? 1.3 : 1, step = Math.min(dt, 0.2);
+        g.lineCap = 'round';
+        for (let k = 0; k < 3; k++) {
+          const D = DEPTH[k], len = D[0] * long, fall = D[1] * (heavy ? 1.2 : 1) * step;
+          g.strokeStyle = 'rgba(214,232,255,' + Math.min(0.8, D[3] * (heavy ? 1.15 : 1)) + ')'; g.lineWidth = D[2]; g.beginPath();
+          for (let i = k; i < n; i += 3) {
+            const f = st.drops[i];
+            f.y += fall * f.sp; f.x -= fall * f.sp * slant;
+            if (f.y > f.land) {
+              if (f.land <= h && st.splashes.length < 10) st.splashes.push({x: f.x, y: f.land, a: 0});
+              // A near drop is aimed at a tile's top edge or at the bottom of the screen, and starts a short fall above it.
+              // The others just come round again at the top.
+              let x = Math.random() * w, y = h - 1;
+              if (k === 2 && st.solid.length && Math.random() < 0.6) { const b = st.solid[Math.floor(Math.random() * st.solid.length)], rr = b.r || 0; x = b.x + rr + Math.random() * (b.w - 2 * rr); y = b.y; }
+              const drop = k === 2 ? 160 + Math.random() * 420 : h + len;
+              f.land = k === 2 ? y : h + len; f.y = f.land - drop; f.x = (k === 2 ? x : Math.random() * w * 1.2) + drop * slant;
+              continue;
+            }
+            g.moveTo(f.x, f.y); g.lineTo(f.x + len * slant, f.y - len);
+          }
+          g.stroke();
+        }
+      }
+      if (st.splashes.length) {
+        for (let i = st.splashes.length - 1; i >= 0; i--) {
+          const s = st.splashes[i], sz = 16 + 24 * s.a;
+          g.globalAlpha = 1 - s.a; g.drawImage(st.splash, s.x - sz / 2, s.y - sz / 2 + 1, sz, sz / 2);
+          s.a += dt * 3.6; if (s.a >= 1) st.splashes.splice(i, 1);
+        }
+        g.globalAlpha = 1;
+      }
       // new beads arrive a few at a time, never all at once
       st.t += dt * hard * 14;
       while (st.t > 1) {
@@ -165,25 +225,19 @@
           f.y = b.y - 3 + rr - Math.sqrt(rr * rr - past * past);
           if (f.x < b.x - 3 || f.x > b.x + b.w + 3) f.mode = 1;
         }
-        f.trail.push(f.x, f.y); if (f.trail.length > 44) f.trail.splice(0, 2);
+        if (st.odd) { f.trail.push(f.x, f.y); if (f.trail.length > 18) f.trail.splice(0, 2); }  // every other frame is enough for a smooth trail
         if (f.y > h + 20) st.runs.splice(i, 1);
       }
-      // wet trails: the whole length faint, the newer half a little stronger
-      g.lineCap = 'round'; g.lineJoin = 'round';
-      for (let pass = 0; pass < 2; pass++) {
-        g.strokeStyle = pass ? 'rgba(225,238,255,.26)' : 'rgba(225,238,255,.18)'; g.lineWidth = pass ? 3.4 : 2; g.beginPath();
-        for (const f of st.runs) { const tr = f.trail, from = pass ? ((tr.length * 0.6) >> 1) * 2 : 0; if (tr.length - from < 4) continue; g.moveTo(tr[from], tr[from + 1]); for (let k = from + 2; k < tr.length; k += 2) g.lineTo(tr[k], tr[k + 1]); }
+      st.odd = !st.odd;
+      // wet trails, all in one stroke
+      if (st.runs.length) {
+        g.lineCap = 'round'; g.lineJoin = 'round'; g.strokeStyle = 'rgba(225,238,255,.3)'; g.lineWidth = 2.8; g.beginPath();
+        for (const f of st.runs) { const tr = f.trail; if (tr.length < 4) continue; g.moveTo(tr[0], tr[1]); for (let k = 2; k < tr.length; k += 2) g.lineTo(tr[k], tr[k + 1]); g.lineTo(f.x, f.y); }
         g.stroke();
       }
-      // the drops themselves: a clear body with a bright rim, and a glint on the larger ones
-      g.fillStyle = 'rgba(210,230,255,.26)'; g.strokeStyle = 'rgba(255,255,255,.5)'; g.lineWidth = 0.8; g.beginPath();
-      for (const b of st.beads) { g.moveTo(b.x + b.r, b.y); g.arc(b.x, b.y, b.r, 0, TAU); }
-      for (const f of st.runs) { g.moveTo(f.x + f.r, f.y); g.arc(f.x, f.y, f.r, 0, TAU); }
-      g.fill(); g.stroke();
-      g.fillStyle = 'rgba(255,255,255,.8)'; g.beginPath();
-      for (const b of st.beads) if (b.r > 2) g.rect(b.x - b.r * 0.5, b.y - b.r * 0.55, b.r * 0.45, b.r * 0.45);
-      for (const f of st.runs) g.rect(f.x - f.r * 0.5, f.y - f.r * 0.55, f.r * 0.4, f.r * 0.4);
-      g.fill();
+      // the drops themselves, each a stamp of the one bead picture
+      for (const b of st.beads) g.drawImage(st.bead, b.x - b.r, b.y - b.r, b.r * 2, b.r * 2);
+      for (const f of st.runs) g.drawImage(st.bead, f.x - f.r, f.y - f.r, f.r * 2, f.r * 2);
     },
   });
 

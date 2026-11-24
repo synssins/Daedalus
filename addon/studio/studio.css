@@ -220,6 +220,18 @@ td input[type=text]:hover, td input[type=text]:focus { background: var(--field);
 .insp .tabs { padding: 6px 0 2px; }
 .insp .tabs button { flex: 1; }
 .insp h2:first-of-type { margin-top: 12px; }
+/* sections of the properties bar fold away under their headings */
+.insp h2.fold { display: flex; align-items: center; gap: 6px; margin: 0; padding: 11px 0; border-top: 1px solid var(--line); cursor: pointer; user-select: none; }
+.insp h2.fold::before { content: ''; width: 6px; height: 6px; margin: 0 4px 0 2px; border-right: 2px solid var(--ink2); border-bottom: 2px solid var(--ink2); transform: rotate(-45deg); transition: transform .12s; }
+.insp h2.fold[aria-expanded=true]::before { transform: rotate(45deg); }
+.insp h2.fold:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+.insp h2.fold.sub { padding-left: 14px; font-weight: 400; }
+.insp .sec { padding-bottom: 12px; }
+.insp .sec > select { width: 100%; margin-bottom: 8px; }
+.togs { display: flex; gap: 3px; flex-wrap: wrap; flex: 1; }
+.togs button { min-width: 26px; height: 28px; padding: 0 6px; border: 1px solid var(--line); border-radius: 4px; background: none; color: var(--ink2); font: inherit; font-size: 12.5px; cursor: pointer; }
+.togs button[aria-pressed=true] { background: var(--acc); border-color: var(--acc); color: var(--on-acc, #fff); }
+.btn[aria-pressed=true] { background: color-mix(in srgb, var(--acc) 16%, transparent); }
 .f { display: grid; grid-template-columns: 88px 1fr; align-items: center; gap: 6px 8px; margin-bottom: 8px; }
 .f > label { color: var(--ink2); font-size: 13px; }
 .f > .w { display: flex; gap: 6px; align-items: center; min-width: 0; }
