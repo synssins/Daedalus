@@ -49,6 +49,10 @@
 
   // ---- runtime and models, fetched from the Studio ----
   const script = src => new Promise((res, rej) => { const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = () => rej(new Error('could not load ' + src)); document.head.append(s); });
+  // The runtime's scripts come from the Studio, another origin than the app's own page. Asking for them "anonymously"
+  // lets an error inside them be reported with its real message instead of a blank "Script error".
+  const make = document.createElement.bind(document);
+  document.createElement = function (tag) { const el = make.apply(null, arguments); if (String(tag).toLowerCase() === 'script') el.crossOrigin = 'anonymous'; return el; };
   async function load() {
     const base = HP.server + '/wake/';
     if (!window.tfweb) { await script(base + 'tflite_web_api_client.js'); tfweb.tflite_web_api.setWasmPath(base); }
