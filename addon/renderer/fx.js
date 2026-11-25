@@ -154,6 +154,7 @@
     return opts.loop === 'stay' ? Math.min(1, p) : p - Math.floor(p);
   }
   function build() {
+    items.forEach(it => { if (it.def.restore) { try { it.def.restore(it.st, it.ctx); } catch (e) { fail(it.kind, e); } } });  // a kind that goes gives back the tiles it took, hid or cut
     items = []; scene.actors = []; scene.next = [];
     if (!W) return;
     config.forEach((c, n) => {

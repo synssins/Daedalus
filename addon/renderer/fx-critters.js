@@ -59,12 +59,12 @@
   // ---------- the world the creatures walk on ----------
   // Tile tops are the platforms. Tiles side by side at the same height with only a small gap count as one
   // platform, so a creature strolls along a whole row; the screen's bottom edge is the floor under everything.
-  function world(ctx, S, join = 22) {  // join: the widest gap a row is walked across (below zero: every gap is a drop)
+  function world(ctx, S) {
     const tiles = ctx.rects.filter(r => !r.hidden && !r.flat), plats = [], of = new Map();
     for (const r of tiles.slice().sort((a, b) => a.x - b.x)) {
       const seg = {x1: r.x, x2: r.x + r.w, y: r.y, r: Math.min(r.r || 0, r.w / 2, r.h / 2), rect: r};
       let p = null;
-      for (const q of plats) { const l = q.segs[q.segs.length - 1], gap = seg.x1 - l.x2; if (Math.abs(l.y - seg.y) <= 6 && gap > -4 && gap <= join) { p = q; break; } }
+      for (const q of plats) { const l = q.segs[q.segs.length - 1], gap = seg.x1 - l.x2; if (Math.abs(l.y - seg.y) <= 6 && gap > -4 && gap <= 22) { p = q; break; } }
       if (!p) plats.push(p = {segs: [], x1: seg.x1, x2: seg.x2, dip: 2 * S});
       p.segs.push(seg); p.x2 = seg.x2; of.set(r, p);
     }
@@ -91,8 +91,6 @@
     }
     return null;
   }
-  /** The tile this point is inside, if any. */
-  function inTile(W, x, y) { for (const r of W.tiles) if (x > r.x && x < r.x + r.w && y > r.y && y < r.y + r.h) return r; return null; }
   /** Is this point over the middle of a tile (where its label is)? Creatures there are left alone by taps. */
   function deep(W, x, y) { for (const r of W.tiles) { const m = Math.min(r.w, r.h) * .15; if (x > r.x + m && x < r.x + r.w - m && y > r.y + m && y < r.y + r.h - m) return true; } return false; }
 
@@ -135,7 +133,8 @@
     if (s.fade) c.alpha = U.clamp(c.alpha + s.fade * dt, 0, 1);
     if (s.spin) c.rot = c.time * s.spin * 6.2832 * c.dir;
     if (s.each) def.acts[s.each](c, W);
-    if (m === 'ground') {
+    if (W.m) { if (gmove(c, dt, W)) return; }
+    else if (m === 'ground') {
       const p = c.plat;
       if (!p || p.dead) { c.skip = p; if (!fire(c, 'edge', W) || c.s.move !== 'air') go(c, def.fall, W); return; }
       if (s.vx) {
@@ -143,9 +142,7 @@
         const mg = (def.edge || 0) * S + 4; if (c.dir < 0 ? nx < mg : nx > W.w - mg) { fire(c, 'screen', W); return; }  // coming to the side of the screen
         const r = wallAhead(c, nx, W); if (r) { c.wall = r; fire(c, 'wall', W); return; }
         for (const o of W.list) if (o !== c && o.s.solid && o.plat === p && (o.x - c.x) * c.dir > 0 && Math.abs(o.x - nx) < def.half * 2 * S) { fire(c, 'bump', W); return; }
-        if (nx < p.x1 || nx > p.x2) { fire(c, 'edge', W); if (c.s.move === 'air') { c.skip = p; c.x = nx + c.dir * S;
-          if (def.snug) { const e = c.dir > 0 ? p.x2 : p.x1; for (const r of W.tiles) { const sd = c.dir > 0 ? r.x : r.x + r.w, d = (sd - e) * c.dir; if (d > 0 && d < 40 && r.y < c.y + 4 && r.y + r.h > c.y + 4) c.x = (e + sd) / 2; } }  // down the middle of the gap to the next tile
-        } return; }
+        if (nx < p.x1 || nx > p.x2) { fire(c, 'edge', W); if (c.s.move === 'air') { c.skip = p; c.x = nx + c.dir * S; } return; }
         // walking onto the foot of a stair somebody built here
         for (const q of W.plats) if (q.stair && q.base === p && q.dir === c.dir && q.n > 1 && (q.x0 - c.x) * c.dir >= -4 && (q.x0 - nx) * c.dir < 0) c.plat = q;
         c.x = nx; c.y = ground(c.plat, nx);
@@ -156,14 +153,9 @@
       }
     } else if (m === 'air') {
       c.vy = Math.min(s.vmax || 420, c.vy + 1100 * dt);
-      let ny = c.y + c.vy * dt; const mg = (def.edge || 0) * S + 4; let nx = U.clamp(c.x + c.dir * (s.vx || 0) * S * dt, mg, W.w - mg);
-      if (def.snug) {  // tiles are solid to them in the air too: a head bumps on an underside, a drift stops at a side
-        const T = def.tall * S;
-        if (c.vy < 0 && inTile(W, c.x, ny - T)) { c.vy = 0; ny = c.y; }
-        if (nx !== c.x && (inTile(W, nx, ny - S) || inTile(W, nx, ny - T))) nx = c.x;
-      }
+      const ny = c.y + c.vy * dt, mg = (def.edge || 0) * S + 4, nx = U.clamp(c.x + c.dir * (s.vx || 0) * S * dt, mg, W.w - mg);
       if (c.vy > 0) {
-        let hit = null, hy = 1e9; const tol = def.snug ? 0 : def.half * S * .8;  // a near miss of a tile's corner still lands on it (not for the snug: they fall past)
+        let hit = null, hy = 1e9; const tol = def.half * S * .8;  // a near miss of a tile's corner still lands on it
         for (const p of W.plats) {
           if (p === c.skip || p.dead || nx < p.x1 - tol || nx > p.x2 + tol) continue;
           const gy = ground(p, U.clamp(nx, p.x1 + 1, p.x2 - 1));
@@ -255,7 +247,7 @@
   const SIDE = ['ffffff', 'ffefef', 'ffffff', '.ffff.'], FRONT = ['ffffff', 'feffef', 'ffffff', '.ffff.'], OOH = ['ffffff', 'feffef', 'ffmmff', '.ffff.'];
   const FEET = ['.o..o.'], LEAF = ['...ggggg....', '.ggggGgggg..', 'gggGGggggggg', '.gg..G..ggg.', '.....G......'];
   const ACORN_ART = {w: 12, h: 14,
-    pal: {s: '#7a4a22', c: '#c8742c', C: '#eba653', f: '#fbe7b8', e: '#3b2418', o: '#e2543a', a: '#f2c88a', m: '#8a2f2f', g: '#86d058', G: '#3f9a3c', b: '#e3ad6b'},
+    pal: {s: '#7a4a22', c: '#c8742c', C: '#eba653', f: '#fbe7b8', e: '#3b2418', o: '#e2543a', a: '#f2c88a', m: '#8a2f2f', g: '#86d058', G: '#3f9a3c', b: '#e3ad6b', k: '#cfd3da'},
     frames: {
       walk0: [[CAP, 2, 5], [SIDE, 3, 9], [FEET, 3, 13]],
       walk1: [[CAP2, 2, 4], [SIDE, 3, 8], [['..oo..', '..oo..'], 3, 12]],
@@ -272,6 +264,8 @@
       wave0: [[CAP, 2, 5], [FRONT, 3, 9], [['.a', 'a.'], 9, 8], [['a'], 2, 11], [FEET, 3, 13]],
       wave1: [[CAP, 2, 5], [FRONT, 3, 9], [['aa'], 9, 10], [['a'], 2, 11], [FEET, 3, 13]],
       flat: [[['..s.....', 'cccccccc'], 2, 11], [['offffffo'], 2, 13]],
+      pick0: [[CAP, 2, 5], [SIDE, 3, 9], [['.kkk', '..s.', '.s..'], 8, 6], [['a'], 9, 9], [FEET, 3, 13]],
+      pick1: [[CAP, 2, 6], [SIDE, 3, 10], [['..k', 'ssk', '..k'], 9, 10], [FEET, 3, 13]],
     }};
   // the hatch they drop from and the door they are looking for: a hollow stump with a lantern inside
   const PROPS_ART = {w: 12, h: 9, pal: {t: '#a8693a', T: '#d9a066', k: '#2a1826', y: '#ffd978', g: '#86d058'},
@@ -283,29 +277,158 @@
   DIGITS.forEach((d, i) => { FONT_ART.frames['d' + i] = [[glyph(d, 'x'), 0, 0]]; });
   FONT_ART.frames.bang = [[glyph('22202', 'x'), 0, 0]];  // "!", after the digits so their places on the sheet stay
 
-  // The jobs, after the classic eight: floater (leaf umbrella), climber (up a tile's side), builder (a stair of
-  // bricks), tunneler (straight through a tile that is in the way), blocker (stands and turns the others back),
-  // digger (straight down through the tile it stands on), miner (down and forward), bomber (counts down and bursts).
-  const ROLES = [['walker', 38], ['floater', 12], ['climber', 10], ['builder', 10], ['tunneler', 8], ['blocker', 6], ['digger', 6], ['miner', 5], ['bomber', 5]], JOBS = ROLES.slice(1);
+  // The jobs, after the classic eight: floater (leaf umbrella), climber (up a tile's side, or up a gap), builder (a
+  // stair of bricks, with a pickaxe through any tile in its way), tunneler (straight through a tile), blocker (stands
+  // and turns the others back), digger (straight down), miner (down and forward), bomber (counts down and bursts).
+  const ROLES = [['walker', 44], ['floater', 12], ['climber', 8], ['builder', 10], ['tunneler', 6], ['blocker', 6], ['digger', 5], ['miner', 4], ['bomber', 5]], JOBS = ROLES.slice(1);
   const DROP = {key: 'drop', label: 'Drop interval', type: 'range', min: 0.3, max: 10, step: 0.1, unit: 's', default: 1.5};  // about this long between two walkers leaving the hatch
-  const TEST = HP.fx.walkTest = {out: 0, home: 0, splat: 0, boom: 0, guard: 0, round: 0, most: 0, off: 0};  // counts, for checks
-  /** The tile the walker stands on, with room for it to go down through; none on bricks, the floor or a gap. */
-  function tileAt(c, W) { const p = c.plat, h = c.def.half * W.S; if (p && p.segs) for (const s of p.segs) if (s.rect && c.x >= s.x1 + h && c.x <= s.x2 - h) return s.rect; return null; }
-  /** How far something let go at x, y falls before it lands. */
-  function dropAt(W, x, y) { let d = W.h - y; for (const p of W.plats) if (!p.dead && x >= p.x1 && x <= p.x2) { const gy = ground(p, x); if (gy >= y - 1 && gy - y < d) d = gy - y; } return d; }
+  const TEST = HP.fx.walkTest = {out: 0, home: 0, splat: 0, boom: 0, guard: 0, round: 0, most: 0, off: 0, cut: 0};  // counts, for checks
+
+  // ---------- the walkers' ground: solid cells, one walker pixel each ----------
+  // 0 air, 1 tile, 2 brick. A tile is solid all round. A brick only holds what comes down on it or steps up it:
+  // a walker that meets bricks too high to step on passes behind them. What is dug out of a tile is cut out of the
+  // real tile (a mask on its element, and a hole in the frosted layer behind it) until the next round.
+  //
+  // SAFETY RULES (this kind cuts the real tiles):
+  //   - Every tile cut is made whole again at each new round, whenever create() runs, on a double tap (restore),
+  //     and when the overlays are rebuilt without this kind (fx.js calls restore on what it drops).
+  //   - Every touch of a real element is wrapped in try/catch. A tile never stops taking touches.
+  const UP = 2;  // cells a walker steps up or down without noticing
+  let holed = [];  // every element we cut
+  function heal() {
+    for (const el of holed) { try { const st = el.style; st.webkitMaskImage = st.maskImage = st.webkitMaskSize = st.maskSize = st.webkitMaskRepeat = st.maskRepeat = ''; delete el.hpHoles; } catch (e) { /* the element is gone */ } }
+    const n = holed.length; holed = [];
+    if (n) { try { if (HP.cut) HP.cut(); } catch (e) {} }
+  }
+  function terrain(W) {
+    const S = W.S, gw = W.gw = Math.ceil(W.w / S), gh = W.gh = Math.ceil(W.h / S), m = W.m = new Uint8Array(gw * gh);
+    for (const r of W.tiles) {
+      const a = Math.max(0, Math.round(r.x / S)), b = Math.min(gw - 1, Math.round((r.x + r.w) / S) - 1), t = Math.max(0, Math.round(r.y / S)), u = Math.min(gh - 1, Math.round((r.y + r.h) / S) - 1);
+      for (let y = t; y <= u; y++) if (b >= a) m.fill(1, y * gw + a, y * gw + b + 1);
+    }
+    W.cuts = new Map(); W.dirty = 0; W.bg.clearRect(0, 0, W.w, W.h);
+  }
+  /** What is at this point: 0 air, 1 tile, 2 brick. Below the screen is floor. */
+  function at(W, x, y) { const S = W.S; x = Math.floor(x / S); y = Math.floor(y / S); if (y >= W.gh) return 1; if (x < 0 || x >= W.gw || y < 0) return 0; return W.m[y * W.gw + x]; }
+  /** Take the ground out of a box (in pixels), tile and brick alike. */
+  function carve(W, x0, y0, x1, y1) {
+    const S = W.S, a = Math.max(0, Math.floor(x0 / S)), b = Math.min(W.gw - 1, Math.ceil(x1 / S) - 1), t = Math.max(0, Math.floor(y0 / S)), u = Math.min(W.gh - 1, Math.ceil(y1 / S) - 1);
+    if (b < a || u < t) return;
+    for (let y = t; y <= u; y++) W.m.fill(0, y * W.gw + a, y * W.gw + b + 1);
+    const X = a * S, Y = t * S, w = (b - a + 1) * S, h = (u - t + 1) * S; TEST.cut++;
+    W.bg.clearRect(X - 1, Y - 1, w + 2, h + 2);
+    for (const r of W.tiles) {
+      if (!r.el || X >= r.x + r.w || X + w <= r.x || Y >= r.y + r.h || Y + h <= r.y) continue;
+      let k = W.cuts.get(r);
+      if (!k) {
+        const cv = document.createElement('canvas'); cv.width = Math.ceil(r.w); cv.height = Math.ceil(r.h);
+        k = {cv, g: cv.getContext('2d')}; k.g.fillRect(0, 0, cv.width, cv.height); W.cuts.set(r, k);
+        if (holed.indexOf(r.el) < 0) holed.push(r.el);
+      }
+      // a cut that comes within a cell of the tile's edge goes right to it: no sliver is left standing
+      let p = X - r.x, q = Y - r.y, p2 = p + w, q2 = q + h;
+      if (p < S) p = 0; if (q < S) q = 0; if (p2 > r.w - S) p2 = r.w; if (q2 > r.h - S) q2 = r.h;
+      k.g.clearRect(p, q, p2 - p, q2 - q); k.dirty = W.dirty = 1;
+    }
+  }
+  /** Show the cuts made since last time on the real tiles. */
+  function flush(W) {
+    const S = W.S, gw = W.gw;
+    for (const [r, k] of W.cuts) {
+      if (!k.dirty) continue; k.dirty = 0;
+      try {
+        const st = r.el.style;
+        st.webkitMaskImage = st.maskImage = 'url(' + k.cv.toDataURL() + ')'; st.webkitMaskSize = st.maskSize = '100% 100%'; st.webkitMaskRepeat = st.maskRepeat = 'no-repeat';
+        // the same holes for the frosted layer: boxes that do not overlap, read off the cells
+        const a = Math.max(0, Math.round(r.x / S)), b = Math.min(gw - 1, Math.round((r.x + r.w) / S) - 1), t = Math.max(0, Math.round(r.y / S)), u = Math.min(W.gh - 1, Math.round((r.y + r.h) / S) - 1), out = [];
+        let open = [];
+        for (let y = t; y <= u + 1; y++) {
+          const runs = [];
+          if (y <= u) for (let x = a; x <= b; x++) if (W.m[y * gw + x] !== 1) { let e = x; while (e < b && W.m[y * gw + e + 1] !== 1) e++; runs.push([x, e]); x = e; }
+          const next = [];
+          for (const o of open) { const j = runs.findIndex(v => v[0] === o[0] && v[1] === o[1]); if (j >= 0) { runs.splice(j, 1); next.push(o); } else out.push([o[0] * S - r.x, o[2] * S - r.y, (o[1] + 1) * S - r.x, y * S - r.y]); }
+          for (const v of runs) next.push([v[0], v[1], y]);
+          open = next;
+        }
+        r.el.hpHoles = out.slice(0, 150);
+      } catch (e) { /* this tile stays whole */ }
+    }
+    try { if (HP.cut) HP.cut(); } catch (e) {}
+  }
+  /** A brick: two cells wide, its top at y. */
+  function lay(W, x, y, i) {
+    const S = W.S, gx = Math.floor(x / S), gy = Math.floor(y / S);
+    for (let k = 0; k < 2; k++) { const cx = gx + k; if (cx >= 0 && cx < W.gw && gy >= 0 && gy < W.gh && !W.m[gy * W.gw + cx]) W.m[gy * W.gw + cx] = 2; }
+    const g = W.bg; g.fillStyle = INK; g.fillRect(gx * S - 1, gy * S - 1, 2 * S + 2, 2 * S + 2); g.fillStyle = i & 1 ? '#c98a4b' : '#e3ad6b'; g.fillRect(gx * S, gy * S, 2 * S, 2 * S);
+  }
+  /** Is a tile in the way of a body standing at x, y? */
+  function blocked(W, c, x, y) {
+    const S = W.S, h = c.def.half * S, T = c.def.tall * S;
+    for (let dx = -h; dx <= h; dx += S) for (let yy = y - T - S; yy < y; yy += S) if (at(W, x + dx, yy) === 1) return true;
+    return false;
+  }
+  /** One frame of moving about on the cells. True: its state changed, or it was stopped. */
+  function gmove(c, dt, W) {
+    const s = c.s, S = W.S, def = c.def, m = s.move || 'ground', T = def.tall * S, h = def.half * S, mg = (def.edge || 0) * S + 4;
+    if (m === 'ground') {
+      let k = 0; while (at(W, c.x, c.y - S) === 1 && k++ < 400) c.y -= S;  // the tile it was inside is whole again: up on top of it
+      k = 0; while (k <= UP && !at(W, c.x, c.y + k * S)) k++;
+      if (k > UP) { if (!fire(c, 'edge', W) || c.s.move !== 'air') go(c, def.fall, W); return true; }  // the ground under it is gone
+      c.y += k * S;
+      let left = (s.vx || 0) * S * dt;
+      while (left > 0) {
+        const d = Math.min(S, left), nx = c.x + c.dir * d; left -= d;
+        if (c.dir < 0 ? nx < mg : nx > W.w - mg) { fire(c, 'screen', W); return true; }  // coming to the side of the screen
+        for (const o of W.list) if (o !== c && o.s.solid && Math.abs(o.y - c.y) < T && (o.x - c.x) * c.dir > 0 && Math.abs(o.x - nx) < 2 * h) { fire(c, 'bump', W); return true; }
+        let ny = c.y; k = 0; while (k < UP && at(W, nx, ny - S)) { ny -= S; k++; }
+        const over = at(W, nx, ny - S), lx = nx + c.dir * (h - S);
+        if (over === 2) ny = c.y;  // bricks too high to step on: behind them
+        if (over === 1 || at(W, lx, ny - (UP + 1) * S) === 1) { fire(c, 'wall', W); return true; }
+        for (let y = ny - T + S; y < ny - (UP + 1) * S; y += S) if (at(W, lx, y) === 1 || at(W, nx, y) === 1) { fire(c, 'head', W); return true; }  // something overhead is too low
+        k = 0; while (k <= UP && !at(W, nx, ny + k * S)) k++;
+        if (k > UP) {
+          fire(c, 'edge', W);
+          if (c.s.move === 'air') { c.x = nx; for (let g = S; g < 40; g += S) if (at(W, nx + c.dir * g, c.y + S) === 1) { c.x = nx + c.dir * (g - S) / 2; break; } }  // down the middle of a gap
+          return true;
+        }
+        c.x = nx; c.y = ny + k * S;
+        if (W.door && Math.abs(c.x - W.door.x) < 3 * S && Math.abs(c.y - W.door.y) <= 2 * S && fire(c, 'exit', W)) return true;
+      }
+    } else if (m === 'air') {
+      c.vy = Math.min(s.vmax || 420, c.vy + 1100 * dt);
+      let ny = c.y + c.vy * dt, nx = U.clamp(c.x + c.dir * (s.vx || 0) * S * dt, mg, W.w - mg);
+      if (nx !== c.x) { const lx = nx + c.dir * (h - S); if (at(W, lx, c.y - S) === 1 || at(W, lx, c.y - T) === 1) nx = c.x; }  // a tile's side
+      if (c.vy < 0 && at(W, nx, ny - T) === 1) { c.vy = 0; ny = c.y; }  // its head on an underside
+      if (c.vy > 0) for (let y = Math.ceil(c.y / S) * S; y <= ny; y += S) if (at(W, nx, y)) {
+        c.x = nx; c.y = y; c.vy = 0;
+        if (!(c.y - c.y0 > W.hard && !s.soft && fire(c, 'crash', W))) fire(c, 'land', W);
+        return true;
+      }
+      c.x = nx; c.y = ny;
+    } else if (m === 'climb') {
+      const px = c.x + c.dir * 2 * S;
+      c.y -= s.vy * S * dt;
+      if (at(W, c.x, c.y - T - S) === 1) { c.dir = -c.dir; go(c, def.fall, W); return true; }  // an underside: it lets go, turned round
+      if (at(W, px, c.y - S) === 1) c.grip = 1;
+      else if (c.grip) { c.x = px + c.dir * S; c.y = Math.ceil(c.y / S) * S; fire(c, 'top', W); return true; }
+      else if (c.cy - c.y > T + 20 * S) { go(c, def.fall, W); return true; }  // nothing to hold on to
+    }
+    return false;
+  }
+
   const ACORN = {
-    art: ACORN_ART, half: 4, tall: 9, hard: 230, fall: 'fall', edge: 7, snug: 1,
+    art: ACORN_ART, half: 4, tall: 9, hard: 230, fall: 'fall', edge: 7,
     key: c => c.role,
     on: {tap: 'wave'},
     states: {
       drop:  {frames: ['fall0', 'fall1'], ft: .12, move: 'air', soft: 1, fade: 5, on: {land: 'walk', tap: 0}},
       walk:  {frames: ['walk0', 'walk1'], ft: .16, vx: 10, dur: [3, 8], enter: 'stride', next: {blocker: 'block', builder: 'build', digger: 'bore', miner: 'bore', _: 'walk'},
-        on: {notice: 'gawk', jolt: 'slip', edge: {floater: 'glide', builder: 'build', _: 'fall'}, wall: {climber: 'climb', tunneler: 'dig', _: 'turn'}, bump: 'turn', screen: 'guard', exit: 'hopin', pit: 'plunge'}},
+        on: {notice: 'gawk', jolt: 'slip', edge: {floater: 'glide', builder: 'build', _: 'fall'}, wall: {climber: 'climb', tunneler: 'bash', _: 'turn'}, head: {tunneler: 'bash', _: 'turn'}, bump: 'turn', screen: 'guard', exit: 'hopin'}},
       turn:  {frames: ['walk0'], enter: 'flip', dur: 0, next: 'walk'},
       // a fall of more than two tiles ends badly, unless it has the leaf
       fall:  {frames: ['fall0', 'fall1'], ft: .12, move: 'air', each: 'chute', on: {land: 'walk', crash: 'splat'}},
       glide: {frames: ['glide0', 'glide1'], ft: .4, move: 'air', vmax: 42, vx: 2.5, soft: 1, on: {land: 'walk'}},
-      climb: {frames: ['climb0', 'climb1'], ft: .2, move: 'climb', vy: 7, off: 4, on: {top: 'walk'}},
+      climb: {frames: ['climb0', 'climb1'], ft: .2, move: 'climb', vy: 7, enter: 'cling', on: {top: 'walk'}},
       block: {frames: ['block0', 'block1'], ft: .5, solid: 1, enter: 'plain', dur: [9, 16], next: 'walk', on: {jolt: 'slip'}},
       // the first one to come to the side of the screen stays there and sends the rest back
       guard: {frames: ['block0', 'block1'], ft: .5, solid: 1, enter: 'post'},
@@ -313,18 +436,16 @@
       gawk:  {frames: ['walk0'], enter: 'face', dur: 1.5, next: 'back', on: {notice: 'gawk', jolt: 'slip'}},
       back:  {frames: ['walk0'], enter: 'unface', dur: 0, next: 'walk'},
       // the screen is pulled away under it: it tumbles the other way, sits seeing stars, then gets up and goes on
-      slip:  {frames: ['fall0', 'fall1'], ft: .1, spin: 1.3, vx: 16, dur: .6, enter: 'jolt', next: 'daze', on: {edge: 'fall', wall: 'daze', bump: 'daze', screen: 'daze', tap: 0}},
+      slip:  {frames: ['fall0', 'fall1'], ft: .1, spin: 1.3, vx: 16, dur: .6, enter: 'jolt', next: 'daze', on: {edge: 'fall', wall: 'daze', head: 'daze', bump: 'daze', screen: 'daze', tap: 0}},
       daze:  {frames: ['fall0'], ft: .3, tick: 'stars', dur: 1.3, next: 'back', on: {tap: 0}},
       build: {frames: ['build0', 'build1'], ft: .15, enter: 'stair', tick: 'brick', on: {built: 'walk'}},
-      // nobody may damage a real tile: dust, then it slips behind the tile and comes out at the far side (tunneler)
-      dig:   {frames: ['build0', 'build1'], ft: .12, enter: 'aim', tick: 'dust', dur: .8, next: 'gnaw'},
-      gnaw:  {frames: ['build0', 'build1'], ft: .12, move: 'free', vx: 7, enter: 'open', each: 'cut', tick: 'dust'},
-      // ... or down through the one it stands on (digger: straight down; miner: down and forward)
-      bore:  {frames: ['build0', 'build1'], ft: .12, enter: 'spot', tick: 'grit', dur: .8, next: {miner: 'mine', _: 'delve'}},
-      delve: {frames: ['build0', 'build1'], ft: .12, move: 'free', vy: 9, enter: 'open', each: 'cut', tick: 'grit'},
-      // a shaft somebody dug stays open while it is in use: whoever walks over it goes down it
-      plunge: {frames: ['fall0', 'fall1'], ft: .12, move: 'free', vy: 60, enter: 'dropin', each: 'sink', on: {tap: 0}},
-      mine:  {frames: ['build0', 'build1'], ft: .12, move: 'free', vy: 7, vx: 5, enter: 'open', each: 'cut', tick: 'grit'},
+      // a tile in the way of the stair: out comes the pickaxe, and the stair goes on through it
+      pick:  {frames: ['pick0', 'pick1'], ft: .22, tick: 'chip'},
+      // the diggers take the tile away a chunk at a time: sideways (tunneler), straight down (digger), down and forward (miner)
+      bash:  {frames: ['pick0', 'pick1'], ft: .2, enter: 'job', tick: 'bash'},
+      bore:  {frames: ['build0', 'build1'], ft: .12, enter: 'spot', dur: .5, next: {miner: 'mine', _: 'delve'}},
+      delve: {frames: ['build0', 'build1'], ft: .25, enter: 'job', tick: 'scoop'},
+      mine:  {frames: ['pick0', 'pick1'], ft: .22, enter: 'job', tick: 'hew'},
       // thrown by a bomber going off next to it
       blown: {frames: ['fall0', 'fall1'], ft: .1, move: 'air', jump: 230, vx: 14, spin: 1.4, on: {land: 'daze', crash: 'splat', tap: 0}},
       wave:  {frames: ['wave0', 'wave1', 'wave0', 'wave1', 'wave0', 'wave1'], ft: .16, once: 1, enter: 'reroll', next: {blocker: 'block', builder: 'build', digger: 'bore', miner: 'bore', _: 'walk'}},
@@ -347,131 +468,124 @@
       // one is enough: a second that comes down beyond the first is sent back in
       post(c, W) {
         c.role = 'walker';
-        const o = W.list.find(o => o !== c && o.st === 'guard' && o.plat === c.plat && Math.abs(o.x - c.x) < 16 * W.S);
+        const o = W.list.find(o => o !== c && o.st === 'guard' && Math.abs(o.y - c.y) < c.def.tall * W.S && Math.abs(o.x - c.x) < 16 * W.S);
         if (o) { c.dir = -c.dir; c.x = o.x + c.dir; go(c, 'walk', W); } else TEST.guard++;
       },
       reroll(c, W) { let r; do r = pick(JOBS); while (r === c.role); c.role = r; if (r === 'bomber') c.fuse = W.t + 5; },
       chute(c, W) { if (c.role === 'floater' && c.y - c.y0 > 10 * W.S) go(c, 'glide', W); },  // the leaf opens a little way down
       squash(c, W) { TEST.splat++; burst(W, c.x, c.y - 2 * W.S, 9, ['#fffaf0', '#f3e2c4', '#c8742c'], 90, {g: 300}); },
-      dust(c, W) { burst(W, c.x + c.dir * 5 * W.S, c.y - 3 * W.S, 3, ['#fff3dc', '#e9dcc6', '#c4b299'], 80, {g: 300}); },
-      grit(c, W) { burst(W, c.x + (c.role === 'miner' ? c.dir * 3 * W.S : 0), c.y - W.S, 3, ['#fff3dc', '#e9dcc6', '#c4b299'], 70, {g: 300}); },
       atdoor(c, W) { c.x = W.door.x; },
-      saved(c, W) { TEST.home++; W.saved = (W.saved + 1) % 100; burst(W, c.x, c.y - 9 * W.S, 3, ['#ffe45c'], 50, {star: 1, life: .7}); },
-      aim(c, W) {
-        const r = c.hole = c.wall, S = W.S, far = r && (c.dir > 0 ? r.x + r.w : r.x), mg = 9 * S + 8;
-        if (!r || far < mg || far > W.w - mg) { c.role = 'walker'; c.dir = -c.dir; go(c, 'walk', W); }  // nothing but the screen's edge behind this tile
+      saved(c, W) { TEST.home++; W.saved = (W.saved + 1) % 1000; burst(W, c.x, c.y - 9 * W.S, 3, ['#ffe45c'], 50, {star: 1, life: .7}); },
+      // up against the wall it walked into; one that goes up a gap from underneath has nothing to press against yet
+      cling(c, W) {
+        c.grip = 0; c.cy = c.y;
+        if (c.loose) { c.loose = 0; return; }
+        for (let k = 0; k < 2 * c.def.half && at(W, c.x + c.dir * 2 * W.S, c.y - 2 * W.S) !== 1; k++) c.x += c.dir * W.S;
       },
-      spot(c, W) { c.hole = tileAt(c, W); if (!c.hole) { c.role = 'walker'; go(c, 'walk', W); } },  // nothing here to go down through
-      // The hole it cuts is painted dark on the tile and closes again afterwards: the real tile is never touched.
-      open(c, W) {
-        const S = W.S, t = c.st === 'gnaw', T = c.def.tall * S, x = t ? c.x + c.dir * c.def.half * S : c.x, up = t ? T / 2 : 0;
-        c.kerf = {x0: x, y0: c.y - up, x1: x, y1: c.y - up, up, w: t ? T + 2 : 2 * c.def.half * S + 2, t: W.t, r: c.hole}; W.holes.push(c.kerf);
+      job(c) { c.role = 'walker'; },  // the job is used up once the digging starts
+      spot(c, W) { if (!at(W, c.x, c.y) || c.y >= W.gh * W.S) { c.role = 'walker'; go(c, 'walk', W); } },  // nothing here to go down through
+      scoop(c, W) {
+        if (c.f) return;
+        const S = W.S, h = c.def.half * S;
+        if (c.y >= W.gh * S) { go(c, 'walk', W); return; }  // the bottom of the screen
+        carve(W, c.x - h - S, c.y, c.x + h + S, c.y + 2 * S);
+        burst(W, c.x, c.y - S, 3, ['#fff3dc', '#e9dcc6', '#c4b299'], 70, {g: 300});
       },
-      cut(c, W) {
-        const r = c.hole, k = c.kerf, h = c.def.half * W.S; k.x1 = c.x; k.y1 = c.y - k.up; k.t = W.t;
-        if (c.y > r.y + r.h + 2 || c.x < r.x - h - 2 || c.x > r.x + r.w + h + 2) {  // out of the far side
-          if (c.st === 'delve') { W.spots.push(k.spot = {x: k.x0, plat: W.of.get(r), ev: 'pit', r: h, lead: 0, k}); }
-          c.role = 'walker'; go(c, 'fall', W);
-        }
+      hew(c, W) {
+        if (c.f) return;
+        const S = W.S, h = c.def.half * S, T = c.def.tall * S, nx = c.x + c.dir * 2 * S, ny = c.y + S, mg = 9 * S + 8;
+        if (nx < mg || nx > W.w - mg || ny >= W.gh * S) { go(c, 'walk', W); return; }
+        carve(W, nx - h - S, ny - T - 2 * S, nx + h + S, ny); c.x = nx; c.y = ny;
+        burst(W, c.x + c.dir * 3 * S, c.y - S, 3, ['#fff3dc', '#e9dcc6', '#c4b299'], 70, {g: 300});
       },
-      dropin(c) { c.kerf = c.spot.k; c.x = c.kerf.x0; },
-      sink(c, W) { const k = c.kerf; k.t = W.t; if (c.y > k.r.y + k.r.h + 2) go(c, 'fall', W);
+      bash(c, W) {
+        if (c.f) return;
+        const S = W.S, h = c.def.half * S, T = c.def.tall * S, fx = c.x + c.dir * (h + 3 * S), mg = 9 * S + 8; let any = false;
+        for (let x = S; x <= h + 3 * S && !any; x += S) for (let y = c.y - T - S; y < c.y; y += S) if (at(W, c.x + c.dir * x, y) === 1) { any = true; break; }
+        if (!any || fx < mg || fx > W.w - mg) { go(c, 'walk', W); return; }  // through, or nothing but the screen's edge beyond
+        carve(W, Math.min(c.x, fx), c.y - T - 2 * S, Math.max(c.x, fx), c.y); c.x += c.dir * 2 * S;
+        burst(W, c.x + c.dir * 5 * S, c.y - 3 * S, 3, ['#fff3dc', '#e9dcc6', '#c4b299'], 80, {g: 300});
       },
-      // It bursts: the bricks near it are gone and whoever stood close is thrown clear (a blocker too).
+      // It bursts: a round hole in whatever is there, tile or brick, and whoever stood close is thrown clear.
       bang(c, W) {
-        const S = W.S, R = 16 * S; TEST.boom++;
+        const S = W.S, R = 7 * S, cy = c.y - 3 * S; TEST.boom++;
         burst(W, c.x, c.y - 4 * S, 16, ['#fffaf0', '#ffd978', '#ff8a3c', '#e2543a'], 170, {g: 300});
-        for (const q of W.plats) if (q.stair && c.x > q.x1 - R && c.x < q.x2 + R && c.y > q.y0 - q.n * q.bh - R && c.y < q.y0 + R) q.dead = W.cut = 1;
-        for (const o of W.list) if (o !== c && !o.dead && !o.s.hide && o.st !== 'hopin' && o.st !== 'home' && o.st !== 'splat' && Math.hypot(o.x - c.x, o.y - c.y) < R) { o.dir = o.x < c.x ? -1 : 1; if (o.role !== 'floater') o.role = 'walker'; go(o, 'blown', W); }
+        for (let dy = -R; dy < R; dy += S) { const hw = Math.sqrt(R * R - (dy + S / 2) * (dy + S / 2)); carve(W, c.x - hw, cy + dy, c.x + hw, cy + dy + S); }
+        for (const o of W.list) if (o !== c && !o.dead && !o.s.hide && o.st !== 'hopin' && o.st !== 'home' && o.st !== 'splat' && Math.hypot(o.x - c.x, o.y - c.y) < 16 * S) { o.dir = o.x < c.x ? -1 : 1; if (o.role !== 'floater') o.role = 'walker'; go(o, 'blown', W); }
       },
-      // A stair of little bricks, up and forward from where the builder stands, one up for two along. If a tile
-      // top is a short way ahead, level or somewhat higher, the stair is aimed at it; with the door higher up it
-      // goes on until it is as high as the door; otherwise it is twelve bricks.
+      // A stair of little bricks, up and forward, one up for two along: as high as the door when that is higher,
+      // otherwise twelve bricks, or as many as it takes to get over a gap.
       stair(c, W) {
-        const S = W.S, p = c.plat, up = c.y - W.door.y; let n = up > 10 ? Math.min(100, Math.ceil(up / S) + 3) : 12, bh = S, to = null; c.role = 'walker';
-        if (W.live >= Math.max(10, W.list.length / 4)) { go(c, 'walk', W); return; }  // enough bricks about already
-        for (const q of W.plats) {
-          if (q === p || q.stair || q === W.floor) continue;
-          const gap = c.dir > 0 ? q.x1 - c.x : c.x - q.x2, rise = c.y - q.segs[c.dir > 0 ? 0 : q.segs.length - 1].y;
-          // a bridge: it comes down a little above the far tile, so one walking back passes under it, into the gap
-          if (gap > 2 && gap < 130 && rise > -8 && rise < 48) { n = Math.ceil((gap + c.def.half * S + 6) / (2 * S)); bh = (rise + 4 * S) / n; to = q; break; }
-        }
-        c.steps = {stair: 1, base: p, x0: c.x, y0: c.y, dir: c.dir, bw: 2 * S, bh, n: 0, max: n, born: W.t, x1: c.x, x2: c.x, to};
-        W.plats.push(c.steps); W.live++;
+        if (c.keep) { c.keep = 0; return; }  // back from the pickaxe: the same stair
+        const up = c.y - W.door.y; c.role = 'walker'; c.bn = 0; c.bair = 0; c.bmax = up > 10 ? Math.min(100, Math.ceil(up / W.S) + 3) : 12;
       },
       brick(c, W) {
         if (c.f) return;
-        const q = c.steps, nx = q.x0 + q.dir * (q.n + .5) * q.bw, side = wallAhead(c, nx, W), wall = side && W.of.get(side) !== q.to ? side : null;
-        const roof = inTile(W, nx, q.y0 - (q.n + 1) * q.bh - c.def.tall * W.S);  // a tile's underside overhead: no further
-        if (q.n >= q.max || nx < 8 || nx > W.w - 8 || wall || roof || c.y < 14 * W.S) {
-          if (!q.n) q.dead = W.cut = 1;
-          // a tile in the way with the door still higher up: turn round and build on the other way, in a zigzag
-          if (wall && q.n && c.y - W.door.y > 10) { c.dir = -c.dir; go(c, 'build', W); } else fire(c, 'built', W);
-          return;
-        }
-        q.n++; q.born = W.t; if (q.dir > 0) q.x2 = q.x0 + q.n * q.bw; else q.x1 = q.x0 - q.n * q.bw;
-        c.plat = q; c.x = nx; c.y = ground(q, nx);
+        const S = W.S, h = c.def.half * S, nx = c.x + c.dir * 2 * S, ny = c.y - S;
+        if (c.bn >= c.bmax || nx < 8 + h || nx > W.w - 8 - h || ny < 14 * S) { fire(c, 'built', W); return; }
+        if (blocked(W, c, nx, ny)) { go(c, 'pick', W); return; }
+        lay(W, nx - S, ny, c.bn++); c.x = nx; c.y = ny;
+        // over a gap, then over ground again and too high to be stepped on from the far side: the bridge is done
+        let k = 1; while (k <= 6 && at(W, nx, ny + k * S) !== 1) k++;
+        if (k > 6) c.bair = 1; else if (c.bair && k > UP + 1 && c.y - W.door.y <= 10) fire(c, 'built', W);
+      },
+      chip(c, W) {
+        if (c.f) return;
+        const S = W.S, h = c.def.half * S, T = c.def.tall * S, nx = c.x + c.dir * 2 * S, ny = c.y - S;
+        carve(W, nx - h - S, ny - T - 2 * S, nx + h + S, ny);
+        burst(W, nx, ny - T, 4, ['#fff3dc', '#e9dcc6', '#c4b299'], 80, {g: 300});
+        c.keep = 1; go(c, 'build', W);
       },
     },
   };
 
-  /** A new round: the hatch over any tile of the top row (never the clock, which has no face to stand behind) and
-   *  the door on some other tile, both by chance, so no two rounds are the same walk. */
+  /** A new round: the tiles whole again, the hatch over any tile of the top row (never the clock, which has no
+   *  face to stand behind) and the door on some other tile, both by chance, so no two rounds are the same walk. */
   function deal(W, ctx) {
     const S = W.S, rnd = Math.random, all = ctx.rects.filter(r => !r.hidden), tiles = W.tiles.filter(r => r.type !== 'clock' && r.w >= 16 * S);
     const tops = tiles.filter(r => !all.some(o => o !== r && o.y + o.h <= r.y + 2 && o.x < r.x + r.w - 4 && o.x + o.w > r.x + 4));
     const any = a => a[Math.floor(rnd() * a.length)];
-    W.spots.length = 0; W.saved = 0; W.wait = .5; W.left = U.clamp(Math.round(+ctx.opts.count || 40), 3, 200); W.dir = rnd() < .5 ? 1 : -1; TEST.round++;
-    if (!tiles.length) { W.hatch = {x: W.w * .3, y: 20}; W.door = {x: W.w * .7, plat: W.floor, y: W.h}; }  // a page with no tiles
-    else {
-      const h = any(tops.length ? tops : tiles), hx = h.x + h.w * (.25 + rnd() * .5), hp = W.of.get(h);
-      let pool = tiles.filter(r => r !== h && r !== W.doorTile && (W.of.get(r) !== hp || Math.abs(r.x + r.w / 2 - hx) > 260));
-      if (!pool.length) pool = tiles.filter(r => r !== h); if (!pool.length) pool = tiles;
-      const d = W.doorTile = any(pool), dx = d.x + d.w * (.3 + rnd() * .4), dp = W.of.get(d);
-      W.hatch = {x: hx, y: Math.max(2, h.y - 11 * S)}; W.door = {x: dx, plat: dp, y: ground(dp, dx)};
-    }
-    W.spots.push({x: W.door.x, plat: W.door.plat, ev: 'exit', r: 3 * S, lead: 0});
+    heal(); terrain(W);
+    W.saved = 0; W.wait = .5; W.left = U.clamp(Math.round(+ctx.opts.count || 40), 3, 200); W.dir = rnd() < .5 ? 1 : -1; TEST.round++;
+    if (!tiles.length) { W.hatch = {x: W.w * .3, y: 20}; W.door = {x: W.w * .7, y: W.gh * S, tile: null}; return; }  // a page with no tiles
+    const h = any(tops.length ? tops : tiles), hx = h.x + h.w * (.25 + rnd() * .5);
+    let pool = tiles.filter(r => r !== h && r !== W.doorTile && (Math.abs(r.y - h.y) > 6 || Math.abs(r.x + r.w / 2 - hx) > 260));
+    if (!pool.length) pool = tiles.filter(r => r !== h); if (!pool.length) pool = tiles;
+    const d = W.doorTile = any(pool);
+    W.hatch = {x: hx, y: Math.max(2, h.y - 11 * S)}; W.door = {x: d.x + d.w * (.3 + rnd() * .4), y: Math.round(d.y / S) * S, tile: d};
   }
   /** The hand that gives out the jobs, as the player's did: it looks at one plain walker and, if that would help
    *  it or the ones behind it get to the door, gives it a job. It does not see everything in time. */
   function hand(c, W) {
-    const S = W.S, D = W.door, p = c.plat, up = c.y - D.y, ahead = c.dir === (D.x < c.x ? -1 : 1);
-    if (p.stair) return;
-    const end = c.dir > 0 ? p.x2 : p.x1, brink = (end - c.x) * c.dir;
-    const kept = W.list.some(o => o !== c && o.s.solid && o.plat === p && (o.x - c.x) * c.dir > 0);  // someone further on already turns them back
+    const S = W.S, D = W.door, T = c.def.tall * S, up = c.y - D.y, ahead = c.dir === (D.x < c.x ? -1 : 1);
+    const near = o => o !== c && Math.abs(o.y - c.y) < T;
+    const kept = W.list.some(o => near(o) && o.s.solid && (o.x - c.x) * c.dir > 0 && Math.abs(o.x - c.x) < 400);  // someone further on already turns them back
     const post = hold => { if (kept || W.posts >= W.maxPosts) return false; c.hold = hold; W.posts++; return go(c, 'block', W); };
-    if (p === D.plat) { if (!ahead && Math.abs(c.x - D.x) > 12 * S) post(30); return; }  // past the door: turn the rest back to it
-    const wall = wallAhead(c, c.x + c.dir * 12 * S, W);
-    if (wall) { if (up > 10 && wall.y < c.y - 8) c.role = 'climber'; else if (ahead) c.role = 'tunneler'; return; }
-    if (brink < 14 * S) {
-      if (dropAt(W, end + c.dir * (S + 2), c.y) > W.hard) { if ((up < -10 && Math.random() < .5) || !post(40)) c.role = 'floater'; }  // a deadly drop: stop them here, or take the leaf
-      else if (ahead && up > -10) { c.role = 'builder'; go(c, 'build', W); }  // bridge it
+    let brink = 0;  // how far ahead the ground ends, if it does soon
+    for (let d = S; d <= 14 * S && !brink; d += S) { let k = 0; while (k <= UP && !at(W, c.x + c.dir * d, c.y + k * S)) k++; if (k > UP) brink = d; }
+    if (brink) {
+      const bx = c.x + c.dir * (brink + S); let drop = 0; while (drop < W.h && !at(W, bx, c.y + drop)) drop += S;
+      if (drop > W.hard) { if ((up < -10 && Math.random() < .5) || !post(40)) c.role = 'floater'; }  // a deadly drop: stop them here, or take the leaf
+      else if (ahead && up > -10 && W.live < W.maxLive) { c.role = 'builder'; go(c, 'build', W); }  // bridge it
       return;
     }
-    if (up > 10) {  // the door is higher: stairs, begun about where they will come out by it; walking away from it, stop and turn the rest
-      if (W.tiles.some(r => r.x < c.x && r.x + r.w > c.x && r.y + r.h <= c.y - 4 && r.y + r.h > c.y - 80)) c.role = 'climber';  // a tile overhead: up the next gap
-      else if (!ahead) post(25);
-      else if (Math.abs(D.x - c.x) < 2 * up + 20 * S && !W.plats.some(q => q.stair && !q.dead && q.base === p && q.dir === c.dir && (q.x0 - c.x) * c.dir > -4 && (q.x0 - c.x) * c.dir < 240)) { c.role = 'builder'; go(c, 'build', W); }
+    if (Math.abs(up) <= 10) { if (!ahead && Math.abs(c.x - D.x) > 12 * S) post(30); return; }  // level with the door and walking away from it
+    if (up > 10) {  // the door is higher: stairs, begun about where they will come out by it
+      if (!ahead) post(25);
+      else if (Math.abs(D.x - c.x) < 2 * up + 20 * S && W.live < W.maxLive && !W.list.some(o => near(o) && (o.st === 'build' || o.st === 'pick') && Math.abs(o.x - c.x) < 40 * S)) { c.role = 'builder'; go(c, 'build', W); }
       return;
     }
-    if (up < -10) {  // the door is lower: down through the tile, once over the row the door is on
-      const r = tileAt(c, W);
-      if (W.spots.some(sp => sp.k && !sp.off && sp.plat === p) || W.list.some(o => o.plat === p && (o.st === 'bore' || o.st === 'delve' || o.st === 'mine'))) return;  // a way down is there, or coming
-      if (r && c.x > D.plat.x1 + 4 * S && c.x < D.plat.x2 - 4 * S && dropAt(W, c.x, r.y + r.h + 2) <= W.hard) { c.role = Math.random() < .3 ? 'miner' : 'digger'; go(c, 'bore', W); }
-      else if (!ahead) post(25);
-      return;
-    }
-    if (!ahead) post(25);  // level with the door, on another row of tiles
+    // the door is lower: down through the tile once over the door's own, if nobody has cut a way down there yet
+    const d = D.tile, r = W.tiles.find(r => c.x > r.x && c.x < r.x + r.w && Math.abs(r.y - c.y) < 2 * S);
+    if (d && r && !W.cuts.has(r) && c.x > d.x + 4 * S && c.x < d.x + d.w - 4 * S && !W.list.some(o => near(o) && (o.st === 'bore' || o.st === 'delve' || o.st === 'mine'))) { c.role = Math.random() < .3 ? 'miner' : 'digger'; go(c, 'bore', W); }
+    else if (!ahead) post(25);
   }
-
   /** A climber passing under a gap in the row above goes up it, along the side of the tile beyond. */
   function flue(c, W) {
-    const S = W.S, T = c.def.tall * S;
-    for (const r of W.tiles) {
-      const b = r.y + r.h, side = c.dir > 0 ? r.x : r.x + r.w, d = (side - c.x) * c.dir;
-      if (b > c.y - T / 2 || b < c.y - T - 40 || d < 3 * S || d > 5 * S || inTile(W, side - c.dir * 3, b - 4)) continue;
-      c.wall = r; go(c, 'climb', W); return;
-    }
+    const S = W.S, T = c.def.tall * S, px = c.x + c.dir * 2 * S;
+    if (at(W, px, c.y - T - 2 * S) !== 1 || at(W, px, c.y - S)) return;
+    for (let y = c.y - T - S; y > c.y - T - 12 * S; y -= S) if (at(W, c.x, y) === 1) return;  // no way up here
+    c.loose = 1; go(c, 'climb', W);
   }
 
   HP.fx.add('walkers', {
@@ -479,14 +593,18 @@
     live: true, fps: 12,
     options: [{key: 'count', label: 'How many', type: 'range', min: 3, max: 200, step: 1, default: 40}, SIZE, DROP],
     create(ctx) {
-      const S = scale(ctx), W = world(ctx, S, -9); W.holes = [];
+      heal();  // whatever an earlier round cut
+      const S = scale(ctx), W = world(ctx, S);
       W.sh = sheet(ACORN_ART, S); W.props = sheet(PROPS_ART, S); W.font = sheet(FONT_ART, 2); prep(ACORN, W.sh);
+      W.bcv = document.createElement('canvas'); W.bcv.width = Math.ceil(W.w); W.bcv.height = Math.ceil(W.h); W.bg = W.bcv.getContext('2d');  // the bricks, painted once each
       const hs = W.tiles.map(r => r.h).sort((a, b) => a - b);
       W.hard = hs.length ? 2 * hs[hs.length >> 1] + 4 * S : 230;  // two tiles of this layout, and a little
-      W.drop = interval(ctx, DROP); W.rest = 0; W.live = 0; W.posts = 0;
+      W.drop = interval(ctx, DROP); W.rest = 0; W.live = 0; W.posts = 0; W.fl = 0;
       deal(W, ctx);
       return W;
     },
+    // a double tap anywhere: every tile whole again at once
+    restore(W) { heal(); if (W && W.bg) terrain(W); },
     tap(W, x, y) {
       const c = under(W, x, y); if (!c) return;
       if (c.was) c.dir = c.was;  // it had only turned to look at the finger
@@ -506,15 +624,14 @@
         c.role = pick(ROLES); c.alpha = 0; c.born = W.t; if (c.role === 'bomber') c.fuse = W.t + 5 + Math.random() * 12;
         go(c, 'drop', W); W.list.push(c); W.left--; W.wait = about(W.drop); TEST.out++;
       }
-      W.posts = 0; W.live = 0; W.maxPosts = Math.max(3, W.list.length / 6);
-      for (const c of W.list) if (c.st === 'block') W.posts++;
-      for (const q of W.plats) if (q.stair && !q.dead) W.live++;
+      W.posts = 0; W.live = 0; W.maxPosts = Math.max(3, W.list.length / 6); W.maxLive = Math.max(4, W.list.length / 8);
+      for (const c of W.list) { if (c.st === 'block') W.posts++; else if (c.st === 'build' || c.st === 'pick') W.live++; }
       let n = 0, busy = false;
       for (const c of W.list) {
         if (W.t - c.born > 150 && !c.fuse && !c.s.solid) c.fuse = W.t + 5;  // shut in somewhere: do not pile up for ever
         if (c.fuse && W.t >= c.fuse && !c.s.end && c.st !== 'hopin' && c.st !== 'home' && c.st !== 'splat') { go(c, 'boom', W); continue; }
-        if (c.st === 'walk' && (c.role === 'walker' || c.role === 'floater' || c.role === 'climber') && c.plat && Math.random() < dt * 2) hand(c, W);
-        if (c.st === 'walk' && c.role === 'climber' && c.plat) flue(c, W);
+        if (c.st === 'walk' && c.role === 'climber') flue(c, W);
+        if (c.st === 'walk' && (c.role === 'walker' || c.role === 'floater' || c.role === 'climber') && Math.random() < dt * 2) hand(c, W);
         step(c, dt, W); if (c.dead) continue;
         W.list[n++] = c; if (!c.s.solid) busy = true;
         if (c.x < 0 || c.x > W.w) TEST.off++;
@@ -523,32 +640,14 @@
       if (!W.left && !busy && W.rest <= 0) {  // only the ones standing guard are left: they go off one after another
         if (!n) W.rest = 2.5; else W.list.forEach((c, i) => { if (!c.fuse) c.fuse = W.t + 1.5 + i * .3; });
       }
+      W.fl -= dt; if (W.dirty && W.fl <= 0) { W.dirty = 0; W.fl = .25; flush(W); }  // the real tiles get their new holes a few times a second
       g.imageSmoothingEnabled = false;
+      g.drawImage(W.bcv, 0, 0, W.w, W.h);
       blit(g, W.props, W.props.ix.door, 0, W.door.x, W.door.y);
       if (W.saved) {  // the count of those who got home, small, over the door
-        const y = W.door.y - 9 * S - 1;
-        if (W.saved > 9) { blit(g, W.font, Math.floor(W.saved / 10), 0, W.door.x - 4, y); blit(g, W.font, W.saved % 10, 0, W.door.x + 4, y); }
-        else blit(g, W.font, W.saved, 0, W.door.x, y);
+        const y = W.door.y - 9 * S - 1, s = String(W.saved);
+        for (let i = 0; i < s.length; i++) blit(g, W.font, +s[i], 0, W.door.x + (i - (s.length - 1) / 2) * 8, y);
       }
-      for (const q of W.plats) if (q.stair && !q.dead) {  // the bricks stay a while, then fade
-        const age = W.t - q.born; if (age > 40) { q.dead = W.cut = 1; continue; }
-        g.globalAlpha = Math.min(1, (40 - age) / 3);
-        for (let i = 0; i < q.n; i++) {
-          const x = Math.round(q.dir > 0 ? q.x0 + i * q.bw : q.x0 - (i + 1) * q.bw), y = Math.round(q.y0 - (i + 1) * q.bh);
-          g.fillStyle = INK; g.fillRect(x - 1, y - 1, q.bw + 2, 2 * S + 2);
-          g.fillStyle = i & 1 ? '#c98a4b' : '#e3ad6b'; g.fillRect(x, y, q.bw, 2 * S);
-        }
-        g.globalAlpha = 1;
-      }
-      if (W.cut) { W.plats = W.plats.filter(q => !q.dead); W.cut = 0; }
-      let hn = 0;
-      for (const k of W.holes) {  // what the diggers cut: dark, then closing
-        const age = W.t - k.t; if (age > 10) { if (k.spot) k.spot.off = 1; continue; } W.holes[hn++] = k;
-        g.globalAlpha = .85 * Math.min(1, (10 - age) / 3); g.strokeStyle = '#140b1e'; g.lineWidth = k.w;
-        g.save(); g.beginPath(); g.rect(k.r.x, k.r.y, k.r.w, k.r.h); g.clip();  // only on the tile it was cut in
-        g.beginPath(); g.moveTo(k.x0, k.y0); g.lineTo(k.x1, k.y1); g.stroke(); g.restore();
-      }
-      W.holes.length = hn; g.globalAlpha = 1;
       for (const c of W.list) {
         paint(g, c, W);
         if (c.s.hide) continue;

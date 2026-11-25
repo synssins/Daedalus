@@ -282,6 +282,8 @@ function cut() {
       + `L${x + w},${y + h - (c.br ? c.br[1] : rr)}` + (c.br ? `L${x + w - c.br[0]},${y + h}` : arc(x + w - rr, y + h))
       + `L${x + (c.bl ? c.bl[0] : rr)},${y + h}` + (c.bl ? `L${x},${y + h - c.bl[1]}` : arc(x, y + h - rr))
       + `L${x},${y + (c.tl ? c.tl[1] : rr)}` + (c.tl ? `L${x + c.tl[0]},${y}` : arc(x + rr, y)) + 'z';
+    // holes an overlay has cut in the tile (el.hpHoles: boxes [x1, y1, x2, y2] that do not overlap): drawn the other way round, so they are left out
+    for (const q of i.el.hpHoles || []) path += `M${x + q[0]},${y + q[1]}V${y + q[3]}H${x + q[2]}V${y + q[1]}z`;
   }
   $('blurclip').style.clipPath = $('blurclip').style.webkitClipPath = path ? `path('${path}')` : 'inset(50%)';
 }
