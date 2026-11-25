@@ -172,78 +172,62 @@
   //   chute            opens a parachute at the top of its arc;  float: seconds it rises under a balloon first
   //   bore             [way, cells, radius]: on reaching ground it tunnels ('fwd', 'down' or 'side') before going off
   //   inst             no projectile at all: 'laser', 'rise', 'shield', 'riot';  once: a tank may use it once a round
-  //   flat             worth trying from under a roof;  tool: never in a kit, the gunner reaches for it when it must;  n: the effect's own numbers
+  //   flat             worth trying from under a roof;  tool: never picked by chance, the gunner reaches for it when it must;  n: the effect's own numbers
+  //   reach            how far its tunnelling warheads go on after it lands (for the gunner's aim);  tracer: a ranging shot
+  // The list and the sizes relative to each other follow the classic artillery game: blast radius there times 0.6 here.
   const DEF = {
-    pea:        {wt: 10, col: '#ffffff', sz: 1, hit: [['boom', 6, 40]]},
-    shell:      {wt: 12, col: '#ffffff', sz: 2, hit: [['boom', 9, 55]]},
-    slug:       {wt: 6, col: '#ffd23c', sz: 3, hit: [['boom', 13, 70]]},
-    anvil:      {wt: 2, col: '#9aa3b8', sz: 4, g: 0.45, v: 0.67, hit: [['boom', 20, 90]]},
-    needle:     {wt: 3, col: '#ff4d4d', sz: 2, shape: 'bar', trail: 'line', flat: 1, g: 0.5, v: 2.2, els: [0.15, 0.3, 0.5], hit: [['boom', 4, 75]]},
-    fiver:      {wt: 4, col: '#ffd23c', sz: 2, shape: 'diamond', apex: 1, hit: [['split', 'bomblet', 5, 11, 0]]},
-    bomblet:    {col: '#ffd23c', sz: 1, hit: [['boom', 6, 30]]},
-    litter:     {wt: 2, col: '#ff9a2e', sz: 3, shape: 'diamond', apex: 1, hit: [['split', 'pod', 3, 22, 12]]},
-    pod:        {col: '#ff9a2e', sz: 2, shape: 'diamond', fuse: 0.6, hit: [['split', 'crumb', 3, 14, 14]]},
-    crumb:      {col: '#ffd23c', sz: 1, hit: [['boom', 5, 22]]},
-    drizzle:    {wt: 2, col: '#3fe0ff', sz: 2, shape: 'diamond', apex: 1, hit: [['split', 'drop', 12, 7, 0]]},
-    drop:       {col: '#3fe0ff', sz: 1, trail: 'none', drag: 0.6, hit: [['boom', 3, 12]]},
-    pinball:    {wt: 3, col: '#ff6ad5', sz: 2, shape: 'ring', bounce: 0.72, nb: 4, hit: [['boom', 8, 50]]},
-    marble:     {wt: 3, col: '#b6ff3c', sz: 2, shape: 'ring', roll: 1, flat: 1, hit: [['boom', 9, 55]]},
-    skipper:    {wt: 3, col: '#cfe6ff', sz: 2, shape: 'bar', hop: 1, flat: 1, bounce: 0.55, nb: 5, els: [0.35, 0.55, 0.8], hit: [['boom', 8, 45]]},
-    mole:       {wt: 3, col: '#5dff6a', sz: 2, bore: ['fwd', 30, 2], hit: [['boom', 8, 50]]},
-    plumb:      {wt: 2, col: '#5dff6a', sz: 2, shape: 'bar', bore: ['down', 46, 2], hit: [['boom', 7, 45]]},
-    trencher:   {wt: 2, col: '#5dff6a', sz: 2, shape: 'diamond', bore: ['side', 60, 3], hit: [['boom', 5, 35]]},
-    mudpie:     {wt: 3, col: '#c08a52', sz: 3, hit: [['dirt', 11]]},
-    rampart:    {wt: 2, col: '#c08a52', sz: 2, shape: 'bar', hit: [['wall', 3, 26]]},
-    trapdoor:   {wt: 2, col: '#a98bff', sz: 2, shape: 'cross', hit: [['shaft', 6, 28]]},
-    ember:      {wt: 3, col: '#ff5a1e', sz: 2, trail: 'spark', hit: [['boom', 3, 10], ['fire', 26, 1, 50]]},
-    thunderclap: {wt: 2, col: '#ffffff', sz: 2, shape: 'cross', prox: 10, hit: [['burst', 20, 5, 38]]},
-    shove:      {wt: 2, col: '#cfe6ff', sz: 2, shape: 'ring', hit: [['boom', 3, 8], ['push', 50, 70]]},
-    gulp:       {wt: 2, col: '#a98bff', sz: 2, shape: 'ring', hit: [['pull', 14]]},
-    seeker:     {wt: 3, col: '#ff4d4d', sz: 2, shape: 'diamond', trail: 'smoke', home: 70, late: 1, hit: [['boom', 8, 50]]},
-    hornets:    {wt: 2, col: '#ffd23c', sz: 2, shape: 'cross', apex: 1, hit: [['split', 'hornet', 5, 16, 6]]},
-    hornet:     {col: '#ffd23c', sz: 1, trail: 'smoke', g: 0.1, wind: 0.3, drag: 1.6, home: 75, wob: 90, fuse: 6, hit: [['boom', 4, 16]]},
-    lobber:     {wt: 3, col: '#ffffff', sz: 2, els: [1.47], hit: [['boom', 10, 58]]},
-    drifter:    {wt: 2, col: '#ffffff', sz: 2, chute: 1, hit: [['boom', 12, 65]]},
-    floater:    {wt: 2, col: '#ff4d4d', sz: 2, float: 2.4, hit: [['boom', 11, 60]]},
-    zapper:     {wt: 2, col: '#3fe0ff', sz: 2, shape: 'cross', hit: [['boom', 4, 15], ['arc', 90, 26]]},
-    ruler:      {wt: 2, col: '#ff4d4d', sz: 2, shape: 'bar', inst: 'laser', n: [1, 70, 40, 0]},
-    skyfall:    {wt: 2, col: '#ffd23c', sz: 1, shape: 'cross', hit: [['beam']]},
-    hailstones: {wt: 2, col: '#ff9a2e', sz: 1, shape: 'cross', hit: [['meteors', 7]]},
-    rock:       {col: '#ff9a2e', sz: 2, trail: 'spark', hit: [['boom', 7, 30]]},
-    comet:      {wt: 1, col: '#3fe0ff', sz: 1, shape: 'cross', hit: [['comet']]},
-    iceball:    {col: '#cfe6ff', sz: 4, trail: 'spark', g: 0.15, wind: 0, hit: [['boom', 18, 85]]},
-    frost:      {wt: 2, col: '#cfe6ff', sz: 2, shape: 'diamond', hit: [['boom', 2, 12], ['coat', 2, 16]]},
-    tarpit:     {wt: 2, col: '#8d7aa8', sz: 3, hit: [['coat', 3, 14]]},
-    trampoline: {wt: 1, col: '#ff6ad5', sz: 3, hit: [['block', 7, 5]]},
-    pedestal:   {wt: 1, col: '#c08a52', sz: 3, inst: 'rise', once: 1},
-    switcher:   {wt: 1, col: '#b6ff3c', sz: 2, shape: 'ring', hit: [['swap']]},
-    bubble:     {wt: 1, col: '#3fe0ff', sz: 2, shape: 'ring', inst: 'shield', once: 1},
-    dud:        {wt: 1, col: '#ff6ad5', sz: 2, apex: 1, hit: [['sparkle', 40]]},
-    sun:        {wt: 1, col: '#b6ff3c', sz: 3, shape: 'ring', hit: [['nuke', 30, 110]]},
-    nova:       {wt: 0.5, col: '#b6ff3c', sz: 4, g: 0.7, v: 0.84, hit: [['nuke', 52, 140]]},
-    trident:    {wt: 2, col: '#ff9a2e', sz: 3, apex: 1, hit: [['split', 'warhead', 4, 20, 0]]},
-    warhead:    {col: '#ff9a2e', sz: 2, hit: [['boom', 11, 55]]},
-    fan:        {wt: 2, col: '#ffd23c', sz: 3, shape: 'bar', apex: 1, hit: [['split', 'bomblet', 9, 26, 0]]},
-    confetti:   {wt: 2, col: '#ff6ad5', sz: 3, shape: 'cross', hit: [['scatter', 'jelly', 12, 70]]},
-    jelly:      {col: '#ff6ad5', sz: 2, trail: 'none', bounce: 0.75, nb: 3, fuse: 2.5, hit: [['cboom', 6, 22]]},
-    gopher:     {wt: 2, col: '#5dff6a', sz: 1, bore: ['fwd', 18, 1], hit: [['boom', 5, 32]]},
-    badger:     {wt: 1, col: '#5dff6a', sz: 3, bore: ['fwd', 55, 3], hit: [['boom', 12, 65]]},
-    sprout:     {wt: 2, col: '#c08a52', sz: 2, shape: 'bar', bore: ['up', 46, 2], hit: [['boom', 4, 20]]},
-    clod:       {wt: 2, col: '#c08a52', sz: 2, hit: [['dirt', 6]]},
-    landslide:  {wt: 1, col: '#c08a52', sz: 4, hit: [['dirt', 22]]},
-    slurry:     {wt: 2, col: '#c08a52', sz: 2, shape: 'ring', hit: [['mud', 90]]},
-    shrug:      {wt: 1, tool: 1, col: '#ffffff', sz: 2, shape: 'cross', inst: 'riot', n: 12},
-    heave:      {wt: 1, tool: 1, col: '#ffffff', sz: 3, shape: 'diamond', inst: 'riot', n: 20},
-    scoop:      {wt: 2, col: '#ffffff', sz: 2, shape: 'ring', hit: [['clear', 18]]},
-    bead:       {wt: 2, col: '#b6ff3c', sz: 1, roll: 1, flat: 1, hit: [['boom', 5, 35]]},
-    boulder:    {wt: 1, col: '#b6ff3c', sz: 4, roll: 1, flat: 1, hit: [['boom', 14, 75]]},
-    inferno:    {wt: 1, col: '#ff5a1e', sz: 3, trail: 'spark', hit: [['boom', 4, 12], ['fire', 50, 2, 90]]},
-    drool:      {wt: 2, col: '#b6ff3c', sz: 2, shape: 'diamond', apex: 1, hit: [['split', 'acid', 10, 9, 0]]},
-    acid:       {col: '#b6ff3c', sz: 1, trail: 'none', bore: ['down', 34, 0], hit: [['cboom', 2, 14]]},
-    lance:      {wt: 1, col: '#3fe0ff', sz: 3, shape: 'bar', inst: 'laser', n: [3, 110, 55, 45]},
-    chalk:      {wt: 1, col: '#ffffff', sz: 1, trail: 'line', hit: [['mark']]},
+    baby:     {wt: 7, col: '#ffffff', sz: 1, hit: [['boom', 6, 35]]},
+    missile:  {wt: 6, col: '#ffffff', sz: 2, hit: [['boom', 12, 60]]},
+    nukeS:    {wt: 3, col: '#b6ff3c', sz: 3, shape: 'ring', hit: [['nuke', 24, 100]]},
+    nuke:     {wt: 2, col: '#b6ff3c', sz: 4, hit: [['nuke', 45, 140]]},
+    // three blasts one after another, each bigger, hopping forward
+    leap:     {wt: 3, col: '#5dff6a', sz: 2, shape: 'diamond', hit: [['boom', 12, 50], ['frog', 'leap2']]},
+    leap2:    {col: '#5dff6a', sz: 2, shape: 'diamond', hit: [['boom', 15, 55], ['frog', 'leap3']]},
+    leap3:    {col: '#5dff6a', sz: 2, shape: 'diamond', hit: [['boom', 18, 60]]},
+    // a chain of blasts in every colour, scattered round where it came down
+    funky:    {wt: 3, col: '#ff6ad5', sz: 3, shape: 'cross', hit: [['scatter', 'funk', 8, 60]]},
+    funk:     {col: '#ff6ad5', sz: 2, trail: 'none', hit: [['cboom', 10, 35]]},
+    // splits at the top of its arc; one that meets something on the way up is a dud
+    mirv:     {wt: 3, col: '#ff9a2e', sz: 3, shape: 'diamond', apex: 1, hit: [['split', 'warhead', 5, 18, 0]]},
+    warhead:  {col: '#ff9a2e', sz: 2, hit: [['boom', 12, 55]]},
+    mirv9:    {wt: 2, col: '#ff4d4d', sz: 4, shape: 'diamond', apex: 1, hit: [['split', 'bighead', 9, 16, 0]]},
+    bighead:  {col: '#ff4d4d', sz: 3, hit: [['boom', 21, 75]]},
+    napalm:   {wt: 3, col: '#ff5a1e', sz: 2, trail: 'spark', hit: [['boom', 3, 10], ['fire', 34, 1, 60]]},
+    napalmH:  {wt: 2, col: '#ffd23c', sz: 3, trail: 'spark', hit: [['boom', 4, 12], ['fire', 55, 2, 95]]},
+    tracer:   {wt: 1, col: '#ffffff', sz: 1, trail: 'line', tracer: 1, hit: [['mark']]},
+    smoke:    {wt: 1, col: '#ff6ad5', sz: 1, trail: 'smoke', tracer: 1, hit: [['mark']]},
+    roll1:    {wt: 2, col: '#b6ff3c', sz: 1, roll: 1, flat: 1, hit: [['boom', 6, 35]]},
+    roll2:    {wt: 2, col: '#b6ff3c', sz: 2, shape: 'ring', roll: 1, flat: 1, hit: [['boom', 12, 60]]},
+    roll3:    {wt: 1.5, col: '#b6ff3c', sz: 4, roll: 1, flat: 1, hit: [['boom', 27, 95]]},
+    // a cone of ground gone in front of the barrel, only so far: n is [range, half angle]
+    riot1:    {wt: 1, tool: 1, col: '#ffffff', sz: 2, shape: 'cross', inst: 'riot', n: [22, 0.35]},
+    riot2:    {wt: 1, tool: 1, col: '#ffffff', sz: 3, shape: 'diamond', inst: 'riot', n: [36, 0.5]},
+    riotB:    {wt: 2, col: '#ffffff', sz: 2, shape: 'ring', hit: [['clear', 18]]},
+    riotH:    {wt: 1.5, col: '#ffffff', sz: 3, shape: 'ring', hit: [['clear', 27]]},
+    // tunnels on along the way it was flying, harming nothing
+    dig1:     {wt: 1.5, col: '#5dff6a', sz: 1, bore: ['fwd', 30, 1], hit: []},
+    dig2:     {wt: 1.5, col: '#5dff6a', sz: 2, bore: ['fwd', 45, 2], hit: []},
+    dig3:     {wt: 1, col: '#5dff6a', sz: 3, bore: ['fwd', 65, 3], hit: []},
+    // lands and sends several tunnelling warheads fanning on, each with a charge at its end
+    hog1:     {wt: 2, col: '#ffd23c', sz: 2, shape: 'bar', reach: 25, hit: [['hogs', 'hogw', 2, 0.4]]},
+    hog2:     {wt: 2, col: '#ffd23c', sz: 3, shape: 'bar', reach: 30, hit: [['hogs', 'hogw', 4, 0.3]]},
+    hog3:     {wt: 1, col: '#ffd23c', sz: 4, shape: 'bar', reach: 45, hit: [['hogs', 'hogW', 6, 0.25]]},
+    hogw:     {col: '#ffd23c', sz: 1, bore: ['fwd', 30, 1], hit: [['boom', 6, 35]]},
+    hogW:     {col: '#ffd23c', sz: 2, bore: ['fwd', 48, 2], hit: [['boom', 10, 50]]},
+    clod:     {wt: 1, col: '#c08a52', sz: 2, hit: [['dirt', 8]]},
+    ball:     {wt: 1, col: '#c08a52', sz: 3, hit: [['dirt', 14]]},
+    ton:      {wt: 1, col: '#c08a52', sz: 4, hit: [['dirt', 26]]},
+    slurry:   {wt: 1, col: '#c08a52', sz: 2, shape: 'ring', hit: [['mud', 110]]},
+    dirtfan:  {wt: 0.7, col: '#c08a52', sz: 2, shape: 'cross', inst: 'dirtfan'},
+    lump:     {col: '#c08a52', sz: 2, trail: 'none', hit: [['dirt', 4]]},
+    // everything left hanging near it comes down
+    quake:    {wt: 1.5, col: '#a98bff', sz: 2, shape: 'cross', hit: [['quake', 34]]},
+    plasma:   {wt: 1, tool: 1, col: '#3fe0ff', sz: 3, shape: 'ring', inst: 'plasma'},
+    laser:    {wt: 2.5, col: '#ff4d4d', sz: 2, shape: 'bar', inst: 'laser', n: [1, 400, 45, 0]},
+    shield:   {wt: 1, col: '#3fe0ff', sz: 2, shape: 'ring', inst: 'shield', once: 1},
+    rock:     {col: '#ff9a2e', sz: 2, trail: 'spark', hit: [['boom', 7, 30]]},
   };
-  const PICK = Object.keys(DEF).filter(n => DEF[n].wt), PLAIN = ['pea', 'shell', 'shell', 'slug'], DIRT = [176, 122, 69];
+  const PICK = Object.keys(DEF).filter(n => DEF[n].wt), DIRT = [176, 122, 69];
   Object.keys(DEF).forEach(n => { DEF[n].name = n; });
 
   function alive(G) { return G.tanks.filter(t => !t.dead); }
@@ -333,16 +317,32 @@
   function hurt(G, t, n, slow) {
     if (t.dead) return;
     if (t.shield && !slow) { t.shield = 0; G.fx.push({k: 'pop', x: t.x, y: t.y - 2, t: 0.3, T: 0.3}); return; }  // the bubble takes one hit and bursts
+    if (!slow && G.firer && G.firer !== t) t.foe = G.firer;  // it remembers who did that
     t.hp -= n;
     if (t.hp <= 0) { t.dead = true; t.hp = 0; later(G, 0.3, () => boom(G, t.x, t.y - 1, 13, 35)); }
+  }
+  /** A round hole from a blast. Ground only comes down when the blast lands on top of it: a hole made from the side
+   *  or from below leaves its roof hanging, so a tank can be undermined. A hit on top then brings down whatever
+   *  thin crust is left over a hollow underneath, and a big one shakes loose everything near. */
+  function crater(G, x, y, R) {
+    const top = !solid(G, x, y - 2);
+    cut(G, x, y, R, R, !top);
+    if (!top) return;
+    if (R >= 16) shake(G, x, y, R);
+    x = Math.round(x); y = Math.round(y);
+    for (let c = x - R; c <= x + R; c++) {
+      let yy = y + (Math.sqrt(R * R - (c - x) * (c - x)) | 0) + 1, n = 0;
+      if (!solid(G, c, yy)) continue;
+      while (n < 14 && solid(G, c, yy + 1)) { yy++; n++; }
+      if (n < 14) hang(G, c, yy);
+    }
   }
   function boom(G, x, y, R, dmg, style, cols) {
     const tg = G.tg, col = colourAt(G, x | 0, y | 0);
     // scorch what will be the crater's rim, then cut
     tg.globalCompositeOperation = 'source-atop'; tg.fillStyle = 'rgba(0,0,0,.4)'; tg.beginPath(); tg.arc(Math.round(x) + 0.5, Math.round(y) + 0.5, R + 2.5, 0, 6.3); tg.fill(); tg.globalCompositeOperation = 'source-over';
-    cut(G, x, y, R);
+    crater(G, x, y, R);
     G.blasts.push({x, y, R, ry: R, t: 0, dur: 0.3 + R * 0.02, s: style || 'fire', c: cols});
-    if (R >= 16) shake(G, x, y, R);
     dust(G, x, y, Math.min(R, 12), css(col, 0.9)); dust(G, x, y, 3, '#ffd23c');
     for (const t of G.tanks) if (!t.dead) { const d = Math.hypot(t.x - x, t.y - 2 - y); if (d < R + 5) hurt(G, t, dmg * (1 - d / (R + 5))); }
   }
@@ -354,77 +354,20 @@
     split(G, x, y, p, name, n, spread, up) {
       for (let i = 0; i < n; i++) G.shells.push(shot(DEF[name], x, y, p.vx + (i - (n - 1) / 2) * spread * (0.8 + Math.random() * 0.4), p.vy - up * (0.5 + Math.random()), p.by, true));
     },
+    /** The next warhead of a chain hops on the way the last one was going. */
+    frog(G, x, y, p, name) { G.shells.push(shot(DEF[name], x, y - 3, (p.vx < 0 ? -1 : 1) * 30, -50, p.by, true)); },
+    /** n tunnelling warheads fan on through the ground from where it landed. */
+    hogs(G, x, y, p, name, n, fan) {
+      const a0 = Math.atan2(p.vy, p.vx), d = DEF[name];
+      for (let i = 0; i < n; i++) { const a = a0 + (i - (n - 1) / 2) * fan, q = shot(d, x, y, Math.cos(a) * 50, Math.sin(a) * 50, p.by, true); q.bored = 1; q.bore = d.bore[1] * (0.7 + Math.random() * 0.6); G.shells.push(q); }
+      dust(G, x, y, 6, d.col);
+    },
     /** A mound of fresh dirt: it buries whatever is there. */
     dirt(G, x, y, p, R) { addDisc(G, x, y - R * 0.4, R, DIRT); G.blasts.push({x, y, R: R * 0.8, ry: R * 0.8, t: 0, dur: 0.25, s: 'dirt'}); dust(G, x, y - R, 8, css(DIRT)); },
-    /** A wall of dirt standing on the ground where it lands. */
-    wall(G, x, y, p, half, h) {
-      x = Math.round(x);
-      for (let c = x - half; c <= x + half; c++) { let sy = Math.round(y) - 6; while (sy < G.H && !solid(G, c, sy)) sy++; addBox(G, c, sy - h, c, sy - 1, 1, DIRT); }
-      dust(G, x, y - 4, 8, css(DIRT));
-    },
-    /** The ground straight below is simply gone: whoever stood there falls. */
-    shaft(G, x, y, p, half, depth) { cutBox(G, x - half, y - 3, x + half, y + depth); G.fx.push({k: 'col', x, y: y + depth, y0: y - 3, w: half, t: 0.25, T: 0.25, c: '#a98bff'}); dust(G, x, y, 10, '#a98bff'); },
     /** Liquid fire: thrown out as drops that run downhill, pool and burn. */
     fire(G, x, y, p, n, heat, wide) { for (let i = 0; i < n; i++) part(G, 1, x, y - 2, (Math.random() - 0.5) * wide, -10 - Math.random() * 35, 3 + Math.random() * 1.5, '').h = heat; },
-    /** Goes off in the air: a wide, shallow scoop out of the ground below and a wide blast. */
-    burst(G, x, y, p, rx, ry, dmg) {
-      let gy = Math.round(y); while (gy < G.H && gy < y + 16 && !solid(G, x, gy)) gy++;
-      cut(G, x, gy, rx, ry); G.blasts.push({x, y: (y + gy) / 2, R: rx + 4, ry: ry + 5, t: 0, dur: 0.4, s: 'flat'}); dust(G, x, gy, 12, '#ffffff');
-      for (const t of G.tanks) if (!t.dead && Math.abs(t.y - gy) < 16) { const d = Math.abs(t.x - x); if (d < rx + 6) hurt(G, t, dmg * (1 - d / (rx + 6))); }
-    },
-    /** A shock that throws tanks sideways. */
-    push(G, x, y, p, R, F) {
-      G.fx.push({k: 'pop', x, y, t: 0.45, T: 0.45, R});
-      for (const t of G.tanks) if (!t.dead) { const d = Math.hypot(t.x - x, t.y - y); if (d < R) t.vx += (t.x < x ? -1 : 1) * F * (1 - d / R); }
-    },
-    /** An implosion: the ground around is torn out and packed into a ball in the middle, tanks are dragged toward it. */
-    pull(G, x, y, p, R) {
-      cut(G, x, y, R); addDisc(G, x, y, R * 0.55 | 0, [90, 70, 120]);
-      G.blasts.push({x, y, R: R + 4, ry: R + 4, t: 0, dur: 0.5, s: 'in'});
-      for (let i = 0; i < 14; i++) { const a = i / 14 * 6.28; part(G, 2, x + Math.cos(a) * (R + 6), y + Math.sin(a) * (R + 6), -Math.cos(a) * 45, -Math.sin(a) * 45, 0.4, '#a98bff'); }
-      for (const t of G.tanks) if (!t.dead) { const d = Math.hypot(t.x - x, t.y - y); if (d < R * 3.5) t.vx += (t.x < x ? 1 : -1) * 55 * (1 - d / (R * 3.5)); if (d < R + 4) hurt(G, t, 30); }
-    },
-    /** Lightning jumps from here to every tank in reach. */
-    arc(G, x, y, p, R, dmg) {
-      for (const t of G.tanks) if (!t.dead) {
-        const d = Math.hypot(t.x - x, t.y - 2 - y); if (d > R) continue;
-        const pts = []; for (let i = 0; i <= 10; i++) pts.push(x + (t.x - x) * i / 10 + (i % 10 ? (Math.random() - 0.5) * 9 : 0), y + (t.y - 2 - y) * i / 10 + (i % 10 ? (Math.random() - 0.5) * 9 : 0));
-        G.fx.push({k: 'bolt', pts, t: 0.4, T: 0.4}); hurt(G, t, dmg * (1 - d / R * 0.5));
-      }
-      G.blasts.push({x, y, R: 6, ry: 6, t: 0, dur: 0.3, s: 'ice'});
-    },
-    /** A marker; a moment later a column comes straight down out of the sky onto it. */
-    beam(G, x, y) {
-      G.fx.push({k: 'mark', x, y, t: 0.7, T: 0.7});
-      later(G, 0.7, () => {
-        cutBox(G, x - 3, 0, x + 3, y + 12, true); G.fx.push({k: 'col', x, y: y + 12, y0: 0, w: 3, t: 0.4, T: 0.4, c: '#ffd23c'}); dust(G, x, y + 10, 12, '#ffd23c');
-        for (const t of G.tanks) if (!t.dead && t.y < y + 18) { const d = Math.abs(t.x - x); if (d < 9) hurt(G, t, 60 * (1 - d / 10)); }
-      });
-    },
-    /** A marker; then rocks rain on the place from high up, one after another. */
-    meteors(G, x, y, p, n) {
-      G.fx.push({k: 'mark', x, y, t: 0.5, T: 0.5});
-      const dir = p.by.x < x ? 1 : -1;
-      for (let i = 0; i < n; i++) later(G, 0.3 + i * 0.22, () => G.shells.push(shot(DEF.rock, x + (Math.random() - 0.5) * 70 - dir * 35, -6, dir * (22 + Math.random() * 12), 80, p.by, true)));
-    },
-    /** A marker; then one big lump of ice comes in almost flat from the side of the screen behind the gunner. */
-    comet(G, x, y, p) {
-      G.fx.push({k: 'mark', x, y, t: 0.5, T: 0.5});
-      later(G, 0.5, () => { const left = p.by.x < x, x0 = left ? -30 : G.W + 30, T = Math.abs(x - x0) / 170; G.shells.push(shot(DEF.iceball, x0, y - 0.5 * GRAV * 0.15 * T * T - 3, left ? 170 : -170, 0, p.by, true)); });
-    },
-    /** Ice or tar over the ground around. Tanks slide on ice; nothing bounces, rolls or slides on tar, and tar burns long. */
-    coat(G, x, y, p, kind, R) { coat(G, x, y, R, kind, kind === 2 ? 'rgba(214,240,255,.82)' : 'rgba(22,14,34,.88)'); G.blasts.push({x, y, R: R * 0.7, ry: R * 0.7, t: 0, dur: 0.35, s: kind === 2 ? 'ice' : 'dirt'}); dust(G, x, y, 8, kind === 2 ? '#e6f6ff' : '#3a2c50'); },
-    /** A slab of rubber: shells bounce off it instead of going off. */
-    block(G, x, y, p, half, h) { addBox(G, x - half, y - h, x + half, y - 1, 4, [255, 106, 213]); dust(G, x, y - h, 6, '#ff6ad5'); },
-    /** The gunner changes places with the shell. */
-    swap(G, x, y, p) {
-      const t = p.by; if (t.dead) return;
-      G.fx.push({k: 'pop', x: t.x, y: t.y - 2, t: 0.35, T: 0.35, R: 10}, {k: 'pop', x, y, t: 0.35, T: 0.35, R: 10});
-      t.x = U.clamp(Math.round(x), 6, G.W - 7); t.y = U.clamp(Math.round(y) - 2, 8, G.H - 2); t.fresh = true; t.vx = 0;
-      cut(G, t.x, t.y - 2, 6, 4, true);  // room to stand in
-    },
-    /** The big one: a white flash, a huge fireball that takes its time, a very large crater, everything near shaken
-     *  loose, sparks of fallout, and a cloud that climbs and leans with the wind. Whoever fired it had better be far away. */
+    /** The big one: a white flash, a huge fireball that takes its time, a very large crater, sparks of fallout, and a
+     *  cloud that climbs and leans with the wind. Whoever fired it had better be far away. */
     nuke(G, x, y, p, R, dmg) {
       boom(G, x, y, R, dmg); G.blasts[G.blasts.length - 1].dur = 1.5;
       G.fx.push({k: 'flash', t: 0.16, T: 0.16}, {k: 'cloud', x, y, y0: y, R: R * 0.45, t: 4.5, T: 4.5});
@@ -432,7 +375,7 @@
     },
     /** Bursts into n of another row, each its own bright colour, thrown every which way. */
     scatter(G, x, y, p, name, n, speed) {
-      cut(G, x, y, 3);
+      cut(G, x, y, 3, 3, true);
       for (let i = 0; i < n; i++) { const a = Math.random() * 6.28, v = speed * (0.5 + Math.random()), q = shot(DEF[name], x, y - 1, Math.cos(a) * v, -Math.abs(Math.sin(a)) * v - 20, p.by, true); q.col = css(TANKS[i % 6][1]); G.shells.push(q); }
     },
     /** A blast in the projectile's own colour. */
@@ -440,16 +383,16 @@
     /** Liquid dirt, poured out in waves: it runs to the lowest ground it can find and fills it level. */
     mud(G, x, y, p, n) { for (let w = 0; w < 6; w++) later(G, w * 0.25, () => { for (let i = 0; i < n / 6; i++) part(G, 4, x + Math.random() * 6 - 3, y - 3, (Math.random() - 0.5) * 40, -10 - Math.random() * 20, 8, css(DIRT)); }); },
     /** A big round bite out of the ground and nothing else: no heat, no harm. */
-    clear(G, x, y, p, R) { cut(G, x, y, R); G.fx.push({k: 'pop', x, y, t: 0.4, T: 0.4, R}); dust(G, x, y, 10, '#ffffff'); },
+    clear(G, x, y, p, R) { crater(G, x, y, R); G.fx.push({k: 'pop', x, y, t: 0.4, T: 0.4, R}); dust(G, x, y, 10, '#ffffff'); },
+    /** Everything left hanging within reach comes down. */
+    quake(G, x, y, p, R) { shake(G, x, y, R); G.fx.push({k: 'pop', x, y, t: 0.5, T: 0.5, R}); dust(G, x, y, 12, '#a98bff'); },
     /** Only shows where it came down. */
     mark(G, x, y) { G.fx.push({k: 'mark', x, y, t: 0.9, T: 0.9}); },
-    /** Nothing but a pretty burst. */
-    sparkle(G, x, y, p, n) { for (let i = 0; i < n; i++) { const a = i / n * 6.28, v = 20 + Math.random() * 40; part(G, 3, x, y, Math.cos(a) * v, Math.sin(a) * v, 1 + Math.random() * 0.8, css(TANKS[i % 6][1])); } },
   };
   /** The weapons that are not thrown at all. */
   const INST = {
-    /** A straight beam, at once: it burns a channel through a good depth of ground and anything in its way.
-     *  n: [half width, cells of ground it can burn, damage, recoil]. The wide one kicks the gunner backwards. */
+    /** A straight beam, at once: it burns a channel through the ground, tiles and all, and anything in its way.
+     *  n: [half width, cells of ground it can burn, damage, recoil]. */
     laser(G, t) {
       const n = t.w.n, cx = Math.cos(t.a), cy = -Math.sin(t.a), x0 = t.x + 0.5 + cx * 7, y0 = t.y - 4 + cy * 7, seen = [];
       let x = x0, y = y0, burn = n[1];
@@ -461,14 +404,20 @@
       G.fx.push({k: 'ray', x: x0, y: y0, x2: x, y2: y, w: n[0], c: t.w.col, t: 0.4, T: 0.4}); dust(G, x, y, 6, t.w.col);
       if (n[3]) t.vx = (cx < 0 ? 1 : -1) * n[3];
     },
-    /** A charge that throws off whatever lies on the gunner: a widening wedge of ground above it is gone. n: how high. */
+    /** A cone of ground gone, the way the barrel points and only so far. What is above it stays up. n: [range, half angle]. */
     riot(G, t) {
-      const R = t.w.n;
-      for (let dy = 0; dy <= R; dy++) cutBox(G, t.x - 5 - dy * 0.7, t.y - dy, t.x + 5 + dy * 0.7, t.y - dy, dy < R);
-      G.fx.push({k: 'pop', x: t.x, y: t.y - 3, t: 0.35, T: 0.35, R}); dust(G, t.x, t.y - 4, 10, '#ffffff');
+      const R = t.w.n[0], half = t.w.n[1], cx = Math.cos(t.a), cy = -Math.sin(t.a), x0 = t.x + 0.5, y0 = t.y - 4, k = Math.tan(half);
+      for (let s = 2; s <= R; s += 2) { const w = Math.max(2, Math.round(2 + s * k)); cut(G, x0 + cx * s, y0 + cy * s, w, w, true); }
+      G.fx.push({k: 'wedge', x: x0, y: y0, a: t.a, half, R, t: 0.4, T: 0.4}); dust(G, x0 + cx * R * 0.5, y0 + cy * R * 0.5, 10, '#ffffff');
     },
-    /** The ground under the gunner rises and lifts it. */
-    rise(G, t) { const h = Math.min(14, t.y - 14); if (h > 0) { addBox(G, t.x - 6, t.y - h + 1, t.x + 6, t.y, 1, DIRT); t.y -= h; dust(G, t.x, t.y + h, 10, css(DIRT)); } },
+    /** A fan of dirt lumps thrown the way the barrel points. */
+    dirtfan(G, t) { for (let i = 0; i < 7; i++) G.shells.push(launch(t, DEF.lump, t.a + (i - 3) * 0.12, 70 + Math.random() * 40)); },
+    /** A burst of energy all round the gunner, a different size every time: it harms every other tank it reaches. */
+    plasma(G, t) {
+      const R = 8 + (G.rng() * 30 | 0), x = t.x, y = t.y - 2;
+      G.blasts.push({x, y, R, ry: R, t: 0, dur: 0.6, s: 'ice'});
+      for (const o of G.tanks) if (!o.dead && o !== t) { const d = Math.hypot(o.x - x, o.y - 2 - y); if (d < R + 5) hurt(G, o, 70 * (1 - d / (R + 5))); }
+    },
     /** A bubble round the gunner that soaks up the next hit. */
     shield(G, t) { t.shield = 1; G.fx.push({k: 'pop', x: t.x, y: t.y - 2, t: 0.3, T: 0.3, R: 9}); },
   };
@@ -519,19 +468,17 @@
       const col = order[i][1], spr = document.createElement('canvas'); spr.width = 9; spr.height = 5;
       const sg = spr.getContext('2d'); sg.fillStyle = css(col); sg.fillRect(0, 3, 9, 1); sg.fillRect(2, 1, 5, 1); sg.fillRect(3, 0, 3, 1); sg.fillStyle = css(col, 1.4); sg.fillRect(0, 2, 9, 1); sg.fillRect(3, 0, 2, 1);
       sg.fillStyle = '#10121e'; sg.fillRect(0, 4, 9, 1); sg.fillStyle = css(col, 0.55); for (let k = 1; k < 9; k += 2) sg.fillRect(k, 4, 1, 1);
-      // its own few special weapons for this round, so no two rounds are fought the same way
-      const kit = [], pool = PICK.filter(n => PLAIN.indexOf(n) < 0 && !DEF[n].tool);
-      for (let k = 0; k < 6; k++) { let sum = 0; for (const n of pool) sum += DEF[n].wt; let at = r() * sum, j = 0; while (j < pool.length - 1 && (at -= DEF[pool[j]].wt) > 0) j++; kit.push(pool.splice(j, 1)[0]); }
-      G.tanks.push({x, y, hp: 100, name: order[i][0], col, spr, kit, w: DEF.shell, a: Math.PI / 2, ga: 0, gp: 0, fy: 0, vy: 0, vx: 0, sx: 0, fell: 0, slip: 40, fresh: true, dead: false, shield: 0, mem: null});
+      G.tanks.push({x, y, hp: 100, name: order[i][0], col, spr, w: DEF.baby, a: Math.PI / 2, ga: 0, gp: 0, fy: 0, vy: 0, vx: 0, sx: 0, fell: 0, slip: 40, fresh: true, dead: false, shield: 0, seen: {}, used: {}, foe: null});
     }
   }
-  /** Which weapon this shot: plain shells half the time, otherwise something from the tank's own kit. */
+  /** Which weapon this shot: any of the whole list, by its weight. The gunner swaps it when the place calls for a tool. */
   function choose(G, t) {
     const f = G.opts.w, r = G.rng;
     if (f != null && f !== '') { const d = DEF[f] || DEF[PICK[+f]]; if (d) return d; }  // the test page's "every shot is this one"
-    if (r() < 0.5 || !t.kit.length) return DEF[PLAIN[r() * PLAIN.length | 0]];
-    const i = r() * t.kit.length | 0, d = DEF[t.kit[i]];
-    if (d.once) t.kit.splice(i, 1);
+    const pool = PICK.filter(n => !DEF[n].tool && !t.used[n]);
+    let sum = 0; for (const n of pool) sum += DEF[n].wt;
+    let at = r() * sum, j = 0; while (j < pool.length - 1 && (at -= DEF[pool[j]].wt) > 0) j++;
+    const d = DEF[pool[j]]; if (d.once) t.used[d.name] = 1;
     return d;
   }
   /** Where this weapon's projectile would end up, fired at this angle and power, and how far that is from the target.
@@ -540,8 +487,8 @@
     const p = launch(t, d, a, v);
     let e = 0;
     for (let i = 0; i < 1400; i++) { e = advance(G, p, 1 / Math.max(40, Math.abs(p.vx) + Math.abs(p.vy), Math.abs(p.rv)), true); if (e === 1 || e === 2) break; }
-    if (e === 1 && d.bore && !p.tank) {  // a burrower goes on from where it meets the ground
-      const way = d.bore[0], n = d.bore[1], l = Math.hypot(p.vx, p.vy) || 1;
+    if (e === 1 && (d.bore || d.reach) && !p.tank) {  // a burrower goes on from where it meets the ground
+      const way = d.bore ? d.bore[0] : 'fwd', n = d.bore ? d.bore[1] : d.reach, l = Math.hypot(p.vx, p.vy) || 1;
       if (way === 'fwd') { p.x += p.vx / l * n; p.y += p.vy / l * n; } else if (way === 'side') p.x += p.vx < 0 ? -n : n; else p.y += way === 'up' ? -n : n;
     }
     G.ex = p.x; G.ey = p.y;
@@ -565,41 +512,49 @@
   function roof(G, t) { for (let n = 0; n < 60; n++) { if (t.y - 5 - n < 0) return 99; if (solid(G, t.x, t.y - 5 - n)) return n; } return 99; }
   /** Dirt on top of it, or dirt right through it: not merely standing in a dip. */
   function buried(G, t) { return !!(solid(G, t.x, t.y - 2) || (solid(G, t.x, t.y - 5) && (solid(G, t.x - 3, t.y - 3) || solid(G, t.x + 3, t.y - 3)))); }
-  /** The gunner. It picks a weapon, then finds the shot that would land closest, the way a person finds the range:
-   *  off by a fair bit on its first try at a target and by less each time after. What it does depends on where it
-   *  stands: under dirt it first throws the dirt off; under a roof it tries something flat, rolling or burrowing,
-   *  and if nothing reaches it opens the roof a shot at a time until it has sky. It mostly will not fire something
-   *  whose blast would take it in as well. Mostly. */
+  /** The gunner. Every turn it picks who to shoot at afresh (leaning toward the weak, the near and whoever hit it
+   *  last) and a weapon from the whole list, then finds the shot that would land closest, the way a person finds the
+   *  range: off by a fair bit on its first try at a target and by less each time after. Under dirt it first blows
+   *  the dirt off. When the shot cannot get there, it goes through the ground instead: a beam straight at the
+   *  target, a cone of ground cleared toward it, or something that tunnels. It mostly will not fire something whose
+   *  blast would take it in as well. Mostly. */
   function plan(G, t) {
     const r = G.rng, foes = alive(G).filter(o => o !== t), forced = G.opts.w != null && G.opts.w !== '';
-    let d = choose(G, t), m = t.mem;
-    if (!m || m.who.dead) { let who = foes[0]; for (const f of foes) if (Math.abs(f.x - t.x) + Math.abs(f.y - t.y) < Math.abs(who.x - t.x) + Math.abs(who.y - t.y)) who = f; if (r() < 0.3) who = foes[r() * foes.length | 0]; m = t.mem = {who, shots: 0}; }
-    const dir = m.who.x < t.x ? -1 : 1, off = [0.2, 0.08, 0.03, 0.012][Math.min(3, m.shots++)] * (r() < 0.5 ? -1 : 1) * (0.5 + r() * 0.5);
-    const over = roof(G, t), boxed = over < 45, low = [0.2, 0.5, 0.9, 1.3];
-    if (!forced && buried(G, t)) d = DEF[r() < 0.6 ? 'shrug' : 'heave'];
-    t.w = d;
-    if (d.inst) {  // nothing to range: a beam is simply pointed, the others only need the barrel somewhere
-      t.ga = d.inst === 'laser' ? Math.atan2(t.y - m.who.y, m.who.x - t.x) + off * 0.6 : t.a; t.gp = 0.5;
-      if (t.ga < 0) t.ga += 6.2832;
-      return;
+    let who = foes[0], best = -1;
+    for (const f of foes) { const s = r() * 2 + (100 - f.hp) / 60 + (f === t.foe ? 1 : 0) + (Math.hypot(f.x - t.x, f.y - t.y) < 90 ? 0.5 : 0); if (s > best) { best = s; who = f; } }
+    const seen = t.seen[who.name] || 0; t.seen[who.name] = seen + 1;
+    let dir = who.x < t.x ? -1 : 1; const off = [0.2, 0.08, 0.03, 0.012][Math.min(3, seen)] * (r() < 0.5 ? -1 : 1) * (0.5 + r() * 0.5);
+    const boxed = roof(G, t) < 45, low = [0.2, 0.5, 0.9, 1.3], high = [1, 1.2, 1.42], under = buried(G, t);
+    let toward = Math.atan2(t.y - who.y, who.x - t.x), up = toward < 0.2 && toward > -1.5708 ? 0.2 : toward < 0.2 || toward > 2.94 ? 2.94 : toward;  // at the target; "up" never points below level
+    const point = (d, a) => { t.w = d; t.ga = a < 0 ? a + 6.2832 : a; t.gp = 0.5; };
+    let d = choose(G, t);
+    if (!forced) {
+      if (under) d = DEF[r() < 0.6 ? 'riot1' : 'riot2'];
+      else if (r() < 0.5 && foes.some(f => Math.hypot(f.x - t.x, f.y - t.y) < 36)) d = DEF.plasma;  // someone is right here
     }
-    let a = range(G, t, d, m.who, dir, d.els || (boxed ? low : [1, 1.2, 1.42]));
-    if (!forced && a.score > 30) {
-      // this will not get there: is there something flat, rolling or burrowing in the kit that would?
-      let tries = 0;
-      for (const n of t.kit) { const q = DEF[n]; if ((q.flat || q.bore) && tries++ < 2) { const b = range(G, t, q, m.who, dir, q.els || low); if (b.score < a.score - 10) { a = b; d = q; } } }
-      if (a.score > 30 && boxed) {  // nothing reaches from under this roof: open it, a shot at a time, until there is sky
-        if (!blastR(d) || d.apex || d.roll) d = DEF[PLAIN[r() * PLAIN.length | 0]];
-        a = {score: 99, el: 1.35, v: 90, ex: t.x + dir * 2, ey: t.y - 5 - over};
-      }
+    if (d.inst) return point(d, d.inst === 'laser' ? toward + off * 0.6 : d.inst === 'riot' ? (under ? 1.5708 : up) : d.inst === 'dirtfan' ? up : t.a);
+    const els = d.els || (boxed ? low.concat(high) : high);
+    let a = range(G, t, d, who, dir, els);
+    if (!forced && a.score > 30 && foes.length > 1) {  // out of reach: is someone else in reach?
+      let o = null; for (const f of foes) if (f !== who && (!o || Math.abs(f.x - t.x) + Math.abs(f.y - t.y) < Math.abs(o.x - t.x) + Math.abs(o.y - t.y))) o = f;
+      const od = o.x < t.x ? -1 : 1, b = range(G, t, d, o, od, els);
+      if (b.score < a.score) { a = b; who = o; dir = od; toward = Math.atan2(t.y - who.y, who.x - t.x); up = toward < 0.2 && toward > -1.5708 ? 0.2 : toward < 0.2 || toward > 2.94 ? 2.94 : toward; }
+    }
+    // a shot that falls short is still fired; one that cannot even leave where the tank sits goes through the ground instead
+    if (!forced && a.score > 30 && Math.hypot(a.ex - t.x, a.ey - t.y) < 32) {
+      const k = r();
+      if (k < 0.2) return point(DEF.laser, toward + off * 0.6);
+      if (k < 0.55) return point(DEF[r() < 0.5 ? 'riot1' : 'riot2'], up);
+      d = DEF[['dig1', 'dig2', 'dig3', 'hog1', 'hog2', 'hog3'][r() * 6 | 0]];
+      a = range(G, t, d, who, dir, low.concat(high));
     }
     const R = blastR(d), close = Math.hypot(a.ex - t.x, a.ey - t.y + 2) < R + 5;
     if (!forced && close && r() > (boxed ? 0.33 : 0.17)) {  // that blast would reach the gunner itself: think again (it does not always)
-      if (boxed) { d = DEF.sprout; a = {score: 99, el: 1.35, v: 90, ex: t.x, ey: t.y - 60}; }  // bore up through the roof instead
-      else { const b = range(G, t, DEF.pea, m.who, dir, [1, 1.2, 1.42]); if (Math.hypot(b.ex - t.x, b.ey - t.y + 2) >= 11) { d = DEF.pea; a = b; } }
+      if (boxed) return point(DEF.riot1, up);
+      const b = range(G, t, DEF.baby, who, dir, high); if (Math.hypot(b.ex - t.x, b.ey - t.y + 2) >= 11) { d = DEF.baby; a = b; }
     }
     t.w = d;
-    if (d.name === 'chalk') m.shots = 3;  // a ranging shot: the next one, fired for real, is close
+    if (d.tracer) t.seen[who.name] = 3;  // a ranging shot: the next one, fired for real, is close
     t.ga = dir > 0 ? a.el : Math.PI - a.el; t.gp = U.clamp(a.v * (1 + off), 25, VMAX) / VMAX;
   }
   function next(G) {
@@ -613,7 +568,7 @@
     }
   }
   function fire(G, t) {
-    G.trail = []; G.shots++;
+    G.trail = []; G.shots++; G.firer = t;
     if (t.w.inst) INST[t.w.inst](G, t); else G.shells.push(launch(t, t.w, t.a, t.gp * VMAX));
   }
   function go(G, p) { for (const f of p.d.hit) FX[f[0]](G, p.x, p.y, p, f[1], f[2], f[3], f[4]); }
@@ -624,6 +579,7 @@
       if (p.bore > 0) {  // boring through the ground in a straight line, until its length is used up or it comes out into the air
         p.x += p.vx * h; p.y += p.vy * h; p.bore -= 50 * h; p.dug += 50 * h;
         if (d.bore[2]) cut(G, p.x, p.y, d.bore[2], d.bore[2], true); else cutBox(G, p.x, p.y, p.x, p.y + 1, true);
+        if ((p.tr += 50 * h) > 3) { p.tr = 0; part(G, 0, p.x, p.y, -p.vx * 0.3 + (Math.random() - 0.5) * 20, -p.vy * 0.3 - 10, 0.4, css(colourAt(G, p.x | 0, p.y | 0), 1.2)); }
         const out = p.dug > 8 && !solid(G, p.x + p.vx * 0.06, p.y + p.vy * 0.06) && !solid(G, p.x + p.vx * 0.1, p.y + p.vy * 0.1);
         if (p.bore <= 0 || out || hitTank(G, p) || p.x < 2 || p.x > G.W - 3 || p.y > G.H - 3 || p.y < 2) { go(G, p); return false; }
         continue;
@@ -637,13 +593,14 @@
           p.bored = 1; p.bore = d.bore[1]; p.vx = way === 'fwd' ? p.vx * 50 / v : way === 'side' ? (p.vx < 0 ? -50 : 50) : 0; p.vy = way === 'fwd' ? p.vy * 50 / v : way === 'down' ? 50 : way === 'up' ? -50 : 0;
           dust(G, p.x, p.y, 4, css(colourAt(G, p.x | 0, p.y | 0))); continue;
         }
+        if (d.apex && p.vy < 0 && !p.tank) { dust(G, p.x, p.y, 6, d.col); return false; }  // it met something on the way up: a dud
         go(G, p); return false;
       }
-      if (tr !== 'none' && (p.tr += sp * h) > (tr === 'line' ? 1.5 : tr === 'dot' ? 4 : 6)) {
+      if (tr !== 'none' && (p.tr += sp * h) > (tr === 'line' ? 1.5 : tr === 'dot' ? 2.5 : 6)) {
         p.tr = 0;
-        if (tr === 'smoke') part(G, 2, p.x, p.y, (Math.random() - 0.5) * 8, -4, 0.6, '#9aa3b8');
+        if (tr === 'smoke') part(G, 2, p.x, p.y, (Math.random() - 0.5) * 8, d.tracer ? 0 : -4, d.tracer ? 5 : 0.6, d.tracer ? d.col : '#9aa3b8');
         else if (tr === 'spark') part(G, 0, p.x, p.y, (Math.random() - 0.5) * 10, 0, 0.35, '#ffd23c');
-        else { G.trail.push(p.x, p.y, tr === 'line' ? 1 : 0); if (G.trail.length > 165) G.trail.splice(0, 3); }
+        else { G.trail.push(p.x, p.y, tr === 'line' ? 1 : 0); if (G.trail.length > 180) G.trail.splice(0, 3); }
       }
     }
     return true;
@@ -806,6 +763,11 @@
         g.fillStyle = hot ? '#ffffff' : '#cfd6ee'; px(f.x - s * 0.5, f.y - s * 0.68, Math.round(s * 0.5), Math.max(1, Math.round(s * 0.14)));
         g.globalAlpha = 1;
       }
+      else if (f.k === 'wedge') {  // the cone a riot charge clears: its two edges and its front, running outward
+        const R = f.R * (0.3 + 0.7 * k); g.fillStyle = '#ffffff';
+        for (let i = 2; i <= R; i += 2) for (const s of [-1, 1]) px(f.x + Math.cos(f.a + s * f.half) * i, f.y - Math.sin(f.a + s * f.half) * i, 1, 1);
+        for (let i = -4; i <= 4; i++) px(f.x + Math.cos(f.a + i / 4 * f.half) * R, f.y - Math.sin(f.a + i / 4 * f.half) * R, 2, 2);
+      }
       else if (f.k === 'pop') ring(f.x, f.y, (f.R || 9) * (0.3 + 0.7 * k), '#ffffff');
       else if (f.k === 'bolt') { for (let i = 0; i < f.pts.length; i += 2) { g.fillStyle = (i + (t * 20 | 0)) % 4 ? '#3fe0ff' : '#ffffff'; px(f.pts[i], f.pts[i + 1], 2, 2); if (i) px((f.pts[i] + f.pts[i - 2]) / 2, (f.pts[i + 1] + f.pts[i - 1]) / 2, 2, 2); } }
       else if (f.k === 'mark') { if (t * 8 % 1 < 0.5) { g.fillStyle = '#ff4d4d'; px(f.x - 3, f.y - 1, 7, 1); px(f.x, f.y - 4, 1, 7); } }
@@ -829,7 +791,7 @@
   const wake = st => { if (!st.game) st.at = Date.now() + idleMs(st); };  // any finger puts the battle off again
   HP.fx.add('tanks', {
     label: 'Tank battle',
-    live: true, fps: 12,
+    live: true, fps: 15,
     options: [{key: 'idle', label: 'Starts after', type: 'select', choices: [[1, '1 minute'], [5, '5 minutes'], [15, '15 minutes'], [30, '30 minutes']], default: 5},
       {key: 'tanks', label: 'Tanks', type: 'range', min: 2, max: 6, step: 1, default: 3}],
     create(ctx) {
