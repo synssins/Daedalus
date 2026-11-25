@@ -41,6 +41,9 @@ shadow style.
 30 animated overlays are included. An overlay is drawn over the dashboard and interacts with the tile layout.
 Examples: snow, rain, fireflies, koi, vines, goose, tank battle, walkers.
 
+Live demo: [overlay test page](https://synssins.github.io/Daedalus/web/fx-demo.html?kind=snowcrew,goose&opt=always:true).
+The overlay is selected in the list under the dashboard. The tiles on this page are not connected to any device.
+
 | | |
 | --- | --- |
 | ![Snow Crew overlay](docs/img/fx-snowcrew.jpg) Snow Crew | ![Train overlay](docs/img/fx-train.jpg) Train |
