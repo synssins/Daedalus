@@ -5,7 +5,7 @@
 <title>Overlay test page</title>
 <!-- For building and checking overlays without a tablet or a house. Open from the file system.
      Address parameters, for screenshots: ?kind=frost,fireflies&p=0.6&night=1&weather=snowy&temp=20&month=10&on=1,4&w=1024&h=768&opt=count:30;always:1&t=5
-     (p = point in the growth cycle 0..1; temp in Fahrenheit; opt = options for the first kind; t = seconds to let it run before "ready") -->
+     (p = point in the growth cycle 0..1; temp in Fahrenheit; date=2026-12-24 sets the day; opt = options for the first kind; t = seconds to let it run before "ready") -->
 <style>
   html, body { margin: 0; background: #05060f; color: #cfd6ee; font: 13px system-ui, sans-serif; }
   #stage { position: relative; background: linear-gradient(180deg, #1b1f5e, #42207a 55%, #a03a6e); overflow: hidden; }
@@ -69,8 +69,9 @@ if (q.has('temp')) $('temp').value = q.get('temp'); if (q.has('month')) $('month
 const opt = {}; (q.get('opt') || '').split(';').filter(Boolean).forEach(kv => { const [k, v] = kv.split(':'); opt[k] = v === 'true' ? true : v === 'false' ? false : isNaN(+v) ? v : +v; });
 function apply() {
   const temp = +$('temp').value;
-  HP.fx.env({night: $('night').checked, elevation: $('night').checked ? -20 : 40, weather: $('weather').value, temp, freezing: 32, cold: temp <= 32, month: +$('month').value, date: new Date()});
-  const list = [...$('kind').selectedOptions].map((o, i) => Object.assign({kind: o.value}, i === 0 ? opt : {}));
+  HP.fx.env({night: $('night').checked, elevation: $('night').checked ? -20 : 40, weather: $('weather').value, temp, freezing: 32, cold: temp <= 32, month: +$('month').value, date: q.has('date') ? new Date(q.get('date') + 'T12:00:00') : new Date()});
+  const sel = [...$('kind').selectedOptions], first = sel.some(o => o.value === want[0]) ? want[0] : sel[0] && sel[0].value;  // opt goes to the kind named first in the address
+  const list = sel.map(o => Object.assign({kind: o.value}, o.value === first ? opt : {}));
   HP.fx.layout(rects); HP.fx.use(list, 'demo/one', false, ['demo/one', 'demo/two']); HP.fx.preview(+$('p').value); $('pv').textContent = Math.round($('p').value * 100) + '%';
 }
 ['kind', 'night', 'weather', 'temp', 'month'].forEach(id => $(id).addEventListener('change', apply));
@@ -82,6 +83,14 @@ window.addEventListener('error', e => { $('note').textContent += ' ERR ' + e.mes
 { const o = console.error; console.error = (...m) => { $('note').textContent += ' ERR ' + m.join(' '); o.apply(console, m); }; }
 if (q.has('steal')) { const [i, at, back] = q.get('steal').split(',').map(Number); setTimeout(() => { rects[i].el.style.visibility = 'hidden'; }, at * 1000); if (back) setTimeout(() => { rects[i].el.style.visibility = ''; }, back * 1000); }
 apply();
+// sculpt=1: every snow sculpture of the snow crew and its motorhome, side by side at double size, for a look
+if (q.has('sculpt') && HP.fx.stickTest && HP.fx.stickTest.sculpt) { const c = document.createElement('canvas'); c.width = W; c.height = H; c.style.cssText = 'position:absolute;left:0;top:0;background:#3a2a6e'; stage.append(c); const g = c.getContext('2d'); g.imageSmoothingEnabled = false;
+  for (let i = 0; i < 9; i++) g.drawImage(HP.fx.stickTest.sculpt(i, 9, true), 10 + (i % 3) * 340, 10 + Math.floor(i / 3) * 190, 324, 180); g.drawImage(HP.fx.stickTest.rv(), 20, 585, 424, 192); g.drawImage(HP.fx.stickTest.sculpt(0, 6, false), 600, 580, 324, 180); }
+// snap=counter,seconds[,zoom]: freeze the picture (and with a zoom, enlarge it around the activity) that many seconds after HP.fx.stickTest[counter] first counts (to photograph one moment)
+if (q.has('snap')) { const [k, d, z] = q.get('snap').split(','), iv = setInterval(() => { if (HP.fx.stickTest && HP.fx.stickTest[k]) { clearInterval(iv); setTimeout(() => { window.requestAnimationFrame = () => 0; const T = HP.fx.stickTest; if (+z) { stage.style.transformOrigin = '0 0'; stage.style.transform = `translate(${W / 2 - T.ax * z}px,${H / 2 - (T.ay - 20) * z}px) scale(${z})`; } }, (+d || 0) * 1000); } }, 40); }
+// poke=seconds: a finger comes down somewhere every so often; swipe=seconds: the screen is yanked sideways every so often
+if (q.has('poke')) setInterval(() => document.dispatchEvent(new PointerEvent('pointerdown', {clientX: Math.random() * W, clientY: Math.random() * H, bubbles: true})), +q.get('poke') * 1000);
+if (q.has('swipe')) setInterval(() => HP.fx.swipe(Math.random() < 0.5 ? -1 : 1), +q.get('swipe') * 1000);
 // frames per second of the live layer, measured from the page's own animation clock
 let n = 0, t0 = performance.now(); const raf = () => { n++; const t = performance.now(); if (t - t0 > 1000) { $('fps').textContent = 'page ' + n + ' fps'; n = 0; t0 = t; } requestAnimationFrame(raf); }; raf();
 setTimeout(() => { if (HP.fx.stickTest) $('note').textContent += ' ' + JSON.stringify(HP.fx.stickTest); }, (+q.get('t') || 1) * 1000 - 300);

@@ -32,14 +32,14 @@
     ok() { drop('hp:engine-try'); },
     /** Ask the Studio whether it has a different engine; if so keep it and restart into it. */
     check(server) {
-      if (preview || this.busy) return;
-      this.busy = true;
+      if (preview || Date.now() - this.busy < 20000) return;  // one at a time, but a request that never answers must not block the next for ever
+      this.busy = Date.now();
       fetch(server + '/api/engine?have=' + encodeURIComponent(version)).then(r => r.status === 200 ? r.json() : null).then(j => {
-        this.busy = false;
+        this.busy = 0;
         if (!j || !j.html || j.version === version || j.version === get('hp:engine-bad')) return;
         set('hp:engine', j);
         if ((get('hp:engine') || {}).version === j.version) location.replace('index.html' + location.search);  // only if it really was stored
-      }).catch(() => { this.busy = false; });
+      }).catch(() => { this.busy = 0; });
     },
   };
 })();

@@ -332,8 +332,17 @@
       const prey = quarry(ctx, v.x, v.y);
       if (prey) { v.chased = true; v.back = {mode: v.mode, T: v.T, x: U.clamp(v.x, 30, ctx.w - 30), y: v.y, f: v.f}; v.prey = prey; v.left = 6 + Math.random() * 6; go('chase'); }
     }
+    // a snowman with a carrot for a nose (the snow crew posts its snowmen): on some visits it goes and takes the carrot
+    if (!v.veg && /enter|look|honk|exit/.test(v.mode) && v.x > -40 && v.x < ctx.w + 40) {
+      const sm = nearest(others(ctx).filter(a => a.kind === 'snowman' && a.carrot), v.x, v.y, 1e5);
+      if (sm) { v.veg = true; if (Math.random() < 0.35 || HP.fx.demo) { v.back = {mode: v.mode, T: v.T, x: U.clamp(v.x, 30, ctx.w - 30), y: v.y, f: v.f}; v.sm = sm; v.pk = 0; go('carrot'); } }
+    }
     const foe = /look|honk|enter|exit/.test(v.mode) ? threat(q, ctx, v.x, v.y, dt) : null;
-    if (v.mode === 'train-go') {
+    if (v.mode === 'carrot') {  // up to it, a peck, and walk on
+      const sd = v.x < v.sm.x ? -1 : 1, tx = U.clamp(v.sm.x + sd * 50, 30, ctx.w - 30), ty = U.clamp(v.sm.y, 70, ctx.h - 6), dx = tx - v.x, dy = ty - v.y, dist = Math.hypot(dx, dy);
+      if (dist > 5 && !v.pk) { const st = Math.min(dist, 150 * sp * dt); v.x += dx / dist * st; v.y += dy / dist * st; if (Math.abs(dx) > 6) v.f = dx > 0 ? 1 : -1; walk = 1.5 * sp; if (v.T > 14) go('back'); }
+      else { v.pk += dt; v.f = -sd; pose = v.pk % 0.5 < 0.25 ? 'peck' : 'glare'; if (v.pk > 0.9 && !v.took) { v.took = true; call(v.sm, 'take'); } if (v.pk > 1.5) go('back'); }
+    } else if (v.mode === 'train-go') {
       // to the track, a little ahead of the train along its heading (dir, radians): there it stands and glares at
       // the headlight until the train is on it. Not for long: if the train does not come, it goes and gets it.
       const a = nearest(others(ctx).filter(o => o.kind === 'train'), v.tp.x, v.tp.y, 220);

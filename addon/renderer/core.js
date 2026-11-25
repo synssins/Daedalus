@@ -532,12 +532,19 @@ async function serverMode(server, cfg) {
     if (window.parent !== window) window.parent.postMessage({type: 'hp-ready'}, '*');
     return;
   }
+  let ws = null;
   (function listen() {  // the server says when this tablet's design changed
-    const ws = new WebSocket(server.replace(/^http/, 'ws') + '/api/events?key=' + encodeURIComponent(HP.key));
-    ws.onopen = ws.onmessage = () => pull().catch(() => {});  // on connect too: catches changes made while the server was away
-    ws.addEventListener('open', () => HP_ENGINE.check(server));  // the add-on restarts when it is updated: that is when a new engine appears
-    ws.onclose = () => setTimeout(listen, 5000);
+    const w = ws = new WebSocket(server.replace(/^http/, 'ws') + '/api/events?key=' + encodeURIComponent(HP.key));
+    w.onopen = w.onmessage = () => pull().catch(() => {});  // on connect too: catches changes made while the server was away
+    w.addEventListener('open', () => HP_ENGINE.check(server));  // the add-on restarts when it is updated: that is when a new engine appears
+    w.onclose = () => { if (ws === w) { ws = null; setTimeout(listen, 5000); } };
   })();
+  // Belt and braces: once a tablet was seen to miss an update because the reopening above never came. Every minute,
+  // ask for a newer engine anyway, and if the connection is neither open nor on its way, start it again.
+  setInterval(() => {
+    if (window.HP_ENGINE) HP_ENGINE.check(server);
+    if (ws && ws.readyState > 1) { const dead = ws; ws = null; try { dead.close(); } catch (e) {} setTimeout(() => { if (!ws) location.reload(); }, 8000); }
+  }, 60000);
 }
 
 native('ping').then(async m => {
