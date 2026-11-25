@@ -258,9 +258,13 @@
     }
     return placed;
   }
+  function ghost(st, la) { if (st.ghosts.length < 8) st.ghosts.push({x: la.gx, y: la.gy, h: la.gd * la.len / 2, a: 1}); la.d = 0; bump('ghosts'); }
   /** Its ladder lies where it was put down. It is only fetched when the figure has to leave for another level. */
   function fetchLad(st, f) {
     const la = f.lad, C = st.plats[f.pl]; f.fetch = 1;
+    // it lies on some other platform (its owner fell, fled or slid away from it): that one is left to fade, and
+    // another is carried. A ladder is never seen crossing the screen by itself.
+    if (la.d > 0 && !la.on && (Math.abs(C.y - 2 - la.gyT) >= 4 || la.gx < C.x1 - 20 || la.gx > C.x2 + 20)) { ghost(st, la); return; }
     if (la.d > 0.5 && !la.on && Math.abs(C.y - 2 - la.gyT) < 4 && Math.abs(f.x - la.gx) > 30) { f.q.push({a: 'walk', x: U.clamp(la.gx, C.x1 + 2, C.x2 - 2)}); bump('fetches'); }
   }
   /** Queue the way to a platform (and to x on it). False when there is no way. */
@@ -380,11 +384,11 @@
       const A = a.A, M = A.P, d = A.dir; f.dir = d; f.an = null; f.sled = 1; for (let j = 0; j < 10; j++) f.p[j] += (S_SLED[j] - f.p[j]) * 0.5;
       if (!a.air) {
         a.v = Math.min(250, (a.v || 30) + 300 * dt); f.x += d * a.v * dt; f.y = M.y; f.lift = colH(M, f.x) * 0.85;
-        if (d > 0 ? f.x > M.rect.x + M.rect.w + 4 : f.x < M.rect.x - 4) { a.air = 1; a.vy = -50; f.y -= f.lift; f.lift = 0; a.F = below(st, f.x + d * 18, f.y, M); }
+        if (d > 0 ? f.x > M.rect.x + M.rect.w + 4 : f.x < M.rect.x - 4) { a.air = 1; a.vy = -30; f.y -= f.lift; f.lift = 0; a.F = below(st, f.x + d * 3, f.y, M); }
       } else {
-        a.vy += 520 * dt; f.x += d * a.v * 0.36 * dt; f.y += a.vy * dt;
+        a.vy += 520 * dt; if (a.air < 4) { a.air += 14 * dt; f.x += d * 14 * dt; } f.y += a.vy * dt;  // straight down the gap beside the tile, never across the next tile's face
         if (f.y >= a.F.y) {
-          f.y = a.F.y; f.pl = a.F.i; f.x = U.clamp(f.x, a.F.x1 + 2, a.F.x2 - 2); f.sled = 0; puff(st, f.x, f.y - 6, 8); if (A.sleds.length < 10) A.sleds.push(f.x + d * 15, f.y);
+          f.y = a.F.y; f.pl = a.F.i; f.x = U.clamp(f.x, a.F.x1 + 2, a.F.x2 - 2); f.sled = 0; puff(st, f.x, f.y - 6, 8); if (A.sleds.length < 10) A.sleds.push(f.x + d * 6, f.y);
           ladFix(f); done = true; f.q.unshift({a: 'rest', an: SB.getup, tool: 0, dur: 1.1}); if (a.train) bump('trainEnd');
         }
       }
@@ -392,7 +396,7 @@
       const L = a.lead, la = L.act, A = a.A, d = A.dir; f.dir = d; f.an = null; for (let j = 0; j < 10; j++) f.p[j] += (S_SLED[j] - f.p[j]) * 0.5;
       if (!la || la.a !== 'sled') { if (a.went && L.pl !== f.pl && f.grp === A) { f.pl = L.pl; f.x = U.clamp(L.x - d * 11, st.plats[f.pl].x1 + 2, st.plats[f.pl].x2 - 2); } f.y = st.plats[f.pl].y; f.lift = 0; done = true; f.q.unshift({a: 'rest', an: SB.getup, tool: 0, dur: 1.1}); }
       else {
-        a.went = 1; f.x = L.x - d * 9 * a.off; if (la.air) { f.y = L.y; f.lift = 0; } else { f.y = A.P.y; f.lift = colH(A.P, f.x) * 0.85; }
+        a.went = 1; f.x = L.x - d * 9 * a.off; if (la.air) { f.y = L.y - 9; f.x = L.x - d * 2; f.lift = 0; } else { f.y = A.P.y; f.lift = colH(A.P, f.x) * 0.85; }
         if (a.off === 2 && Math.abs(f.x - A.cx) > 50) { f.lift = 0; f.y = A.P.y; done = true; a.fell = 1; bump('felloff'); }
       }
     }
@@ -635,7 +639,7 @@
       f.grp = null; f.mug = 0; f.bury = 0; f.tong = null; f.duck = 0;
       if (grounded(st, f)) { f.q.length = 0; f.act = null; f.lift = 0; f.shv = null; unhide(st, f); }
     }
-    if (A.grp) { st.playNext = st.clock + (st.force ? 3 : st.play * rnd(0.6, 1.4)); st.sinceRv++; } else st.gagNext = st.clock + (st.force ? 3 : st.play * rnd(0.25, 0.55));
+    if (A.grp) { st.playNext = st.clock + (st.force ? 3 : st.play * rnd(0.6, 1.4)); st.sinceRv++; st.sinceYeti++; } else st.gagNext = st.clock + (st.force ? 3 : st.play * rnd(0.25, 0.55));
   }
   /** The nearest tile to stand behind: c.Q is the platform under tile c.R, c.l and c.r the spots just clear of its sides. */
   function cover(st, f, used, min) {
@@ -767,7 +771,7 @@
     for (const P of st.plats) {
       if (!P.i || !P.ok || P.away || P.x2 - P.x1 < 118 || P.y < 120) continue;
       for (const d of [1, -1]) {
-        const ex = d > 0 ? P.rect.x + P.rect.w + 26 : P.rect.x - 26, F = below(st, ex, P.y, P);
+        const ex = d > 0 ? P.rect.x + P.rect.w + 8 : P.rect.x - 8, F = below(st, ex, P.y, P);
         if (!F.ok || F.away || ex < F.x1 + 4 || ex > F.x2 - 4 || F.y - P.y < 40) continue;
         const sc = P.y + Math.random() * 220; if (sc > bd) { bd = sc; best = {P, d}; }
       }
@@ -800,9 +804,9 @@
       const b = A.boss;
       if (!b || b.grp !== A || b.ready || A.pt > 30) {
         A.ph = 3; A.pt = 0; if (b && b.ready) bump('shooed');
-        for (const f of A.m) if (f.grp === A && !f.boss && f.ready) { f.mug = 0; f.act = null; f.q.length = 0; f.q.push(rest(SB.jump, 0.5, {face: b || f, hopH: 5}), rest(SA.stand, 2, {idle: 1})); }
+        for (const f of A.m) if (f.grp === A && !f.boss && f.ready) { f.mug = 0; f.act = null; f.q.length = 0; f.q.push(rest(SB.jump, 0.5, {face: b || f, hopH: 5})); if (f.shv) f.q.push({a: 'walk', x: f.shv.x + 6}, call(g => { g.shv = null; })); }
       }
-    } else return A.pt > 2.2;
+    } else return A.pt > 9 || (A.pt > 1.5 && A.m.every(f => f.grp !== A || f.boss || quiet(f)));
     return n < 1;
   }
   function cocoaStart(st) {
@@ -813,7 +817,8 @@
     if (!P) return;
     const sp = Math.min(27, (P.x2 - P.x1 - 8) / (n - 1)), x0 = (P.x1 + P.x2) / 2 - sp * (n - 1) / 2;
     const A = actStart(st, 'cocoa', {grp: 1, max: 160, P, ph: 0, k: 0, bx: x0 + (n - 1) * sp, idle: cocoaIdle, step: cocoaStep});
-    A.join = f => { claim(A, f); f.slot = A.k++; if (go(st, f, P, x0 + f.slot * sp)) f.q.push(call(g => { g.ready = 1; g.mug = 1; })); };
+    // each stands its shovel up in the snow beside its place, blade down, and has both hands for the mug
+    A.join = f => { claim(A, f); f.slot = A.k++; const rx = U.clamp(x0 + f.slot * sp - 10, P.x1 + 3, P.x2 - 3); if (go(st, f, P, rx)) f.q.push(call(g => { g.shv = {x: rx, y: P.y, up: 1}; }), {a: 'walk', x: x0 + f.slot * sp}, call(g => { g.ready = 1; g.mug = 1; })); };
     fr.forEach(A.join);
     return true;
   }
@@ -1045,7 +1050,71 @@
   }
 
   SEEN.sculpt = sculpt; SEEN.rv = rvSprite;  // (for the test page, which lays them all out side by side)
-  const GROUPS = {fight: fightStart, scare: booStart, sled: sledStart, cocoa: cocoaStart, snowman: st => manStart(st, 0), tableau: st => manStart(st, st.force ? 1 + st.tabN++ % 8 : 1 + (Math.random() * 8 | 0)), angel: angelStart, santa: santaStart, camper: camperStart};
+  // ---------- the yeti: a big shaggy friend who looks in round the edge of the screen ----------
+  function yetiStart(st, ctx) {
+    const m = ctx.env.month, F = st.force === 'yeti';
+    if (st.yeti || (!F && ((!st.snowing && m !== 12 && m !== 1 && m !== 2) || st.sinceYeti < 3 || Math.random() < 0.5))) return;
+    st.yeti = {sd: Math.random() < 0.5 ? -1 : 1, ph: 0, t: 0, k: 0, cocoa: F ? !(st.yetiN++ & 1) : Math.random() < 0.65, f: null, mug: 0, froze: 0, waved: 0, hx: 8, hy: -66};
+    st.sinceYeti = 0;
+    actStart(st, 'yeti', {grp: 1, max: 110, step: yetiStep, idle: idleRest, fin: () => { st.yeti = null; }});
+    return true;
+  }
+  function yetiStep(A, dt, st) {
+    const Y = st.yeti, ex = Y.sd < 0 ? 0 : st.w, G = st.plats[0], go2 = n => { Y.ph = n; Y.t = 0; }, to = k => { Y.k += U.clamp(k - Y.k, -dt * 0.8, dt * 0.8); }; Y.t += dt;
+    SEEN.ax = ex - Y.sd * 60; SEEN.ay = G.y - 50;
+    if (Y.ph === 0) { to(0.36); if (Y.t > 2.8) go2(1); }  // first a hand and an eye
+    else if (Y.ph === 1) {  // then head and shoulders: everyone stops dead
+      to(1);
+      if (Y.t > 0.3 && !Y.froze) { Y.froze = 1; bump('froze'); for (const c of st.crew) if (canTake(st, c) && !c.re) { react(c, SB.look, 2.6); c.dir = ex >= c.x ? 1 : -1; } }
+      if (Y.t > 2.8) {
+        const f = Y.cocoa ? nearTo(freeCrew(st), ex, G.y) : null;
+        if (f) { claim(A, f); if (go(st, f, G, ex - Y.sd * 60)) { Y.f = f; f.mug = 1; f.q.push(call(g => { g.ready = 1; }), rest(SB.give, 40, {dir: Y.sd, until: () => Y.ph !== 2 && Y.ph !== 3})); } else f.grp = null; }
+        if (!Y.f) Y.cocoa = false;
+        go2(2);
+      }
+    } else if (Y.ph === 2) {
+      to(1);
+      if (Y.cocoa) { const f = Y.f; if (f.grp !== A || Y.t > 50) { Y.cocoa = false; Y.t = 0; } else if (f.ready) go2(3); }  // one of them brings it a mug
+      else {  // or it only waves, and one of them waves back
+        if (Y.t > 0.4 && !Y.waved) { Y.waved = 1; bump('yetiWave'); const c = nearTo(st.crew.filter(o => canTake(st, o) && !o.guest), ex, G.y); if (c) { react(c, SA.wave, 2.2); c.dir = ex >= c.x ? 1 : -1; } }
+        if (Y.t > 3) go2(6);
+      }
+    } else if (Y.ph === 3) { if (Y.t > 0.9) { Y.mug = 1; if (Y.f.grp === A) Y.f.mug = 0; bump('yetiMug'); go2(4); } }  // takes it between two fingers
+    else if (Y.ph === 4) { if (Y.t > 3.4) { const f = Y.f; if (f.grp === A && grounded(st, f)) { f.act = null; f.q.length = 0; f.q.push(rest(SA.wave, 1.8, {dir: Y.sd})); } go2(6); } }  // a sip, a happy shiver
+    else { to(0); if (Y.k <= 0.01 && Y.t > 0.5) return true; }
+  }
+  function yetiDraw(g, st) {
+    const Y = st.yeti, c = st.clock, k = Y.k, ph = Y.ph, t = Y.t, shiver = ph === 4 && t > 1.9, hx = -34 + 60 * k + (shiver ? Math.sin(c * 46) * 1.6 : 0), FUR = '#f6f9ff', EDGE = 'rgba(112,142,200,.95)';
+    // one shaggy shape: a ring of points, every other one a tuft further out
+    const shag = (cx, cy, rx, ry, n) => { g.beginPath(); for (let i = 0; i < n; i++) { const a = i / n * 6.283, r = i & 1 ? 1.11 : 0.97; g.lineTo(cx + Math.cos(a) * rx * r, cy + Math.sin(a) * ry * r); } g.closePath(); g.fillStyle = FUR; g.fill(); g.strokeStyle = EDGE; g.lineWidth = 1.4; g.stroke(); };
+    g.save(); g.translate(Y.sd < 0 ? 0 : st.w, st.plats[0].y); if (Y.sd > 0) g.scale(-1, 1); g.lineJoin = g.lineCap = 'round';
+    shag(hx - 16, -30, 44, 46, 30); shag(hx, -90, 27, 29, 26);
+    g.strokeStyle = 'rgba(150,178,228,.9)'; g.lineWidth = 1.5; g.beginPath();  // blue shadows in the fur
+    for (const q of [[-30, -40], [-10, -28], [8, -44], [-22, -14], [2, -12], [-38, -22], [-14, -108], [6, -112]]) { g.moveTo(hx + q[0] - 3, q[1] - 3); g.lineTo(hx + q[0], q[1] + 2); g.lineTo(hx + q[0] + 3, q[1] - 3); }
+    g.stroke();
+    g.fillStyle = '#d5e4f7'; g.beginPath(); g.ellipse(hx + 6, -82, 13, 9, 0, 0, 6.3); g.fill();  // the muzzle
+    for (const x of [hx - 4, hx + 14]) {  // big round eyes (shut tight in a happy shiver)
+      if (shiver) { g.strokeStyle = '#1b2238'; g.lineWidth = 1.8; g.beginPath(); g.arc(x, -96, 4.5, Math.PI + 0.3, -0.3); g.stroke(); continue; }
+      g.fillStyle = '#fff'; g.strokeStyle = '#1b2238'; g.lineWidth = 1.3; g.beginPath(); g.arc(x, -98, 6.4, 0, 6.3); g.fill(); g.stroke(); g.fillStyle = '#1b2238'; g.beginPath(); g.arc(x + 2, -97, 2.8, 0, 6.3); g.fill(); g.fillStyle = '#fff'; g.fillRect(x + 0.6, -99, 1.5, 1.5);
+    }
+    g.fillStyle = '#4a6aa8'; g.beginPath(); g.ellipse(hx + 7, -87, 3.2, 2.2, 0, 0, 6.3); g.fill();
+    g.strokeStyle = '#1b2238'; g.lineWidth = 1.4; g.beginPath(); g.arc(hx + 7, -84, 6.5, 0.35, Math.PI - 0.35); g.stroke();
+    // the hand: gripping the edge; or out for the mug, up to the mouth, waving
+    let tx = 8, ty = -66; const u = Math.min(1, t / 0.8), e = u * u * (3 - 2 * u);
+    if (ph === 2 && !Y.cocoa) { tx = 70 + Math.sin(c * 8) * 9; ty = -108; }
+    else if (ph === 3) { tx = 8 + 34 * e; ty = -66 + 40 * e; }
+    else if (ph === 4) { const v = t < 2.6 ? e : Math.max(0, 1 - (t - 2.6) / 0.6); tx = 42 + (hx + 15 - 42) * v; ty = -26 + (-74 + 26) * v; }
+    Y.hx += (tx - Y.hx) * 0.45; Y.hy += (ty - Y.hy) * 0.45; const px = Y.hx, py = Y.hy, grip = Math.abs(px - 8) < 3 && Math.abs(py + 66) < 3;
+    if (grip) { g.beginPath(); for (let i = 0; i < 4; i++) { g.moveTo(-3, -77 + i * 7.5); g.lineTo(12 - (i === 3 ? 3 : 0), -77 + i * 7.5); } g.strokeStyle = EDGE; g.lineWidth = 8.6; g.stroke(); g.strokeStyle = FUR; g.lineWidth = 6.2; g.stroke(); }
+    else if (k > 0.5) {
+      g.beginPath(); g.moveTo(hx + 12, -46); g.quadraticCurveTo((hx + px) / 2 + 22, (py - 46) / 2 + 12, px, py); g.strokeStyle = EDGE; g.lineWidth = 15; g.stroke(); g.strokeStyle = FUR; g.lineWidth = 12.4; g.stroke();
+      g.beginPath(); g.moveTo(px, py); g.lineTo(px + 9, py - 5); g.moveTo(px, py); g.lineTo(px + 9, py + 5); if (!Y.mug) { g.moveTo(px, py); g.lineTo(px + 3, py - 9); } g.strokeStyle = EDGE; g.lineWidth = 7.6; g.stroke(); g.strokeStyle = FUR; g.lineWidth = 5.4; g.stroke();
+      if (Y.mug) { g.fillStyle = '#c8553a'; g.fillRect(px + 7, py - 3.2, 5, 6.4); }  // the mug, tiny between two huge fingers
+    }
+    g.restore();
+  }
+
+  const GROUPS = {yeti: yetiStart, fight: fightStart, scare: booStart, sled: sledStart, cocoa: cocoaStart, snowman: st => manStart(st, 0), tableau: st => manStart(st, st.force ? 1 + st.tabN++ % 8 : 1 + (Math.random() * 8 | 0)), angel: angelStart, santa: santaStart, camper: camperStart};
   const GAGS = {shove: shoveStart, icicle: icicleStart, tongue: tongueStart, fort: fortStart, bunny: bunnyStart};
   function tryStart(st, list, ctx) {
     const F = st.force, names = F ? [F] : Object.keys(list).sort(() => Math.random() - 0.5);
@@ -1177,12 +1246,20 @@
       g.save(); g.translate(J[20], J[21]); g.rotate(d * 0.25); g.fillStyle = '#f4f1e6'; g.strokeStyle = INK; g.lineWidth = 1.2; g.beginPath(); g.rect(-3.5, -9, 7, 10); g.fill(); g.stroke(); g.fillStyle = '#8b6a44'; g.fillRect(-2, -10, 4, 2); g.restore();
     } else if (f.look === 'bunny') {
       g.fillStyle = f.suit; g.strokeStyle = INK; g.lineWidth = 1.3;
-      g.beginPath(); g.ellipse(x - d * 2.2, y - R - 7.5, 2.4, 8, -d * 0.12, 0, 6.3); g.fill(); g.stroke();
-      g.beginPath(); g.ellipse(x + d * 3.5, y - R - 4.5, 2.4, 7.5, d * 1.05, 0, 6.3); g.fill(); g.stroke();  // one ear will not stay up
+      g.save(); g.translate(x, y); g.rotate(a + Math.PI / 2);  // the ears go with the head: lying down, they lie down too
+      g.beginPath(); g.ellipse(-d * 2.2, -R - 7.5, 2.4, 8, -d * 0.12, 0, 6.3); g.fill(); g.stroke();
+      g.beginPath(); g.ellipse(d * 3.5, -R - 4.5, 2.4, 7.5, d * 1.05, 0, 6.3); g.fill(); g.stroke();  // one ear will not stay up
+      g.restore();
       g.fillStyle = BONE; g.beginPath(); g.arc(x + d * 1.2, y + 0.6, R * 0.62, 0, 6.3); g.fill();
       g.fillStyle = '#fff'; g.beginPath(); g.arc(J[0] - d * 3.5, J[1] - 2, 2.8, 0, 6.3); g.fill(); g.stroke();
       g.fillStyle = f.suit; g.beginPath(); g.ellipse(J[8] + d * 1.5, J[9] - 0.5, 4, 2.2, 0, 0, 6.3); g.ellipse(J[12] + d * 1.5, J[13] - 0.5, 4, 2.2, 0, 0, 6.3); g.fill();
     } else if (f.look === 'santa') {
+      // a red coat over the line body: rounder than the body, belted, white at the hem
+      g.save(); g.translate((J[0] + J[2]) / 2, (J[1] + J[3]) / 2); g.rotate(Math.atan2(J[2] - J[0], J[1] - J[3]));
+      g.fillStyle = RED; g.strokeStyle = INK; g.lineWidth = 1.3; g.beginPath(); g.ellipse(0, 1, 6.8 * s, TOR * s * 0.5 + 4, 0, 0, 6.3); g.fill(); g.stroke();
+      g.lineCap = 'butt'; g.strokeStyle = '#fff'; g.lineWidth = 2.2; g.beginPath(); g.moveTo(-5.2 * s, TOR * s * 0.5 + 2.4); g.lineTo(5.2 * s, TOR * s * 0.5 + 2.4); g.stroke();
+      g.strokeStyle = '#1b2238'; g.lineWidth = 2.4; g.beginPath(); g.moveTo(-6.7 * s, 2.2); g.lineTo(6.7 * s, 2.2); g.stroke(); g.fillStyle = '#ffd94a'; g.fillRect(-1.7, 0.6, 3.4, 3.2);
+      g.restore();
       g.fillStyle = '#fff'; g.strokeStyle = 'rgba(105,135,188,.8)'; g.lineWidth = 1; g.beginPath(); g.arc(x + d * 1.4, y + 2.6, R + 0.4, -0.2, Math.PI + 0.2); g.closePath(); g.fill(); g.stroke();
       g.fillStyle = RED; g.strokeStyle = INK; g.lineWidth = 1.1; g.beginPath(); g.moveTo(x + d * (R + 0.6), y - 1.6); g.quadraticCurveTo(x + d * 2, y - R - 7, x - d * 4, y - R - 3); g.lineTo(x - d * (R + 6.5), y + 0.5); g.lineTo(x - d * (R + 0.6), y - 1.6); g.closePath(); g.fill(); g.stroke();
       g.lineCap = 'round'; g.strokeStyle = '#fff'; g.lineWidth = 2.6; g.beginPath(); g.moveTo(x - d * (R + 0.6), y - 1.8); g.lineTo(x + d * (R + 0.8), y - 1.8); g.stroke();
@@ -1305,9 +1382,12 @@
   function sack(g, x, y, s, a) {
     g.save(); g.translate(x, y); g.rotate(a); g.fillStyle = '#c4261f'; g.strokeStyle = INK; g.lineWidth = 1.4;
     g.beginPath(); g.moveTo(-4 * s, -13 * s); g.bezierCurveTo(-17 * s, -6 * s, -15 * s, 13 * s, 0, 13 * s); g.bezierCurveTo(15 * s, 13 * s, 17 * s, -6 * s, 4 * s, -13 * s); g.closePath(); g.fill(); g.stroke();
-    g.fillStyle = '#fff'; g.strokeStyle = 'rgba(105,135,188,.8)'; g.lineWidth = 0.9; g.beginPath();
-    for (let i = -1; i <= 1; i++) { g.moveTo(i * 4.2 * s + 3.3 * s, -14 * s); g.arc(i * 4.2 * s, -14 * s - (i ? 0 : 1.2), 3.3 * s, 0, 6.3); }
-    g.fill(); g.stroke(); g.restore();
+    // its mouth: the dark opening, and one band of white fur round it with a scalloped edge
+    g.fillStyle = '#6e1512'; g.beginPath(); g.ellipse(0, -16.5 * s, 6.5 * s, 2.2 * s, 0, 0, 6.3); g.fill(); g.stroke();
+    g.fillStyle = '#fff'; g.strokeStyle = 'rgba(150,175,218,.95)'; g.lineWidth = 0.8; g.beginPath(); g.moveTo(-8.8 * s, -16.4 * s);
+    for (let i = 0; i < 4; i++) g.arc((-6.6 + i * 4.4) * s, -16.4 * s, 2.2 * s, Math.PI, 0);
+    g.lineTo(8.8 * s, -11.6 * s); for (let i = 3; i >= 0; i--) g.arc((-6.6 + i * 4.4) * s, -11.6 * s, 2.2 * s, 0, Math.PI);
+    g.closePath(); g.fill(); g.stroke(); g.restore();
   }
   function santaDraw(g, st, dt, sc) {
     const S = st.santa, f = S.f, c = st.clock, fly = S.ph === 0 || (S.ph === 4 && S.t > 0.9), P = S.P;
@@ -1518,7 +1598,7 @@
       const flakes = []; for (let i = 0; i < 38; i++) flakes.push({x: r() * W, y: r() * H, v: 22 + r() * 30, w: 0.6 + r() * 1.2, ph: r() * 6.28, z: 1.4 + r() * 1.4});
       const layer = document.createElement('canvas'); layer.width = W; layer.height = H;
       return {plats, crew, flakes, layer, lg: layer.getContext('2d'), bits: [], balls: [], req: null, quake: 0, row: null, bumpGap: (+ctx.opts.bump || 24), rowNext: (+ctx.opts.bump || 24) * 0.6, force, on: false,
-        boss, bunny, covers, ice, iceP: null, iceDirty: true, iceF: [], stuck: [], iceN: 0, acts: [], men: [], fort: null, fortP: null, shift: null, santa: null, rv: null, rvCv: null, glow: null, wp: null, ep: null,
+        boss, bunny, covers, ice, iceP: null, iceDirty: true, iceF: [], stuck: [], iceN: 0, acts: [], men: [], ghosts: [], yeti: null, sinceYeti: 0, yetiN: 0, fort: null, fortP: null, shift: null, santa: null, rv: null, rvCv: null, glow: null, wp: null, ep: null,
         play, playNext: force ? 7 : play * 0.5, gagNext: force ? 7 : play * 0.25, tabN: 0, sinceRv: 0, work: true, fz: 0, snowing: false, rr: 0, clock: 0, look: 0, chk: 0, w: W, h: H};
     },
     // a finger dragged along a pile brushes it off, as on the plain snow overlay
@@ -1633,6 +1713,7 @@
           // while its owner works, rests or plays, a carried ladder lies on the ground; it stays there until it is fetched
           const far = la.d > 0 && (aa === 'drop' || Math.abs(f.x - la.gx) > 30 || Math.abs(C.y - 2 - la.gyT) > 4);
           const busy = !la.on && !k && (f.re || f.row || f.fear || far || (aa && !MOVING[aa]) || (!f.fetch && (la.d > 0 || f.grp)));
+          if (la.d > 0 && k > 0 && far) ghost(st, la);  // (whatever led here: it is not swung across from far away)
           if (busy && !la.d) { la.gx = C.x2 - C.x1 > la.len ? U.clamp(f.x, C.x1 + half - 6, C.x2 - half + 6) : (C.x1 + C.x2) / 2; la.gd = f.dir; la.gy = la.gyT = C.y - 2; }  // all of it on the tile, where there is room
           if (la.d) la.gy += U.clamp(la.gyT - la.gy, -500 * dt, 500 * dt);
           la.d = U.clamp((la.d || 0) + (busy ? 5 : -5) * dt, 0, 1);
@@ -1647,6 +1728,7 @@
         if (!f.noTool) {
           // the shovel: in both hands, planted to lean on, or slung across the back
           if (f.fear && !f.fear.cling) { T[0] = f.fear.sx - 13; T[1] = T[3] = f.fear.sy - 2; T[2] = f.fear.sx + 13; }  // dropped where it stood
+          else if (f.shv && f.shv.up) { T[0] = f.shv.x + 5; T[1] = f.shv.y - 28; T[2] = f.shv.x; T[3] = f.shv.y - 4; }  // stood up in the snow, blade down
           else if (f.shv) { T[0] = f.shv.x - 13; T[1] = T[3] = f.shv.y; T[2] = f.shv.x + 13; }                         // dropped in a fright
           else if (f.tool === 1) { const a = (f.p[11] + f.p[10]) * D, vx = f.dir * Math.sin(a), vy = -Math.cos(a); T[0] = J[16] - vx * 11 * s; T[1] = J[17] - vy * 11 * s; T[2] = J[16] + vx * 15 * s; T[3] = J[17] + vy * 15 * s; reach(f, 1, T[0], T[1]); }
           else if (f.ov && f.ov.k && !f.ov.cling && f.ov.t < f.ov.an.len - 0.6) {  // knocked out of the hands: it spins off and lies there until picked up
@@ -1684,6 +1766,10 @@
         if (A.heap) { const h = A.heap; snow.moveTo(h.x + 9, h.y); snow.arc(h.x, h.y, 9, 0, 6.3); snow.moveTo(h.x - 3, h.y - 9); snow.arc(h.x - 7, h.y - 9, 4, 0, 6.3); snow.moveTo(h.x + 11, h.y - 8); snow.arc(h.x + 7, h.y - 8, 4, 0, 6.3); }
         if (A.sleds) for (let i = 0; i < A.sleds.length; i += 2) { const x = A.sleds[i], y = A.sleds[i + 1] - 1, d = A.dir; shafts.moveTo(x - d * 11, y); shafts.lineTo(x + d * 11, y); shafts.quadraticCurveTo(x + d * 17, y, x + d * 16, y - 6); }
       }
+      for (let i = st.ghosts.length - 1; i >= 0; i--) {  // ladders left behind, fading
+        const c = st.ghosts[i]; if ((c.a -= dt * 0.9) <= 0) { st.ghosts.splice(i, 1); continue; }
+        g.globalAlpha = c.a; g.strokeStyle = '#d6ae72'; g.lineWidth = 1.7; g.beginPath(); g.moveTo(c.x - c.h, c.y - 3.4); g.lineTo(c.x + c.h, c.y - 3.4); g.moveTo(c.x - c.h, c.y + 3.4); g.lineTo(c.x + c.h, c.y + 3.4); g.stroke(); g.globalAlpha = 1;
+      }
       g.lineCap = 'round';
       g.strokeStyle = INK; g.lineWidth = 3.4; g.stroke(rails);
       g.strokeStyle = '#d6ae72'; g.lineWidth = 1.7; g.stroke(rails);
@@ -1694,6 +1780,7 @@
       for (const f of st.crew) if (f.gift && !f.gone) { if (st.clock - f.gift > 80) f.gift = 0; else present(g, f.J[0] - f.dir * 6, f.J[1] - 5, f.n >> 1); }  // Santa's present, kept under the arm for a while
       if (stuckF && stuckF.tong) { const f = stuckF; g.lineCap = 'round'; g.strokeStyle = '#ff7f96'; g.lineWidth = 2.2; g.beginPath(); g.moveTo(f.J[4] + f.dir * HR * f.s * 0.8, f.J[5] + 1.5); g.lineTo(f.tong.x, f.tong.y); g.stroke(); }
       g.fillStyle = '#c8553a'; g.fill(mugs);
+      if (st.yeti) yetiDraw(g, st);
       if (st.rv) rvDraw(g, st, dt);
       if (st.santa) santaDraw(g, st, dt, sc);
       g.fillStyle = 'rgba(247,251,255,.97)'; g.fill(snow); g.lineWidth = 1; g.strokeStyle = 'rgba(110,140,190,.7)'; g.stroke(snow);
