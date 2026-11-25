@@ -2,7 +2,8 @@
 
 ## Description
 
-Wall-tablet dashboards for Home Assistant. You design them on a grid inside Home Assistant, and old iPads draw them.
+Daedalus is a wall-tablet dashboard system for Home Assistant. Dashboards are designed on a grid in a Home Assistant
+add-on and displayed by a tablet app.
 
 ![A dashboard on a tablet](docs/img/panel.png)
 
@@ -14,7 +15,7 @@ Wall-tablet dashboards for Home Assistant. You design them on a grid inside Home
 design it is given. It keeps a copy, so it starts without the server.
 
 Tablets never hold a Home Assistant token. They reach Home Assistant through the Workshop with their own key,
-and the key stops working when you remove the tablet.
+and the key stops working when the tablet is removed.
 
 ## Workshop
 
@@ -73,7 +74,7 @@ features.
 
 ## Develop
 
-Run the Workshop on a PC against your Home Assistant:
+Run the Workshop on a PC against a Home Assistant instance:
 
 ```sh
 cd addon
