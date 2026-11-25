@@ -407,6 +407,7 @@
     /** A cone of ground gone, the way the barrel points and only so far. What is above it stays up. n: [range, half angle]. */
     riot(G, t) {
       const R = t.w.n[0], half = t.w.n[1], cx = Math.cos(t.a), cy = -Math.sin(t.a), x0 = t.x + 0.5, y0 = t.y - 4, k = Math.tan(half);
+      cutBox(G, t.x - 5, t.y - 5, t.x + 5, t.y, true);
       for (let s = 2; s <= R; s += 2) { const w = Math.max(2, Math.round(2 + s * k)); cut(G, x0 + cx * s, y0 + cy * s, w, w, true); }
       G.fx.push({k: 'wedge', x: x0, y: y0, a: t.a, half, R, t: 0.4, T: 0.4}); dust(G, x0 + cx * R * 0.5, y0 + cy * R * 0.5, 10, '#ffffff');
     },
@@ -526,13 +527,14 @@
     let dir = who.x < t.x ? -1 : 1; const off = [0.2, 0.08, 0.03, 0.012][Math.min(3, seen)] * (r() < 0.5 ? -1 : 1) * (0.5 + r() * 0.5);
     const boxed = roof(G, t) < 45, low = [0.2, 0.5, 0.9, 1.3], high = [1, 1.2, 1.42], under = buried(G, t);
     let toward = Math.atan2(t.y - who.y, who.x - t.x), up = toward < 0.2 && toward > -1.5708 ? 0.2 : toward < 0.2 || toward > 2.94 ? 2.94 : toward;  // at the target; "up" never points below level
+    const again = t.w && t.w.inst === 'riot', dig = () => DEF[['dig1', 'dig2', 'dig3', 'hog1', 'hog2', 'hog3'][r() * 6 | 0]];
     const point = (d, a) => { t.w = d; t.ga = a < 0 ? a + 6.2832 : a; t.gp = 0.5; };
     let d = choose(G, t);
     if (!forced) {
-      if (under) d = DEF[r() < 0.6 ? 'riot1' : 'riot2'];
+      if (under && !again) d = DEF[r() < 0.6 ? 'riot1' : 'riot2'];
       else if (r() < 0.5 && foes.some(f => Math.hypot(f.x - t.x, f.y - t.y) < 36)) d = DEF.plasma;  // someone is right here
     }
-    if (d.inst) return point(d, d.inst === 'laser' ? toward + off * 0.6 : d.inst === 'riot' ? (under ? 1.5708 : up) : d.inst === 'dirtfan' ? up : t.a);
+    if (d.inst) return point(d, d.inst === 'laser' ? toward + off * 0.6 : d.inst === 'riot' ? up : d.inst === 'dirtfan' ? up : t.a);
     const els = d.els || (boxed ? low.concat(high) : high);
     let a = range(G, t, d, who, dir, els);
     if (!forced && a.score > 30 && foes.length > 1) {  // out of reach: is someone else in reach?
@@ -544,14 +546,16 @@
     if (!forced && a.score > 30 && Math.hypot(a.ex - t.x, a.ey - t.y) < 32) {
       const k = r();
       if (k < 0.2) return point(DEF.laser, toward + off * 0.6);
-      if (k < 0.55) return point(DEF[r() < 0.5 ? 'riot1' : 'riot2'], up);
-      d = DEF[['dig1', 'dig2', 'dig3', 'hog1', 'hog2', 'hog3'][r() * 6 | 0]];
+      if (k < 0.55 && !again) return point(DEF[r() < 0.5 ? 'riot1' : 'riot2'], up);
+      d = dig();
       a = range(G, t, d, who, dir, low.concat(high));
     }
     const R = blastR(d), close = Math.hypot(a.ex - t.x, a.ey - t.y + 2) < R + 5;
     if (!forced && close && r() > (boxed ? 0.33 : 0.17)) {  // that blast would reach the gunner itself: think again (it does not always)
-      if (boxed) return point(DEF.riot1, up);
-      const b = range(G, t, DEF.baby, who, dir, high); if (Math.hypot(b.ex - t.x, b.ey - t.y + 2) >= 11) { d = DEF.baby; a = b; }
+      if (boxed && !again) return point(DEF.riot1, up);
+      if (boxed) { d = dig(); a = range(G, t, d, who, dir, low.concat(high)); }
+      else {
+      const b = range(G, t, DEF.baby, who, dir, high); if (Math.hypot(b.ex - t.x, b.ey - t.y + 2) >= 11) { d = DEF.baby; a = b; } }
     }
     t.w = d;
     if (d.tracer) t.seen[who.name] = 3;  // a ranging shot: the next one, fired for real, is close
