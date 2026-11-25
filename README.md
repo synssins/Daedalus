@@ -12,13 +12,21 @@ Daedalus is a wall-tablet dashboard system for Home Assistant. It has two compon
 Tablets do not store a Home Assistant token. Each tablet is issued its own key and connects to Home Assistant
 through the Workshop. Removing a tablet in the Workshop revokes its key.
 
-![Dashboard rendered by Daedalus Panel](docs/img/panel.png)
+![Dashboard rendered by Daedalus Panel](docs/img/dash-home.jpg)
 
 ## Features
 
+### Dashboards
+
+Tiles are placed freely on the grid and can be grouped by room or by function. A dashboard has one or more pages.
+Each tile can use the theme or its own look: fill, gradient, transparency, frosted glass, border, corner radius,
+shadow style.
+
+![Dashboard page with a camera tile](docs/img/dash-outside.jpg)
+
 ### Editor
 
-![Dashboard editor](docs/img/workshop.png)
+![Dashboard editor](docs/img/editor.jpg)
 
 - Snap-grid layout with drag and resize.
 - Live preview that uses the tablet renderer and current Home Assistant state.
@@ -33,7 +41,11 @@ through the Workshop. Removing a tablet in the Workshop revokes its key.
 30 animated overlays are included. An overlay is drawn over the dashboard and interacts with the tile layout.
 Examples: snow, rain, fireflies, koi, vines, goose, tank battle, walkers.
 
-![Walkers overlay](docs/img/walkers.png)
+| | |
+| --- | --- |
+| ![Snow Crew overlay](docs/img/fx-snowcrew.jpg) Snow Crew | ![Train overlay](docs/img/fx-train.jpg) Train |
+| ![Goose taking a tile](docs/img/fx-goose-steal.jpg) Goose taking a tile | ![Goose chasing the Snow Crew](docs/img/fx-goose-crew.jpg) Goose chasing the Snow Crew |
+| ![Goose derailing a train](docs/img/fx-goose-train.jpg) Goose derailing a train | ![Walkers overlay](docs/img/fx-walkers.jpg) Walkers |
 
 ## Installation
 
@@ -99,3 +111,7 @@ connect to the development instance.
 | `addon/server/` | Workshop server (Python, aiohttp) |
 | `addon/studio/` | Workshop page and editor |
 | `addon/renderer/` | Copy of `web/` served by the add-on |
+
+## Credits
+
+Background photo in the screenshots: "Snowy mountains at dusk" by Nitish Meena, CC0, via Wikimedia Commons.
