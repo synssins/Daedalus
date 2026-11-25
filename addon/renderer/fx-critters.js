@@ -59,12 +59,12 @@
   // ---------- the world the creatures walk on ----------
   // Tile tops are the platforms. Tiles side by side at the same height with only a small gap count as one
   // platform, so a creature strolls along a whole row; the screen's bottom edge is the floor under everything.
-  function world(ctx, S) {
+  function world(ctx, S, join = 22) {  // join: the widest gap a row is walked across (below zero: every gap is a drop)
     const tiles = ctx.rects.filter(r => !r.hidden && !r.flat), plats = [], of = new Map();
     for (const r of tiles.slice().sort((a, b) => a.x - b.x)) {
       const seg = {x1: r.x, x2: r.x + r.w, y: r.y, r: Math.min(r.r || 0, r.w / 2, r.h / 2), rect: r};
       let p = null;
-      for (const q of plats) { const l = q.segs[q.segs.length - 1], gap = seg.x1 - l.x2; if (Math.abs(l.y - seg.y) <= 6 && gap > -4 && gap <= 22) { p = q; break; } }
+      for (const q of plats) { const l = q.segs[q.segs.length - 1], gap = seg.x1 - l.x2; if (Math.abs(l.y - seg.y) <= 6 && gap > -4 && gap <= join) { p = q; break; } }
       if (!p) plats.push(p = {segs: [], x1: seg.x1, x2: seg.x2, dip: 2 * S});
       p.segs.push(seg); p.x2 = seg.x2; of.set(r, p);
     }
@@ -91,6 +91,8 @@
     }
     return null;
   }
+  /** The tile this point is inside, if any. */
+  function inTile(W, x, y) { for (const r of W.tiles) if (x > r.x && x < r.x + r.w && y > r.y && y < r.y + r.h) return r; return null; }
   /** Is this point over the middle of a tile (where its label is)? Creatures there are left alone by taps. */
   function deep(W, x, y) { for (const r of W.tiles) { const m = Math.min(r.w, r.h) * .15; if (x > r.x + m && x < r.x + r.w - m && y > r.y + m && y < r.y + r.h - m) return true; } return false; }
 
@@ -141,7 +143,9 @@
         const mg = (def.edge || 0) * S + 4; if (c.dir < 0 ? nx < mg : nx > W.w - mg) { fire(c, 'screen', W); return; }  // coming to the side of the screen
         const r = wallAhead(c, nx, W); if (r) { c.wall = r; fire(c, 'wall', W); return; }
         for (const o of W.list) if (o !== c && o.s.solid && o.plat === p && (o.x - c.x) * c.dir > 0 && Math.abs(o.x - nx) < def.half * 2 * S) { fire(c, 'bump', W); return; }
-        if (nx < p.x1 || nx > p.x2) { fire(c, 'edge', W); if (c.s.move === 'air') { c.skip = p; c.x = nx + c.dir * S; } return; }
+        if (nx < p.x1 || nx > p.x2) { fire(c, 'edge', W); if (c.s.move === 'air') { c.skip = p; c.x = nx + c.dir * S;
+          if (def.snug) { const e = c.dir > 0 ? p.x2 : p.x1; for (const r of W.tiles) { const sd = c.dir > 0 ? r.x : r.x + r.w, d = (sd - e) * c.dir; if (d > 0 && d < 40 && r.y < c.y + 4 && r.y + r.h > c.y + 4) c.x = (e + sd) / 2; } }  // down the middle of the gap to the next tile
+        } return; }
         // walking onto the foot of a stair somebody built here
         for (const q of W.plats) if (q.stair && q.base === p && q.dir === c.dir && q.n > 1 && (q.x0 - c.x) * c.dir >= -4 && (q.x0 - nx) * c.dir < 0) c.plat = q;
         c.x = nx; c.y = ground(c.plat, nx);
@@ -152,7 +156,12 @@
       }
     } else if (m === 'air') {
       c.vy = Math.min(s.vmax || 420, c.vy + 1100 * dt);
-      const ny = c.y + c.vy * dt, mg = (def.edge || 0) * S + 4, nx = U.clamp(c.x + c.dir * (s.vx || 0) * S * dt, mg, W.w - mg);
+      let ny = c.y + c.vy * dt; const mg = (def.edge || 0) * S + 4; let nx = U.clamp(c.x + c.dir * (s.vx || 0) * S * dt, mg, W.w - mg);
+      if (def.snug) {  // tiles are solid to them in the air too: a head bumps on an underside, a drift stops at a side
+        const T = def.tall * S;
+        if (c.vy < 0 && inTile(W, c.x, ny - T)) { c.vy = 0; ny = c.y; }
+        if (nx !== c.x && (inTile(W, nx, ny - S) || inTile(W, nx, ny - T))) nx = c.x;
+      }
       if (c.vy > 0) {
         let hit = null, hy = 1e9; const tol = def.snug ? 0 : def.half * S * .8;  // a near miss of a tile's corner still lands on it (not for the snug: they fall past)
         for (const p of W.plats) {
@@ -291,7 +300,7 @@
     states: {
       drop:  {frames: ['fall0', 'fall1'], ft: .12, move: 'air', soft: 1, fade: 5, on: {land: 'walk', tap: 0}},
       walk:  {frames: ['walk0', 'walk1'], ft: .16, vx: 10, dur: [3, 8], enter: 'stride', next: {blocker: 'block', builder: 'build', digger: 'bore', miner: 'bore', _: 'walk'},
-        on: {notice: 'gawk', jolt: 'slip', edge: {floater: 'glide', builder: 'build', _: 'fall'}, wall: {climber: 'climb', tunneler: 'dig', _: 'turn'}, bump: 'turn', screen: 'guard', exit: 'hopin'}},
+        on: {notice: 'gawk', jolt: 'slip', edge: {floater: 'glide', builder: 'build', _: 'fall'}, wall: {climber: 'climb', tunneler: 'dig', _: 'turn'}, bump: 'turn', screen: 'guard', exit: 'hopin', pit: 'plunge'}},
       turn:  {frames: ['walk0'], enter: 'flip', dur: 0, next: 'walk'},
       // a fall of more than two tiles ends badly, unless it has the leaf
       fall:  {frames: ['fall0', 'fall1'], ft: .12, move: 'air', each: 'chute', on: {land: 'walk', crash: 'splat'}},
@@ -308,13 +317,14 @@
       daze:  {frames: ['fall0'], ft: .3, tick: 'stars', dur: 1.3, next: 'back', on: {tap: 0}},
       build: {frames: ['build0', 'build1'], ft: .15, enter: 'stair', tick: 'brick', on: {built: 'walk'}},
       // nobody may damage a real tile: dust, then it slips behind the tile and comes out at the far side (tunneler)
-      dig:   {frames: ['build0', 'build1'], ft: .12, tick: 'dust', dur: 1.3, next: 'sink'},
-      sink:  {frames: ['build1'], fade: -3.5, dur: .3, next: 'rise'},
-      rise:  {frames: ['fall0', 'fall1'], ft: .12, move: 'air', enter: 'through', fade: 3.5, soft: 1, on: {land: 'walk'}},
-      // ... or out of its underside (digger: straight below; miner: below and further on)
-      bore:  {frames: ['build0', 'build1'], ft: .12, enter: 'spot', tick: 'grit', dur: 1.1, next: 'sunk'},
-      sunk:  {frames: ['build1'], fade: -3.5, dur: .3, next: 'drip'},
-      drip:  {frames: ['fall0', 'fall1'], ft: .12, move: 'air', enter: 'under', fade: 3.5, each: 'chute', on: {land: 'walk', crash: 'splat'}},
+      dig:   {frames: ['build0', 'build1'], ft: .12, enter: 'aim', tick: 'dust', dur: .8, next: 'gnaw'},
+      gnaw:  {frames: ['build0', 'build1'], ft: .12, move: 'free', vx: 7, enter: 'open', each: 'cut', tick: 'dust'},
+      // ... or down through the one it stands on (digger: straight down; miner: down and forward)
+      bore:  {frames: ['build0', 'build1'], ft: .12, enter: 'spot', tick: 'grit', dur: .8, next: {miner: 'mine', _: 'delve'}},
+      delve: {frames: ['build0', 'build1'], ft: .12, move: 'free', vy: 9, enter: 'open', each: 'cut', tick: 'grit'},
+      // a shaft somebody dug stays open while it is in use: whoever walks over it goes down it
+      plunge: {frames: ['fall0', 'fall1'], ft: .12, move: 'free', vy: 60, enter: 'dropin', each: 'sink', on: {tap: 0}},
+      mine:  {frames: ['build0', 'build1'], ft: .12, move: 'free', vy: 7, vx: 5, enter: 'open', each: 'cut', tick: 'grit'},
       // thrown by a bomber going off next to it
       blown: {frames: ['fall0', 'fall1'], ft: .1, move: 'air', jump: 230, vx: 14, spin: 1.4, on: {land: 'daze', crash: 'splat', tap: 0}},
       wave:  {frames: ['wave0', 'wave1', 'wave0', 'wave1', 'wave0', 'wave1'], ft: .16, once: 1, enter: 'reroll', next: {blocker: 'block', builder: 'build', digger: 'bore', miner: 'bore', _: 'walk'}},
@@ -347,16 +357,25 @@
       grit(c, W) { burst(W, c.x + (c.role === 'miner' ? c.dir * 3 * W.S : 0), c.y - W.S, 3, ['#fff3dc', '#e9dcc6', '#c4b299'], 70, {g: 300}); },
       atdoor(c, W) { c.x = W.door.x; },
       saved(c, W) { TEST.home++; W.saved = (W.saved + 1) % 100; burst(W, c.x, c.y - 9 * W.S, 3, ['#ffe45c'], 50, {star: 1, life: .7}); },
-      through(c, W) {
-        const r = c.wall, h = c.def.half * W.S; c.role = 'walker'; if (!r) return;
-        const x = c.dir > 0 ? r.x + r.w + h + 2 : r.x - h - 2;
-        if (x < 8 || x > W.w - 8) c.dir = -c.dir; else c.x = x;  // nothing but the screen's edge behind this tile: come back out
+      aim(c, W) {
+        const r = c.hole = c.wall, S = W.S, far = r && (c.dir > 0 ? r.x + r.w : r.x), mg = 9 * S + 8;
+        if (!r || far < mg || far > W.w - mg) { c.role = 'walker'; c.dir = -c.dir; go(c, 'walk', W); }  // nothing but the screen's edge behind this tile
       },
       spot(c, W) { c.hole = tileAt(c, W); if (!c.hole) { c.role = 'walker'; go(c, 'walk', W); } },  // nothing here to go down through
-      under(c, W) {
-        const r = c.hole, h = c.def.half * W.S, mine = c.role === 'miner'; c.role = 'walker'; if (!r) return;
-        if (mine) c.x = U.clamp(c.x + c.dir * r.h * .6, r.x + h, r.x + r.w - h);
-        c.y = c.y0 = r.y + r.h + 2; c.vy = 0;
+      // The hole it cuts is painted dark on the tile and closes again afterwards: the real tile is never touched.
+      open(c, W) {
+        const S = W.S, t = c.st === 'gnaw', T = c.def.tall * S, x = t ? c.x + c.dir * c.def.half * S : c.x, up = t ? T / 2 : 0;
+        c.kerf = {x0: x, y0: c.y - up, x1: x, y1: c.y - up, up, w: t ? T + 2 : 2 * c.def.half * S + 2, t: W.t, r: c.hole}; W.holes.push(c.kerf);
+      },
+      cut(c, W) {
+        const r = c.hole, k = c.kerf, h = c.def.half * W.S; k.x1 = c.x; k.y1 = c.y - k.up; k.t = W.t;
+        if (c.y > r.y + r.h + 2 || c.x < r.x - h - 2 || c.x > r.x + r.w + h + 2) {  // out of the far side
+          if (c.st === 'delve') { W.spots.push(k.spot = {x: k.x0, plat: W.of.get(r), ev: 'pit', r: h, lead: 0, k}); }
+          c.role = 'walker'; go(c, 'fall', W);
+        }
+      },
+      dropin(c) { c.kerf = c.spot.k; c.x = c.kerf.x0; },
+      sink(c, W) { const k = c.kerf; k.t = W.t; if (c.y > k.r.y + k.r.h + 2) go(c, 'fall', W);
       },
       // It bursts: the bricks near it are gone and whoever stood close is thrown clear (a blocker too).
       bang(c, W) {
@@ -369,20 +388,22 @@
       // top is a short way ahead, level or somewhat higher, the stair is aimed at it; with the door higher up it
       // goes on until it is as high as the door; otherwise it is twelve bricks.
       stair(c, W) {
-        const S = W.S, p = c.plat, up = c.y - W.door.y; let n = up > 10 ? Math.min(60, Math.ceil(up / S) + 3) : 12, bh = S; c.role = 'walker';
-        if (W.live >= 10) { go(c, 'walk', W); return; }  // enough bricks about already
+        const S = W.S, p = c.plat, up = c.y - W.door.y; let n = up > 10 ? Math.min(100, Math.ceil(up / S) + 3) : 12, bh = S, to = null; c.role = 'walker';
+        if (W.live >= Math.max(10, W.list.length / 4)) { go(c, 'walk', W); return; }  // enough bricks about already
         for (const q of W.plats) {
           if (q === p || q.stair || q === W.floor) continue;
           const gap = c.dir > 0 ? q.x1 - c.x : c.x - q.x2, rise = c.y - q.segs[c.dir > 0 ? 0 : q.segs.length - 1].y;
-          if (gap > 16 && gap < 130 && rise > -8 && rise < 48) { n = Math.ceil((gap + 8) / (2 * S)); bh = rise / n; break; }
+          // a bridge: it comes down a little above the far tile, so one walking back passes under it, into the gap
+          if (gap > 2 && gap < 130 && rise > -8 && rise < 48) { n = Math.ceil((gap + c.def.half * S + 6) / (2 * S)); bh = (rise + 4 * S) / n; to = q; break; }
         }
-        c.steps = {stair: 1, base: p, x0: c.x, y0: c.y, dir: c.dir, bw: 2 * S, bh, n: 0, max: n, born: W.t, x1: c.x, x2: c.x};
+        c.steps = {stair: 1, base: p, x0: c.x, y0: c.y, dir: c.dir, bw: 2 * S, bh, n: 0, max: n, born: W.t, x1: c.x, x2: c.x, to};
         W.plats.push(c.steps); W.live++;
       },
       brick(c, W) {
         if (c.f) return;
-        const q = c.steps, nx = q.x0 + q.dir * (q.n + .5) * q.bw, wall = wallAhead(c, nx, W);
-        if (q.n >= q.max || nx < 8 || nx > W.w - 8 || wall || c.y < 14 * W.S) {
+        const q = c.steps, nx = q.x0 + q.dir * (q.n + .5) * q.bw, side = wallAhead(c, nx, W), wall = side && W.of.get(side) !== q.to ? side : null;
+        const roof = inTile(W, nx, q.y0 - (q.n + 1) * q.bh - c.def.tall * W.S);  // a tile's underside overhead: no further
+        if (q.n >= q.max || nx < 8 || nx > W.w - 8 || wall || roof || c.y < 14 * W.S) {
           if (!q.n) q.dead = W.cut = 1;
           // a tile in the way with the door still higher up: turn round and build on the other way, in a zigzag
           if (wall && q.n && c.y - W.door.y > 10) { c.dir = -c.dir; go(c, 'build', W); } else fire(c, 'built', W);
@@ -400,7 +421,7 @@
     const S = W.S, rnd = Math.random, all = ctx.rects.filter(r => !r.hidden), tiles = W.tiles.filter(r => r.type !== 'clock' && r.w >= 16 * S);
     const tops = tiles.filter(r => !all.some(o => o !== r && o.y + o.h <= r.y + 2 && o.x < r.x + r.w - 4 && o.x + o.w > r.x + 4));
     const any = a => a[Math.floor(rnd() * a.length)];
-    W.spots.length = 0; W.saved = 0; W.wait = .5; W.left = U.clamp(Math.round(+ctx.opts.count || 40), 3, 80); W.dir = rnd() < .5 ? 1 : -1; TEST.round++;
+    W.spots.length = 0; W.saved = 0; W.wait = .5; W.left = U.clamp(Math.round(+ctx.opts.count || 40), 3, 200); W.dir = rnd() < .5 ? 1 : -1; TEST.round++;
     if (!tiles.length) { W.hatch = {x: W.w * .3, y: 20}; W.door = {x: W.w * .7, plat: W.floor, y: W.h}; }  // a page with no tiles
     else {
       const h = any(tops.length ? tops : tiles), hx = h.x + h.w * (.25 + rnd() * .5), hp = W.of.get(h);
@@ -424,16 +445,18 @@
     if (wall) { if (up > 10 && wall.y < c.y - 8) c.role = 'climber'; else if (ahead) c.role = 'tunneler'; return; }
     if (brink < 14 * S) {
       if (dropAt(W, end + c.dir * (S + 2), c.y) > W.hard) { if ((up < -10 && Math.random() < .5) || !post(40)) c.role = 'floater'; }  // a deadly drop: stop them here, or take the leaf
-      else if (ahead && up > -10) c.role = 'builder';  // bridge it
+      else if (ahead && up > -10) { c.role = 'builder'; go(c, 'build', W); }  // bridge it
       return;
     }
     if (up > 10) {  // the door is higher: stairs, begun about where they will come out by it; walking away from it, stop and turn the rest
-      if (!ahead) post(25);
+      if (W.tiles.some(r => r.x < c.x && r.x + r.w > c.x && r.y + r.h <= c.y - 4 && r.y + r.h > c.y - 80)) c.role = 'climber';  // a tile overhead: up the next gap
+      else if (!ahead) post(25);
       else if (Math.abs(D.x - c.x) < 2 * up + 20 * S && !W.plats.some(q => q.stair && !q.dead && q.base === p && q.dir === c.dir && (q.x0 - c.x) * c.dir > -4 && (q.x0 - c.x) * c.dir < 240)) { c.role = 'builder'; go(c, 'build', W); }
       return;
     }
     if (up < -10) {  // the door is lower: down through the tile, once over the row the door is on
       const r = tileAt(c, W);
+      if (W.spots.some(sp => sp.k && !sp.off && sp.plat === p) || W.list.some(o => o.plat === p && (o.st === 'bore' || o.st === 'delve' || o.st === 'mine'))) return;  // a way down is there, or coming
       if (r && c.x > D.plat.x1 + 4 * S && c.x < D.plat.x2 - 4 * S && dropAt(W, c.x, r.y + r.h + 2) <= W.hard) { c.role = Math.random() < .3 ? 'miner' : 'digger'; go(c, 'bore', W); }
       else if (!ahead) post(25);
       return;
@@ -441,12 +464,22 @@
     if (!ahead) post(25);  // level with the door, on another row of tiles
   }
 
+  /** A climber passing under a gap in the row above goes up it, along the side of the tile beyond. */
+  function flue(c, W) {
+    const S = W.S, T = c.def.tall * S;
+    for (const r of W.tiles) {
+      const b = r.y + r.h, side = c.dir > 0 ? r.x : r.x + r.w, d = (side - c.x) * c.dir;
+      if (b > c.y - T / 2 || b < c.y - T - 40 || d < 3 * S || d > 5 * S || inTile(W, side - c.dir * 3, b - 4)) continue;
+      c.wall = r; go(c, 'climb', W); return;
+    }
+  }
+
   HP.fx.add('walkers', {
     label: 'Walkers',
     live: true, fps: 12,
-    options: [{key: 'count', label: 'How many', type: 'range', min: 3, max: 80, step: 1, default: 40}, SIZE, DROP],
+    options: [{key: 'count', label: 'How many', type: 'range', min: 3, max: 200, step: 1, default: 40}, SIZE, DROP],
     create(ctx) {
-      const S = scale(ctx), W = world(ctx, S);
+      const S = scale(ctx), W = world(ctx, S, -9); W.holes = [];
       W.sh = sheet(ACORN_ART, S); W.props = sheet(PROPS_ART, S); W.font = sheet(FONT_ART, 2); prep(ACORN, W.sh);
       const hs = W.tiles.map(r => r.h).sort((a, b) => a - b);
       W.hard = hs.length ? 2 * hs[hs.length >> 1] + 4 * S : 230;  // two tiles of this layout, and a little
@@ -481,6 +514,7 @@
         if (W.t - c.born > 150 && !c.fuse && !c.s.solid) c.fuse = W.t + 5;  // shut in somewhere: do not pile up for ever
         if (c.fuse && W.t >= c.fuse && !c.s.end && c.st !== 'hopin' && c.st !== 'home' && c.st !== 'splat') { go(c, 'boom', W); continue; }
         if (c.st === 'walk' && (c.role === 'walker' || c.role === 'floater' || c.role === 'climber') && c.plat && Math.random() < dt * 2) hand(c, W);
+        if (c.st === 'walk' && c.role === 'climber' && c.plat) flue(c, W);
         step(c, dt, W); if (c.dead) continue;
         W.list[n++] = c; if (!c.s.solid) busy = true;
         if (c.x < 0 || c.x > W.w) TEST.off++;
@@ -507,6 +541,14 @@
         g.globalAlpha = 1;
       }
       if (W.cut) { W.plats = W.plats.filter(q => !q.dead); W.cut = 0; }
+      let hn = 0;
+      for (const k of W.holes) {  // what the diggers cut: dark, then closing
+        const age = W.t - k.t; if (age > 10) { if (k.spot) k.spot.off = 1; continue; } W.holes[hn++] = k;
+        g.globalAlpha = .85 * Math.min(1, (10 - age) / 3); g.strokeStyle = '#140b1e'; g.lineWidth = k.w;
+        g.save(); g.beginPath(); g.rect(k.r.x, k.r.y, k.r.w, k.r.h); g.clip();  // only on the tile it was cut in
+        g.beginPath(); g.moveTo(k.x0, k.y0); g.lineTo(k.x1, k.y1); g.stroke(); g.restore();
+      }
+      W.holes.length = hn; g.globalAlpha = 1;
       for (const c of W.list) {
         paint(g, c, W);
         if (c.s.hide) continue;
