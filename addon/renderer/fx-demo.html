@@ -95,7 +95,7 @@ if (q.has('swipe')) setInterval(() => HP.fx.swipe(Math.random() < 0.5 ? -1 : 1),
 if (q.has('wx')) q.get('wx').split(',').forEach(e => { const [at, w] = e.split(':'); setTimeout(() => { $('weather').value = w; HP.fx.env({weather: w}); }, +at * 1000); });
 // frames per second of the live layer, measured from the page's own animation clock
 let n = 0, t0 = performance.now(); const raf = () => { n++; const t = performance.now(); if (t - t0 > 1000) { $('fps').textContent = 'page ' + n + ' fps'; n = 0; t0 = t; } requestAnimationFrame(raf); }; raf();
-setTimeout(() => { if (HP.fx.stickTest) $('note').textContent += ' ' + JSON.stringify(HP.fx.stickTest); }, (+q.get('t') || 1) * 1000 - 300);
+setTimeout(() => { for (const k of ['stickTest', 'walkTest']) if (HP.fx[k] && want.some(w => k === 'walkTest' ? w === 'walkers' : w !== 'walkers')) $('note').textContent += ' ' + JSON.stringify(HP.fx[k]); }, (+q.get('t') || 1) * 1000 - 300);
 setTimeout(() => { document.title = 'ready'; }, (+q.get('t') || 1) * 1000);
 </script>
 </body>

@@ -62,7 +62,7 @@
   function world(ctx, S) {
     const tiles = ctx.rects.filter(r => !r.hidden && !r.flat), plats = [], of = new Map();
     for (const r of tiles.slice().sort((a, b) => a.x - b.x)) {
-      const seg = {x1: r.x, x2: r.x + r.w, y: r.y, r: Math.min(r.r || 0, r.w / 2, r.h / 2)};
+      const seg = {x1: r.x, x2: r.x + r.w, y: r.y, r: Math.min(r.r || 0, r.w / 2, r.h / 2), rect: r};
       let p = null;
       for (const q of plats) { const l = q.segs[q.segs.length - 1], gap = seg.x1 - l.x2; if (Math.abs(l.y - seg.y) <= 6 && gap > -4 && gap <= 22) { p = q; break; } }
       if (!p) plats.push(p = {segs: [], x1: seg.x1, x2: seg.x2, dip: 2 * S});
@@ -138,12 +138,12 @@
       if (!p || p.dead) { c.skip = p; if (!fire(c, 'edge', W) || c.s.move !== 'air') go(c, def.fall, W); return; }
       if (s.vx) {
         const nx = c.x + c.dir * s.vx * S * dt;
-        if (nx < 4 || nx > W.w - 4) { fire(c, 'screen', W); return; }
+        const mg = (def.edge || 0) * S + 4; if (c.dir < 0 ? nx < mg : nx > W.w - mg) { fire(c, 'screen', W); return; }  // coming to the side of the screen
         const r = wallAhead(c, nx, W); if (r) { c.wall = r; fire(c, 'wall', W); return; }
         for (const o of W.list) if (o !== c && o.s.solid && o.plat === p && (o.x - c.x) * c.dir > 0 && Math.abs(o.x - nx) < def.half * 2 * S) { fire(c, 'bump', W); return; }
         if (nx < p.x1 || nx > p.x2) { fire(c, 'edge', W); if (c.s.move === 'air') { c.skip = p; c.x = nx + c.dir * S; } return; }
         // walking onto the foot of a stair somebody built here
-        for (const q of W.plats) if (q.stair && q.base === p && q.dir === c.dir && q.n > 1 && (q.x0 - c.x) * c.dir >= 0 && (q.x0 - nx) * c.dir < 0) c.plat = q;
+        for (const q of W.plats) if (q.stair && q.base === p && q.dir === c.dir && q.n > 1 && (q.x0 - c.x) * c.dir >= -4 && (q.x0 - nx) * c.dir < 0) c.plat = q;
         c.x = nx; c.y = ground(c.plat, nx);
         for (const sp of W.spots) {
           if (!sp.off && sp.plat === c.plat && Math.abs(sp.x - c.x - c.dir * sp.lead) < sp.r) { if (c.spot !== sp) { c.spot = sp; if (fire(c, sp.ev, W)) return; } }
@@ -152,9 +152,9 @@
       }
     } else if (m === 'air') {
       c.vy = Math.min(s.vmax || 420, c.vy + 1100 * dt);
-      const ny = c.y + c.vy * dt, nx = U.clamp(c.x + c.dir * (s.vx || 0) * S * dt, 4, W.w - 4);
+      const ny = c.y + c.vy * dt, mg = (def.edge || 0) * S + 4, nx = U.clamp(c.x + c.dir * (s.vx || 0) * S * dt, mg, W.w - mg);
       if (c.vy > 0) {
-        let hit = null, hy = 1e9; const tol = def.half * S * .8;  // a near miss of a tile's corner still lands on it
+        let hit = null, hy = 1e9; const tol = def.snug ? 0 : def.half * S * .8;  // a near miss of a tile's corner still lands on it (not for the snug: they fall past)
         for (const p of W.plats) {
           if (p === c.skip || p.dead || nx < p.x1 - tol || nx > p.x2 + tol) continue;
           const gy = ground(p, U.clamp(nx, p.x1 + 1, p.x2 - 1));
@@ -162,7 +162,7 @@
         }
         if (hit) {
           c.plat = hit; c.skip = null; c.vy = 0; c.x = U.clamp(nx, hit.x1 + 2, hit.x2 - 2); c.y = ground(hit, c.x);
-          if (!(c.y - c.y0 > def.hard && !s.soft && fire(c, 'crash', W))) fire(c, 'land', W);
+          if (!(c.y - c.y0 > (W.hard || def.hard) && !s.soft && fire(c, 'crash', W))) fire(c, 'land', W);
           return;
         }
       }
@@ -262,6 +262,7 @@
       build1: [[CAP, 2, 6], [SIDE, 3, 10], [['a'], 9, 12], [['bb'], 10, 13], [FEET, 3, 13]],
       wave0: [[CAP, 2, 5], [FRONT, 3, 9], [['.a', 'a.'], 9, 8], [['a'], 2, 11], [FEET, 3, 13]],
       wave1: [[CAP, 2, 5], [FRONT, 3, 9], [['aa'], 9, 10], [['a'], 2, 11], [FEET, 3, 13]],
+      flat: [[['..s.....', 'cccccccc'], 2, 11], [['offffffo'], 2, 13]],
     }};
   // the hatch they drop from and the door they are looking for: a hollow stump with a lantern inside
   const PROPS_ART = {w: 12, h: 9, pal: {t: '#a8693a', T: '#d9a066', k: '#2a1826', y: '#ffd978', g: '#86d058'},
@@ -273,38 +274,54 @@
   DIGITS.forEach((d, i) => { FONT_ART.frames['d' + i] = [[glyph(d, 'x'), 0, 0]]; });
   FONT_ART.frames.bang = [[glyph('22202', 'x'), 0, 0]];  // "!", after the digits so their places on the sheet stay
 
-  const ROLES = [['walker', 40], ['floater', 14], ['climber', 14], ['builder', 13], ['tunneler', 11], ['blocker', 8]], JOBS = ROLES.slice(1);
+  // The jobs, after the classic eight: floater (leaf umbrella), climber (up a tile's side), builder (a stair of
+  // bricks), tunneler (straight through a tile that is in the way), blocker (stands and turns the others back),
+  // digger (straight down through the tile it stands on), miner (down and forward), bomber (counts down and bursts).
+  const ROLES = [['walker', 38], ['floater', 12], ['climber', 10], ['builder', 10], ['tunneler', 8], ['blocker', 6], ['digger', 6], ['miner', 5], ['bomber', 5]], JOBS = ROLES.slice(1);
   const DROP = {key: 'drop', label: 'Drop interval', type: 'range', min: 0.3, max: 10, step: 0.1, unit: 's', default: 1.5};  // about this long between two walkers leaving the hatch
+  const TEST = HP.fx.walkTest = {out: 0, home: 0, splat: 0, boom: 0, guard: 0, round: 0, most: 0, off: 0};  // counts, for checks
+  /** The tile the walker stands on, with room for it to go down through; none on bricks, the floor or a gap. */
+  function tileAt(c, W) { const p = c.plat, h = c.def.half * W.S; if (p && p.segs) for (const s of p.segs) if (s.rect && c.x >= s.x1 + h && c.x <= s.x2 - h) return s.rect; return null; }
+  /** How far something let go at x, y falls before it lands. */
+  function dropAt(W, x, y) { let d = W.h - y; for (const p of W.plats) if (!p.dead && x >= p.x1 && x <= p.x2) { const gy = ground(p, x); if (gy >= y - 1 && gy - y < d) d = gy - y; } return d; }
   const ACORN = {
-    art: ACORN_ART, half: 4, tall: 9, hard: 230, fall: 'fall',
+    art: ACORN_ART, half: 4, tall: 9, hard: 230, fall: 'fall', edge: 7, snug: 1,
     key: c => c.role,
-    on: {tap: 'wave', old: 'fade'},
+    on: {tap: 'wave'},
     states: {
       drop:  {frames: ['fall0', 'fall1'], ft: .12, move: 'air', soft: 1, fade: 5, on: {land: 'walk', tap: 0}},
-      walk:  {frames: ['walk0', 'walk1'], ft: .16, vx: 10, dur: [3, 8], enter: 'stride', next: {blocker: 'block', builder: 'build', _: 'walk'},
-        on: {notice: 'gawk', jolt: 'slip', edge: {floater: 'glide', builder: 'build', _: 'fall'}, wall: {climber: 'climb', tunneler: 'dig', _: 'turn'}, bump: 'turn', screen: 'leave', exit: 'hopin'}},
+      walk:  {frames: ['walk0', 'walk1'], ft: .16, vx: 10, dur: [3, 8], enter: 'stride', next: {blocker: 'block', builder: 'build', digger: 'bore', miner: 'bore', _: 'walk'},
+        on: {notice: 'gawk', jolt: 'slip', edge: {floater: 'glide', builder: 'build', _: 'fall'}, wall: {climber: 'climb', tunneler: 'dig', _: 'turn'}, bump: 'turn', screen: 'guard', exit: 'hopin'}},
       turn:  {frames: ['walk0'], enter: 'flip', dur: 0, next: 'walk'},
-      fall:  {frames: ['fall0', 'fall1'], ft: .12, move: 'air', on: {land: 'walk', crash: 'poof'}},
+      // a fall of more than two tiles ends badly, unless it has the leaf
+      fall:  {frames: ['fall0', 'fall1'], ft: .12, move: 'air', each: 'chute', on: {land: 'walk', crash: 'splat'}},
       glide: {frames: ['glide0', 'glide1'], ft: .4, move: 'air', vmax: 42, vx: 2.5, soft: 1, on: {land: 'walk'}},
       climb: {frames: ['climb0', 'climb1'], ft: .2, move: 'climb', vy: 7, off: 4, on: {top: 'walk'}},
       block: {frames: ['block0', 'block1'], ft: .5, solid: 1, enter: 'plain', dur: [9, 16], next: 'walk', on: {jolt: 'slip'}},
+      // the first one to come to the side of the screen stays there and sends the rest back
+      guard: {frames: ['block0', 'block1'], ft: .5, solid: 1, enter: 'post'},
       // a finger on the glass: stop, turn to look at it, then turn back and carry on
       gawk:  {frames: ['walk0'], enter: 'face', dur: 1.5, next: 'back', on: {notice: 'gawk', jolt: 'slip'}},
       back:  {frames: ['walk0'], enter: 'unface', dur: 0, next: 'walk'},
       // the screen is pulled away under it: it tumbles the other way, sits seeing stars, then gets up and goes on
       slip:  {frames: ['fall0', 'fall1'], ft: .1, spin: 1.3, vx: 16, dur: .6, enter: 'jolt', next: 'daze', on: {edge: 'fall', wall: 'daze', bump: 'daze', screen: 'daze', tap: 0}},
       daze:  {frames: ['fall0'], ft: .3, tick: 'stars', dur: 1.3, next: 'back', on: {tap: 0}},
-      build: {frames: ['build0', 'build1'], ft: .22, enter: 'stair', tick: 'brick', on: {built: 'walk'}},
-      // a tunneller may not damage a real tile: dust, then it slips behind the tile and comes out at the far side
+      build: {frames: ['build0', 'build1'], ft: .15, enter: 'stair', tick: 'brick', on: {built: 'walk'}},
+      // nobody may damage a real tile: dust, then it slips behind the tile and comes out at the far side (tunneler)
       dig:   {frames: ['build0', 'build1'], ft: .12, tick: 'dust', dur: 1.3, next: 'sink'},
       sink:  {frames: ['build1'], fade: -3.5, dur: .3, next: 'rise'},
       rise:  {frames: ['fall0', 'fall1'], ft: .12, move: 'air', enter: 'through', fade: 3.5, soft: 1, on: {land: 'walk'}},
-      wave:  {frames: ['wave0', 'wave1', 'wave0', 'wave1', 'wave0', 'wave1'], ft: .16, once: 1, enter: 'reroll', next: {blocker: 'block', builder: 'build', _: 'walk'}},
+      // ... or out of its underside (digger: straight below; miner: below and further on)
+      bore:  {frames: ['build0', 'build1'], ft: .12, enter: 'spot', tick: 'grit', dur: 1.1, next: 'sunk'},
+      sunk:  {frames: ['build1'], fade: -3.5, dur: .3, next: 'drip'},
+      drip:  {frames: ['fall0', 'fall1'], ft: .12, move: 'air', enter: 'under', fade: 3.5, each: 'chute', on: {land: 'walk', crash: 'splat'}},
+      // thrown by a bomber going off next to it
+      blown: {frames: ['fall0', 'fall1'], ft: .1, move: 'air', jump: 230, vx: 14, spin: 1.4, on: {land: 'daze', crash: 'splat', tap: 0}},
+      wave:  {frames: ['wave0', 'wave1', 'wave0', 'wave1', 'wave0', 'wave1'], ft: .16, once: 1, enter: 'reroll', next: {blocker: 'block', builder: 'build', digger: 'bore', miner: 'bore', _: 'walk'}},
       hopin: {frames: ['walk1'], move: 'air', jump: 200, soft: 1, enter: 'atdoor', on: {land: 'home', tap: 0}},
       home:  {frames: ['walk0'], fade: -5, dur: .25, enter: 'saved', next: 'out', on: {tap: 0}},
-      poof:  {frames: [], hide: 1, enter: 'puff', end: 1},
-      leave: {frames: ['walk0', 'walk1'], ft: .16, move: 'free', vx: 10, dur: 3, next: 'out'},
-      fade:  {frames: ['wave0', 'wave1'], ft: .16, fade: -1.2, dur: .9, next: 'out', on: {tap: 0}},
+      splat: {frames: ['flat'], fade: -.9, dur: 1.1, enter: 'squash', next: 'out', on: {tap: 0}},
+      boom:  {frames: [], hide: 1, enter: 'bang', end: 1},
       out:   {frames: [], hide: 1, end: 1},
     },
     acts: {
@@ -315,84 +332,126 @@
       unface(c) { if (c.was) c.dir = c.was; },
       jolt(c, W) { if (!c.was) c.was = c.dir; c.dir = W.jolt; },
       stars(c, W) { if (W.parts.length < 60) W.parts.push({x: c.x + (Math.random() - .5) * 10 * W.S, y: c.y - 11 * W.S, vx: (Math.random() - .5) * 30, vy: -18, g: 0, t: 0, life: .7, col: '#ffe45c', sz: W.S, star: 1}); },
-      plain(c) { c.role = 'walker'; },
-      reroll(c) { let r; do r = pick(JOBS); while (r === c.role); c.role = r; },
-      puff(c, W) { burst(W, c.x, c.y - 3 * W.S, 9, ['#fffaf0', '#f3e2c4', '#d9c3a0'], 90, {}); },
+      // "hold" is how long it was asked to stand there; without one it stands as long as it likes
+      plain(c) { c.role = 'walker'; if (c.hold) { c.dur = about(c.hold); c.hold = 0; } },
+      // one is enough: a second that comes down beyond the first is sent back in
+      post(c, W) {
+        c.role = 'walker';
+        const o = W.list.find(o => o !== c && o.st === 'guard' && o.plat === c.plat && Math.abs(o.x - c.x) < 16 * W.S);
+        if (o) { c.dir = -c.dir; c.x = o.x + c.dir; go(c, 'walk', W); } else TEST.guard++;
+      },
+      reroll(c, W) { let r; do r = pick(JOBS); while (r === c.role); c.role = r; if (r === 'bomber') c.fuse = W.t + 5; },
+      chute(c, W) { if (c.role === 'floater' && c.y - c.y0 > 10 * W.S) go(c, 'glide', W); },  // the leaf opens a little way down
+      squash(c, W) { TEST.splat++; burst(W, c.x, c.y - 2 * W.S, 9, ['#fffaf0', '#f3e2c4', '#c8742c'], 90, {g: 300}); },
       dust(c, W) { burst(W, c.x + c.dir * 5 * W.S, c.y - 3 * W.S, 3, ['#fff3dc', '#e9dcc6', '#c4b299'], 80, {g: 300}); },
+      grit(c, W) { burst(W, c.x + (c.role === 'miner' ? c.dir * 3 * W.S : 0), c.y - W.S, 3, ['#fff3dc', '#e9dcc6', '#c4b299'], 70, {g: 300}); },
       atdoor(c, W) { c.x = W.door.x; },
-      saved(c, W) { W.saved = (W.saved + 1) % 100; burst(W, c.x, c.y - 9 * W.S, 3, ['#ffe45c'], 50, {star: 1, life: .7}); },
+      saved(c, W) { TEST.home++; W.saved = (W.saved + 1) % 100; burst(W, c.x, c.y - 9 * W.S, 3, ['#ffe45c'], 50, {star: 1, life: .7}); },
       through(c, W) {
         const r = c.wall, h = c.def.half * W.S; c.role = 'walker'; if (!r) return;
         const x = c.dir > 0 ? r.x + r.w + h + 2 : r.x - h - 2;
         if (x < 8 || x > W.w - 8) c.dir = -c.dir; else c.x = x;  // nothing but the screen's edge behind this tile: come back out
       },
-      // A stair of little bricks, up and forward from where the builder stands. If a tile top is a short way
-      // ahead, level or somewhat higher, the stair is aimed at it; otherwise it just climbs eight bricks.
+      spot(c, W) { c.hole = tileAt(c, W); if (!c.hole) { c.role = 'walker'; go(c, 'walk', W); } },  // nothing here to go down through
+      under(c, W) {
+        const r = c.hole, h = c.def.half * W.S, mine = c.role === 'miner'; c.role = 'walker'; if (!r) return;
+        if (mine) c.x = U.clamp(c.x + c.dir * r.h * .6, r.x + h, r.x + r.w - h);
+        c.y = c.y0 = r.y + r.h + 2; c.vy = 0;
+      },
+      // It bursts: the bricks near it are gone and whoever stood close is thrown clear (a blocker too).
+      bang(c, W) {
+        const S = W.S, R = 16 * S; TEST.boom++;
+        burst(W, c.x, c.y - 4 * S, 16, ['#fffaf0', '#ffd978', '#ff8a3c', '#e2543a'], 170, {g: 300});
+        for (const q of W.plats) if (q.stair && c.x > q.x1 - R && c.x < q.x2 + R && c.y > q.y0 - q.n * q.bh - R && c.y < q.y0 + R) q.dead = W.cut = 1;
+        for (const o of W.list) if (o !== c && !o.dead && !o.s.hide && o.st !== 'hopin' && o.st !== 'home' && o.st !== 'splat' && Math.hypot(o.x - c.x, o.y - c.y) < R) { o.dir = o.x < c.x ? -1 : 1; if (o.role !== 'floater') o.role = 'walker'; go(o, 'blown', W); }
+      },
+      // A stair of little bricks, up and forward from where the builder stands, one up for two along. If a tile
+      // top is a short way ahead, level or somewhat higher, the stair is aimed at it; with the door higher up it
+      // goes on until it is as high as the door; otherwise it is twelve bricks.
       stair(c, W) {
-        const S = W.S, p = c.plat; let n = 8, bh = S; c.role = 'walker';
+        const S = W.S, p = c.plat, up = c.y - W.door.y; let n = up > 10 ? Math.min(60, Math.ceil(up / S) + 3) : 12, bh = S; c.role = 'walker';
+        if (W.live >= 10) { go(c, 'walk', W); return; }  // enough bricks about already
         for (const q of W.plats) {
           if (q === p || q.stair || q === W.floor) continue;
-          const gap = c.dir > 0 ? q.x1 - c.x : c.x - q.x2, up = c.y - q.segs[c.dir > 0 ? 0 : q.segs.length - 1].y;
-          if (gap > 16 && gap < 130 && up > -8 && up < 48) { n = Math.ceil((gap + 8) / (3 * S)); bh = up / n; break; }
+          const gap = c.dir > 0 ? q.x1 - c.x : c.x - q.x2, rise = c.y - q.segs[c.dir > 0 ? 0 : q.segs.length - 1].y;
+          if (gap > 16 && gap < 130 && rise > -8 && rise < 48) { n = Math.ceil((gap + 8) / (2 * S)); bh = rise / n; break; }
         }
-        c.steps = {stair: 1, base: p, x0: c.x, y0: c.y, dir: c.dir, bw: 3 * S, bh, n: 0, max: n, born: W.t, x1: c.x, x2: c.x};
-        W.plats.push(c.steps);
+        c.steps = {stair: 1, base: p, x0: c.x, y0: c.y, dir: c.dir, bw: 2 * S, bh, n: 0, max: n, born: W.t, x1: c.x, x2: c.x};
+        W.plats.push(c.steps); W.live++;
       },
       brick(c, W) {
         if (c.f) return;
-        const q = c.steps, nx = q.x0 + q.dir * (q.n + .5) * q.bw;
-        if (q.n >= q.max || nx < 8 || nx > W.w - 8 || wallAhead(c, nx, W)) { if (!q.n) q.dead = 1; fire(c, 'built', W); return; }
+        const q = c.steps, nx = q.x0 + q.dir * (q.n + .5) * q.bw, wall = wallAhead(c, nx, W);
+        if (q.n >= q.max || nx < 8 || nx > W.w - 8 || wall || c.y < 14 * W.S) {
+          if (!q.n) q.dead = W.cut = 1;
+          // a tile in the way with the door still higher up: turn round and build on the other way, in a zigzag
+          if (wall && q.n && c.y - W.door.y > 10) { c.dir = -c.dir; go(c, 'build', W); } else fire(c, 'built', W);
+          return;
+        }
         q.n++; q.born = W.t; if (q.dir > 0) q.x2 = q.x0 + q.n * q.bw; else q.x1 = q.x0 - q.n * q.bw;
         c.plat = q; c.x = nx; c.y = ground(q, nx);
       },
     },
   };
 
-  /** Where a plain walker goes from a hatch: its platform and x at every step, as pairs. */
-  function route(W, x, y, dir) {
-    const c = make(ACORN, null, x, y, dir), tr = []; c.role = 'walker'; go(c, 'drop', W);
-    for (let i = 0; i < 900 && !c.dead; i++) { step(c, .1, W); if (c.plat && c.st === 'walk') tr.push(c.plat, c.x); }
-    return tr;
+  /** A new round: the hatch over any tile of the top row (never the clock, which has no face to stand behind) and
+   *  the door on some other tile, both by chance, so no two rounds are the same walk. */
+  function deal(W, ctx) {
+    const S = W.S, rnd = Math.random, all = ctx.rects.filter(r => !r.hidden), tiles = W.tiles.filter(r => r.type !== 'clock' && r.w >= 16 * S);
+    const tops = tiles.filter(r => !all.some(o => o !== r && o.y + o.h <= r.y + 2 && o.x < r.x + r.w - 4 && o.x + o.w > r.x + 4));
+    const any = a => a[Math.floor(rnd() * a.length)];
+    W.spots.length = 0; W.saved = 0; W.wait = .5; W.left = U.clamp(Math.round(+ctx.opts.count || 40), 3, 80); W.dir = rnd() < .5 ? 1 : -1; TEST.round++;
+    if (!tiles.length) { W.hatch = {x: W.w * .3, y: 20}; W.door = {x: W.w * .7, plat: W.floor, y: W.h}; }  // a page with no tiles
+    else {
+      const h = any(tops.length ? tops : tiles), hx = h.x + h.w * (.25 + rnd() * .5), hp = W.of.get(h);
+      let pool = tiles.filter(r => r !== h && r !== W.doorTile && (W.of.get(r) !== hp || Math.abs(r.x + r.w / 2 - hx) > 260));
+      if (!pool.length) pool = tiles.filter(r => r !== h); if (!pool.length) pool = tiles;
+      const d = W.doorTile = any(pool), dx = d.x + d.w * (.3 + rnd() * .4), dp = W.of.get(d);
+      W.hatch = {x: hx, y: Math.max(2, h.y - 11 * S)}; W.door = {x: dx, plat: dp, y: ground(dp, dx)};
+    }
+    W.spots.push({x: W.door.x, plat: W.door.plat, ev: 'exit', r: 3 * S, lead: 0});
   }
-  /** Choose the hatch and the door from the seed. The door is put where a plain walker really arrives, a long walk
-   *  from the hatch, so the default ones get home and the ones with jobs make it interesting. */
-  function plan(W, ctx) {
-    const S = W.S, rnd = ctx.rand, cands = [];
-    for (const r of W.tiles) {
-      const x = r.x + r.w * (.25 + rnd() * .5), hy = r.y - 11 * S;
-      // best where nothing is above the tile (the clock's space, the top row), so the hatch covers no other tile
-      const clear = hy >= 2 && !W.tiles.some(o => o !== r && o.y < r.y - 2 && o.y + o.h > hy - 2 && o.x < x + 7 * S && o.x + o.w > x - 7 * S);
-      cands.push({x, y: Math.max(2, hy), clear, k: rnd(), dir: rnd() < .5 ? 1 : -1, p: W.of.get(r)});
+  /** The hand that gives out the jobs, as the player's did: it looks at one plain walker and, if that would help
+   *  it or the ones behind it get to the door, gives it a job. It does not see everything in time. */
+  function hand(c, W) {
+    const S = W.S, D = W.door, p = c.plat, up = c.y - D.y, ahead = c.dir === (D.x < c.x ? -1 : 1);
+    if (p.stair) return;
+    const end = c.dir > 0 ? p.x2 : p.x1, brink = (end - c.x) * c.dir;
+    const kept = W.list.some(o => o !== c && o.s.solid && o.plat === p && (o.x - c.x) * c.dir > 0);  // someone further on already turns them back
+    const post = hold => { if (kept || W.posts >= W.maxPosts) return false; c.hold = hold; W.posts++; return go(c, 'block', W); };
+    if (p === D.plat) { if (!ahead && Math.abs(c.x - D.x) > 12 * S) post(30); return; }  // past the door: turn the rest back to it
+    const wall = wallAhead(c, c.x + c.dir * 12 * S, W);
+    if (wall) { if (up > 10 && wall.y < c.y - 8) c.role = 'climber'; else if (ahead) c.role = 'tunneler'; return; }
+    if (brink < 14 * S) {
+      if (dropAt(W, end + c.dir * (S + 2), c.y) > W.hard) { if ((up < -10 && Math.random() < .5) || !post(40)) c.role = 'floater'; }  // a deadly drop: stop them here, or take the leaf
+      else if (ahead && up > -10) c.role = 'builder';  // bridge it
+      return;
     }
-    cands.sort((a, b) => (b.clear - a.clear) || (a.k - b.k));
-    let best = null;
-    for (let i = 0; i < cands.length && i < 8; i++) for (let d = 0; d < 2; d++) {
-      const h = cands[i], dir = d ? -h.dir : h.dir, tr = route(W, h.x, h.y + 6 * S, dir), runs = [];
-      for (let j = 0; j < tr.length; j += 2) { const l = runs[runs.length - 1]; if (l && l.p === tr[j]) l.b = j; else runs.push({p: tr[j], a: j, b: j}); }
-      let run = null;
-      for (const q of runs) if (q.p !== W.floor && q.b - q.a >= 80) run = q;  // the last tile top it spends a while on
-      if (!run) for (const q of runs) if (!run || q.b - q.a > run.b - run.a) run = q;
-      if (!run) continue;
-      let j = run.a + (Math.floor((run.b - run.a) * .65) & ~1), flat = 1e9;
-      for (let k = run.a; k <= run.b; k += 2) flat = Math.min(flat, ground(run.p, tr[k + 1]));
-      while (j > run.a && ground(run.p, tr[j + 1]) > flat + .5) j -= 2;  // not on a rounded corner
-      const x = tr[j + 1], score = Math.min(j, 900) + h.k * 400 + (h.clear ? 300 : 0) - (run.p === h.p && Math.abs(x - h.x) < 150 ? 600 : 0);
-      if (!best || score > best.score) best = {score, hatch: h, dir, door: {x, plat: run.p, y: ground(run.p, x)}};
+    if (up > 10) {  // the door is higher: stairs, begun about where they will come out by it; walking away from it, stop and turn the rest
+      if (!ahead) post(25);
+      else if (Math.abs(D.x - c.x) < 2 * up + 20 * S && !W.plats.some(q => q.stair && !q.dead && q.base === p && q.dir === c.dir && (q.x0 - c.x) * c.dir > -4 && (q.x0 - c.x) * c.dir < 240)) { c.role = 'builder'; go(c, 'build', W); }
+      return;
     }
-    W.parts.length = 0;
-    return best || {hatch: {x: W.w * .3, y: 20}, dir: 1, door: {x: W.w * .7, plat: W.floor, y: W.h}};  // a page with no tiles
+    if (up < -10) {  // the door is lower: down through the tile, once over the row the door is on
+      const r = tileAt(c, W);
+      if (r && c.x > D.plat.x1 + 4 * S && c.x < D.plat.x2 - 4 * S && dropAt(W, c.x, r.y + r.h + 2) <= W.hard) { c.role = Math.random() < .3 ? 'miner' : 'digger'; go(c, 'bore', W); }
+      else if (!ahead) post(25);
+      return;
+    }
+    if (!ahead) post(25);  // level with the door, on another row of tiles
   }
 
   HP.fx.add('walkers', {
     label: 'Walkers',
     live: true, fps: 12,
-    options: [{key: 'count', label: 'How many', type: 'range', min: 3, max: 20, step: 1, default: 8}, SIZE, DROP],
+    options: [{key: 'count', label: 'How many', type: 'range', min: 3, max: 80, step: 1, default: 40}, SIZE, DROP],
     create(ctx) {
       const S = scale(ctx), W = world(ctx, S);
       W.sh = sheet(ACORN_ART, S); W.props = sheet(PROPS_ART, S); W.font = sheet(FONT_ART, 2); prep(ACORN, W.sh);
-      const pl = plan(W, ctx);
-      W.hatch = pl.hatch; W.door = pl.door; W.dir = pl.dir; W.saved = 0; W.wait = .5; W.drop = interval(ctx, DROP);
-      W.spots.push({x: W.door.x, plat: W.door.plat, ev: 'exit', r: 3 * S, lead: 0});
+      const hs = W.tiles.map(r => r.h).sort((a, b) => a - b);
+      W.hard = hs.length ? 2 * hs[hs.length >> 1] + 4 * S : 230;  // two tiles of this layout, and a little
+      W.drop = interval(ctx, DROP); W.rest = 0; W.live = 0; W.posts = 0;
+      deal(W, ctx);
       return W;
     },
     tap(W, x, y) {
@@ -406,18 +465,30 @@
     // the screen slides off to another dashboard: they are thrown the other way, as off a tablecloth pulled from under them
     swipe(W, dir) { W.jolt = -dir; for (const c of W.list) fire(c, 'jolt', W); },
     draw(g, W, ctx, t, dt) {
-      const S = W.S, want = U.clamp(Math.round(+ctx.opts.count || 8), 3, 20);
+      const S = W.S;
       W.t += dt; W.wait -= dt;
-      if (W.wait <= 0 && W.list.length < want) {
+      if (W.rest > 0) { W.rest -= dt; if (W.rest <= 0) deal(W, ctx); }  // everybody is in or gone: the next round, somewhere else
+      else if (W.wait <= 0 && W.left > 0) {
         const c = make(ACORN, W.sh, W.hatch.x, W.hatch.y + 6 * S, W.dir);
-        c.role = pick(ROLES); c.alpha = 0; c.born = W.t; go(c, 'drop', W); W.list.push(c); W.wait = about(W.drop);
+        c.role = pick(ROLES); c.alpha = 0; c.born = W.t; if (c.role === 'bomber') c.fuse = W.t + 5 + Math.random() * 12;
+        go(c, 'drop', W); W.list.push(c); W.left--; W.wait = about(W.drop); TEST.out++;
       }
-      let n = 0, gone = false;
+      W.posts = 0; W.live = 0; W.maxPosts = Math.max(3, W.list.length / 6);
+      for (const c of W.list) if (c.st === 'block') W.posts++;
+      for (const q of W.plats) if (q.stair && !q.dead) W.live++;
+      let n = 0, busy = false;
       for (const c of W.list) {
-        if (W.t - c.born > 150 && c.st === 'walk') fire(c, 'old', W);  // shut in between two walls: do not pile up for ever
-        step(c, dt, W); if (!c.dead) W.list[n++] = c;
+        if (W.t - c.born > 150 && !c.fuse && !c.s.solid) c.fuse = W.t + 5;  // shut in somewhere: do not pile up for ever
+        if (c.fuse && W.t >= c.fuse && !c.s.end && c.st !== 'hopin' && c.st !== 'home' && c.st !== 'splat') { go(c, 'boom', W); continue; }
+        if (c.st === 'walk' && (c.role === 'walker' || c.role === 'floater' || c.role === 'climber') && c.plat && Math.random() < dt * 2) hand(c, W);
+        step(c, dt, W); if (c.dead) continue;
+        W.list[n++] = c; if (!c.s.solid) busy = true;
+        if (c.x < 0 || c.x > W.w) TEST.off++;
       }
-      W.list.length = n;
+      W.list.length = n; if (n > TEST.most) TEST.most = n;
+      if (!W.left && !busy && W.rest <= 0) {  // only the ones standing guard are left: they go off one after another
+        if (!n) W.rest = 2.5; else W.list.forEach((c, i) => { if (!c.fuse) c.fuse = W.t + 1.5 + i * .3; });
+      }
       g.imageSmoothingEnabled = false;
       blit(g, W.props, W.props.ix.door, 0, W.door.x, W.door.y);
       if (W.saved) {  // the count of those who got home, small, over the door
@@ -425,9 +496,9 @@
         if (W.saved > 9) { blit(g, W.font, Math.floor(W.saved / 10), 0, W.door.x - 4, y); blit(g, W.font, W.saved % 10, 0, W.door.x + 4, y); }
         else blit(g, W.font, W.saved, 0, W.door.x, y);
       }
-      for (const q of W.plats) if (q.stair) {  // the bricks stay a while, then fade
-        const age = W.t - q.born; if (age > 16) { q.dead = gone = true; continue; }
-        g.globalAlpha = Math.min(1, (16 - age) / 3);
+      for (const q of W.plats) if (q.stair && !q.dead) {  // the bricks stay a while, then fade
+        const age = W.t - q.born; if (age > 40) { q.dead = W.cut = 1; continue; }
+        g.globalAlpha = Math.min(1, (40 - age) / 3);
         for (let i = 0; i < q.n; i++) {
           const x = Math.round(q.dir > 0 ? q.x0 + i * q.bw : q.x0 - (i + 1) * q.bw), y = Math.round(q.y0 - (i + 1) * q.bh);
           g.fillStyle = INK; g.fillRect(x - 1, y - 1, q.bw + 2, 2 * S + 2);
@@ -435,11 +506,14 @@
         }
         g.globalAlpha = 1;
       }
-      if (gone) W.plats = W.plats.filter(q => !q.dead);
+      if (W.cut) { W.plats = W.plats.filter(q => !q.dead); W.cut = 0; }
       for (const c of W.list) {
         paint(g, c, W);
-        if (c.bang > W.t && c.st === 'gawk') blit(g, W.font, W.font.ix.bang, 0, c.x, Math.max(12, c.y - 10 * S - 2));  // kept on the screen for one on the top row
-        if (ctx.scene && !c.s.hide) ctx.scene.next.push({kind: 'walker', x: c.x, y: c.y, h: c.def.tall * S});  // so other kinds can meet them
+        if (c.s.hide) continue;
+        const left = c.fuse ? Math.ceil(c.fuse - W.t) : 0, top = Math.max(12, c.y - 10 * S - 2);  // kept on the screen for one on the top row
+        if (left > 0 && left <= 5) blit(g, W.font, left, 0, c.x, top);  // a bomber's count
+        else if (c.bang > W.t && c.st === 'gawk') blit(g, W.font, W.font.ix.bang, 0, c.x, top);
+        if (ctx.scene) ctx.scene.next.push({kind: 'walker', x: c.x, y: c.y, h: c.def.tall * S});  // so other kinds can meet them
       }
       blit(g, W.props, W.props.ix.hatch, 0, W.hatch.x, W.hatch.y + 9 * S);  // over them: they come out from behind its lintel
       drawParts(g, W, dt);
