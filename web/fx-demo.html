@@ -27,7 +27,7 @@
   <label>Temp °F <input id="temp" type="number" value="60" style="width:60px"></label>
   <label>Month <input id="month" type="number" min="1" max="12" value="6" style="width:50px"></label>
   <button id="press">Press a button</button>
-  <span id="fps"></span>
+  <span id="fps"></span> <span id="note"></span>
 </div>
 <script>
 // Headless Chrome with a virtual time budget runs only one animation frame. For screenshots (a "t" in the address)
@@ -76,9 +76,15 @@ function apply() {
 ['kind', 'night', 'weather', 'temp', 'month'].forEach(id => $(id).addEventListener('change', apply));
 $('p').addEventListener('input', () => { HP.fx.preview(+$('p').value); $('pv').textContent = Math.round($('p').value * 100) + '%'; });
 $('press').onclick = () => HP.fx.press(Math.floor(Math.random() * rects.length));
+if (q.has('demo')) HP.fx.demo = true;  // as in the Studio's Preview: kinds that wait start at once
+// for checks: steal=tile,second hides a tile's element the way a goose does; script errors are written into the page
+window.addEventListener('error', e => { $('note').textContent += ' ERR ' + e.message; });
+{ const o = console.error; console.error = (...m) => { $('note').textContent += ' ERR ' + m.join(' '); o.apply(console, m); }; }
+if (q.has('steal')) { const [i, at, back] = q.get('steal').split(',').map(Number); setTimeout(() => { rects[i].el.style.visibility = 'hidden'; }, at * 1000); if (back) setTimeout(() => { rects[i].el.style.visibility = ''; }, back * 1000); }
 apply();
 // frames per second of the live layer, measured from the page's own animation clock
 let n = 0, t0 = performance.now(); const raf = () => { n++; const t = performance.now(); if (t - t0 > 1000) { $('fps').textContent = 'page ' + n + ' fps'; n = 0; t0 = t; } requestAnimationFrame(raf); }; raf();
+setTimeout(() => { if (HP.fx.stickTest) $('note').textContent += ' ' + JSON.stringify(HP.fx.stickTest); }, (+q.get('t') || 1) * 1000 - 300);
 setTimeout(() => { document.title = 'ready'; }, (+q.get('t') || 1) * 1000);
 </script>
 </body>

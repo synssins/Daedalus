@@ -226,7 +226,7 @@
   // ---------- the others ----------
   /** Tell the other kinds where this goose is. No pet function, on purpose. */
   function post(ctx, x, y, sc, chasing) { if (ctx.scene && ctx.scene.next) ctx.scene.next.push({kind: 'goose', x, y, h: 95 * sc, angry: true, chasing: chasing || null}); }
-  const others = ctx => ((ctx.scene && ctx.scene.actors) || []).filter(a => a && a.kind !== 'goose' && a.x === +a.x && a.y === +a.y);
+  const others = ctx => ((ctx.scene && ctx.scene.actors) || []).filter(a => a && a.kind !== 'goose' && !a.hid && a.x === +a.x && a.y === +a.y);  // hid: someone out of sight (hanging off a tile's edge)
   /** The nearest of these, within reach r. */
   function nearest(list, x, y, r) { let best = null, bd = r; list.forEach(a => { const d = Math.hypot(a.x - x, a.y - y); if (d < bd) { bd = d; best = a; } }); return best; }
   /** What goose q should glare at right now: a finger that just touched near it, or anyone within about 200 px. */
@@ -277,7 +277,11 @@
    *  when the goose is chasing someone), and is a goose itself after a minute. n: its place in the line. */
   function chick(q, g, ctx, t, dt, now, n) {
     const age = (now - q.born) / GROW, e = q._, sc = 0.4 + 0.6 * age;
-    if (age >= 1) { q.phase = 'away'; schedule(q); save(); return; }
+    if (age >= 1) {  // grown: a goose now. One that is on screen walks off like any other, it does not just vanish
+      q.phase = 'away'; schedule(q); save();
+      if (q.at === ctx.page) { const d = q.ax < ctx.w / 2 ? -1 : 1; e.V = {mode: 'exit', page: ctx.page, i: -1, el: null, d, f: d, x: q.ax, y: q.ay, T: 0}; }
+      return;
+    }
     if (q.at !== ctx.page) return;
     let tx = q.ax, ty = q.ay, run = false, prey = null;
     S.geese.some(o => { const v = o._.V;
