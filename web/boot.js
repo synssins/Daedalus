@@ -1,6 +1,6 @@
 'use strict';
 // Where the drawing engine comes from. The app carries one copy (engine.html and its scripts) so it can start
-// with nothing else. HomePanel Studio hands out the current engine as one self-contained page; the tablet keeps
+// with nothing else. Daedalus Workshop hands out the current engine as one self-contained page; the tablet keeps
 // it in its own storage and runs that copy from then on, with no server needed to start. So a new kind of button
 // or behaviour reaches every tablet by updating the add-on, and the app itself only changes for native abilities.
 //

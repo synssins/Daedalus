@@ -1,10 +1,10 @@
-"""HomePanel Studio server.
+"""Daedalus Workshop server.
 
 One process, one port. It does four jobs:
   1. Tablets: say hello, wait for approval, fetch their design, hear about changes (/api/...).
   2. Home Assistant relay: tablets talk to HA through here, so they hold a tablet key, never an HA token.
   3. Studio: the page in the HA sidebar, plus its admin API (/admin/...), reachable only through HA.
-  4. mDNS: advertises _homepanel._tcp so tablets find the server by themselves.
+  4. mDNS: advertises _daedalus._tcp so tablets find the server by themselves.
 
 Runs as an HA add-on (Supervisor gives the HA connection) or standalone for development:
     HA_URL=http://ha:8123 HA_TOKEN=... python -m server
@@ -24,10 +24,10 @@ from aiohttp import ClientSession, WSMsgType, web
 
 from .store import Store
 
-log = logging.getLogger("homepanel")
+log = logging.getLogger("daedalus")
 ROOT = Path(__file__).resolve().parents[1]
-PORT = int(os.environ.get("HOMEPANEL_PORT", "8722"))
-DATA = Path(os.environ.get("HOMEPANEL_DATA", "/data" if Path("/data").is_dir() else ROOT / "data"))
+PORT = int(os.environ.get("DAEDALUS_PORT", "8722"))
+DATA = Path(os.environ.get("DAEDALUS_DATA", "/data" if Path("/data").is_dir() else ROOT / "data"))
 # Renderer files: shipped inside the add-on image, or the repo's web/ folder in development.
 # The repo's web/ wins when it is there (development); the add-on image only has the copy in renderer/.
 RENDERER = next(p for p in (ROOT.parent / "web", ROOT / "renderer") if p.is_dir())
@@ -219,7 +219,7 @@ async def ha_socket(request: web.Request):
         await ws.close()
         return ws
     if not tablet_for(request, first.get("access_token") or ""):
-        await ws.send_json({"type": "auth_invalid", "message": "Tablet not approved in HomePanel Studio"})
+        await ws.send_json({"type": "auth_invalid", "message": "Tablet not approved in Daedalus Workshop"})
         await ws.close()
         return ws
     try:
@@ -455,7 +455,7 @@ async def admin_settings(request: web.Request):
 async def admin_backup(request: web.Request):
     s: Store = request.app["store"]
     if request.method == "GET":
-        return web.json_response(s.backup(), headers={"Content-Disposition": 'attachment; filename="homepanel.hpbackup"'})
+        return web.json_response(s.backup(), headers={"Content-Disposition": 'attachment; filename="daedalus.dbackup"'})
     try:
         done = s.restore(await request.json())
     except (ValueError, json.JSONDecodeError) as e:
@@ -473,7 +473,7 @@ async def tablet_llm(request: web.Request):
         raise web.HTTPUnauthorized()
     llm = request.app["store"].get_settings().get("llm") or {}
     if not llm.get("url"):
-        raise web.HTTPBadRequest(text="No LLM address is set in HomePanel Studio")
+        raise web.HTTPBadRequest(text="No LLM address is set in Daedalus Workshop")
     body = await request.json()
     msgs = [m for m in body.get("messages", []) if m.get("role") in ("user", "assistant") and isinstance(m.get("content"), str)][-20:]
     if llm.get("system"):
@@ -524,19 +524,19 @@ def lan_ip() -> str:
 
 
 async def start_mdns(app: web.Application):
-    if os.environ.get("HOMEPANEL_MDNS") == "0":  # a development copy must not draw the tablets away from the real one
+    if os.environ.get("DAEDALUS_MDNS") == "0":  # a development copy must not draw the tablets away from the real one
         return
     try:
         from zeroconf import ServiceInfo
         from zeroconf.asyncio import AsyncZeroconf
         ip = lan_ip()
-        info = ServiceInfo("_homepanel._tcp.local.", "HomePanel Studio._homepanel._tcp.local.", addresses=[socket.inet_aton(ip)],
-                           port=PORT, properties={"v": "1"}, server=f"homepanel-{ip.replace('.', '-')}.local.")
+        info = ServiceInfo("_daedalus._tcp.local.", "Daedalus Workshop._daedalus._tcp.local.", addresses=[socket.inet_aton(ip)],
+                           port=PORT, properties={"v": "1"}, server=f"daedalus-{ip.replace('.', '-')}.local.")
         app["zc"] = AsyncZeroconf()
         # Another copy on the network (a development server) may hold the name: take a numbered one instead of failing.
         await app["zc"].async_register_service(info, allow_name_change=True)
         app["zc_info"] = info
-        log.info("advertising _homepanel._tcp at %s:%s", ip, PORT)
+        log.info("advertising _daedalus._tcp at %s:%s", ip, PORT)
     except Exception as e:  # discovery is a convenience; the server works without it
         log.warning("mDNS advertising off: %r", e)
 
@@ -617,7 +617,7 @@ def build_app() -> web.Application:
 
 def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    log.info("HomePanel Studio on port %s, data in %s, Home Assistant at %s", PORT, DATA, HA_HTTP)
+    log.info("Daedalus Workshop on port %s, data in %s, Home Assistant at %s", PORT, DATA, HA_HTTP)
     app = build_app()
     log.info("tablet engine %s", app["engine"]["version"])
     web.run_app(app, port=PORT, access_log=None)

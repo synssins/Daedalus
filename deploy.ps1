@@ -1,4 +1,4 @@
-# Install HomePanel on one iPad over SSH, then relaunch it (also over SSH, so no USB cable is needed).
+# Install Daedalus Panel on one iPad over SSH, then relaunch it (also over SSH, so no USB cable is needed).
 #   .\deploy.ps1            newest GitHub build + local config.json   (needed after Swift/plist changes)
 #   .\deploy.ps1 -WebOnly   just the local web\ folder + config.json  (seconds; no build needed)
 # Per-iPad settings come from config.json beside this script (git-ignored), copied into the app bundle.
@@ -7,8 +7,8 @@ $ErrorActionPreference = 'Stop'
 $key = "$env:USERPROFILE\.ssh\ipad_panel_ed25519"
 $scp = @('-i', $key, '-o', 'IdentitiesOnly=yes', '-q')
 $ssh = @('-i', $key, '-o', 'BatchMode=yes', '-o', 'IdentitiesOnly=yes', "mobile@$Ip")
-$app = '/var/jb/Applications/HomePanel.app'
-$tmp = '/var/mobile/HomePanel.stage'
+$app = '/var/jb/Applications/DaedalusPanel.app'
+$tmp = '/var/mobile/DaedalusPanel.stage'
 
 ssh @ssh "rm -rf $tmp && mkdir -p $tmp"
 $cfg = Join-Path $PSScriptRoot 'config.json'
@@ -25,16 +25,16 @@ if ($WebOnly) {
     $install = "sudo rm -rf $app/web && sudo cp -R $tmp/web $app/web"
 } else {
     $dist = Join-Path $PSScriptRoot 'dist'
-    Remove-Item "$dist\HomePanel.app.tar" -Force -ErrorAction SilentlyContinue
+    Remove-Item "$dist\DaedalusPanel.app.tar" -Force -ErrorAction SilentlyContinue
     # Without a run id, gh picks an arbitrary run's artifact, so always name the newest successful one.
     if (-not $RunId) { $RunId = gh run list --limit 1 --status success --json databaseId --jq '.[0].databaseId' }
-    gh run download $RunId -n HomePanel -D $dist
+    gh run download $RunId -n DaedalusPanel -D $dist
     if ($LASTEXITCODE) { throw 'artifact download failed' }
-    scp @scp "$dist\HomePanel.app.tar" "mobile@${Ip}:$tmp/HomePanel.app.tar"
-    $install = "sudo rm -rf $app && sudo tar -xf $tmp/HomePanel.app.tar -C /var/jb/Applications && sudo chmod 755 $app/HomePanel"
+    scp @scp "$dist\DaedalusPanel.app.tar" "mobile@${Ip}:$tmp/DaedalusPanel.app.tar"
+    $install = "sudo rm -rf $app && sudo tar -xf $tmp/DaedalusPanel.app.tar -C /var/jb/Applications && sudo chmod 755 $app/DaedalusPanel"
 }
 
 ssh @ssh "$install && if [ -f $tmp/config.json ]; then sudo cp $tmp/config.json $app/config.json; fi && sudo chown -R root:wheel $app && sudo chmod 644 $app/config.json 2>/dev/null; uicache -p $app && rm -rf $tmp && echo INSTALLED"
 if ($LASTEXITCODE) { throw 'install failed' }
 
-ssh @ssh 'export PATH=/var/jb/usr/bin:$PATH; killall HomePanel 2>/dev/null; sleep 1; uiopen --bundleid home.panel.app && echo LAUNCHED'
+ssh @ssh 'export PATH=/var/jb/usr/bin:$PATH; killall DaedalusPanel 2>/dev/null; sleep 1; uiopen --bundleid daedalus.panel.app && echo LAUNCHED'

@@ -2,7 +2,7 @@
 // The assistant button: tap it (or say its wake word), speak, hear the answer. Everything shows inside the
 // button itself: the orb, what was heard, what was answered. Two routes, chosen per button in the Studio:
 //   'ha'   the whole exchange runs in a Home Assistant voice pipeline (speech to text, the assistant, text to speech)
-//   'llm'  Home Assistant only hears and speaks; the text in between goes to the LLM set in HomePanel Studio
+//   'llm'  Home Assistant only hears and speaks; the text in between goes to the LLM set in Daedalus Workshop
 // Sound is sent to Home Assistant only from the tap or wake word until the end of the sentence.
 (() => {
   let run = null;  // the exchange in progress

@@ -5,7 +5,7 @@ primary_target: "addon/studio/index.html"
 related_targets: []
 ---
 
-# HomePanel Studio (add-on page in the Home Assistant sidebar)
+# Daedalus Workshop (add-on page in the Home Assistant sidebar)
 
 Scope: the whole Studio page: tablet list, design list, grid editor. Visitor mode: Operate.
 

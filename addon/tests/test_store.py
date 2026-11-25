@@ -73,7 +73,7 @@ with tempfile.TemporaryDirectory() as tmp:
 
     # backup and restore: round trip, and a damaged entry never blocks the rest
     b = s.backup()
-    assert b["format"] == "hpbackup" and b["designs"] and "assets" in b
+    assert b["format"] == "daedalus-backup" and b["designs"] and "assets" in b
     b["designs"].append({"id": "broken"})  # no design inside
     b["designs"][0]["design"]["pages"][0]["tiles"].append({"type": "entity", "entity": "light.gone_forever", "x": 0, "y": 0, "w": 4, "h": 4})
     with tempfile.TemporaryDirectory() as d2:
@@ -82,6 +82,9 @@ with tempfile.TemporaryDirectory() as tmp:
         assert done["panels"] == len(b["designs"]) - 1 and done["skipped"] == 1, done
         assert s2.get_design(b["designs"][0]["id"])["design"]["pages"][0]["tiles"][-1]["entity"] == "light.gone_forever"
         assert set(s2.tablets) == set(s.tablets)
+    b["format"] = "hpbackup"  # a backup made under the old name still restores
+    with tempfile.TemporaryDirectory() as d3:
+        assert Store(Path(d3)).restore(b)["skipped"] == 1
     try:
         s.restore({"format": "something else"})
         raise AssertionError("a foreign file must be refused")

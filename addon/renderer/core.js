@@ -1,7 +1,7 @@
 'use strict';
-// HomePanel renderer. The app is a placeholder: everything on screen comes from a design file: a theme, and
+// Daedalus renderer. The app is a placeholder: everything on screen comes from a design file: a theme, and
 // dashboards (pages) of buttons (tiles) placed on a small-cell grid. Tile types are plugins registered with
-// HP.tile(); see tiles.js. The design, and the theme it follows, come from HomePanel Studio (the HA add-on).
+// HP.tile(); see tiles.js. The design, and the theme it follows, come from Daedalus Workshop (the HA add-on).
 
 const HP = window.HP = Object.assign(window.HP || {}, {tiles: {}, icons: window.HP_ICONS || {}, S: {states: {}, areas: {}, reg: {}}, design: null, live: [], stack: []});
 HP.tile = (name, def) => { HP.tiles[name] = def; };
@@ -473,7 +473,7 @@ HP.setPanels = (list, page, startId) => {
 
 function connectHA(url, token) {
   HP.ha = new HA(url, token);
-  HP.ha.onstate = s => { if (s === 'online') $('bar').textContent = ''; else toast((HP.server ? 'HomePanel Studio: ' : 'Home Assistant: ') + s); console.log('HA ' + s); };
+  HP.ha.onstate = s => { if (s === 'online') $('bar').textContent = ''; else toast((HP.server ? 'Daedalus Workshop: ' : 'Home Assistant: ') + s); console.log('HA ' + s); };
   HP.ha.onready = () => loadAll().catch(e => toast('load failed: ' + e.message));
   HP.ha.connect();
 }
@@ -483,7 +483,7 @@ HP.report = text => { if (HP.server && HP.key && !HP.preview) fetch(HP.server + 
 window.addEventListener('error', e => HP.report('script error: ' + e.message + ' @' + String(e.filename || '').split('/').pop() + ':' + e.lineno));
 window.addEventListener('unhandledrejection', e => HP.report('failed: ' + (e.reason && e.reason.message || e.reason)));
 
-/** Normal mode: everything comes from HomePanel Studio (the HA add-on). */
+/** Normal mode: everything comes from Daedalus Workshop (the HA add-on). */
 async function serverMode(server, cfg) {
   HP.server = server; keep.set('server', server);
   const auth = () => ({headers: {Authorization: 'Bearer ' + HP.key}});
@@ -494,7 +494,7 @@ async function serverMode(server, cfg) {
     HP.startPage = j.tablet && j.tablet.start_page; HP.bar = !!(j.tablet && j.tablet.bar);
     const panels = j.panels || (j.design ? [{id: j.id || '', design: j.design, theme: j.theme}] : []);
     if (!panels.length && cfg.preview) return;  // the Studio is about to send one itself
-    if (!panels.length) return splash('No panel yet', 'Choose one for "' + ((j.tablet && j.tablet.name) || 'this device') + '" in HomePanel Studio.');
+    if (!panels.length) return splash('No panel yet', 'Choose one for "' + ((j.tablet && j.tablet.name) || 'this device') + '" in Daedalus Workshop.');
     keep.set('panels', panels); keep.set('start', j.id || null);
     HP.setPanels(panels, null, j.id);
     HP.report('engine ' + (window.HP_ENGINE ? HP_ENGINE.version : 'none') + ', drew ' + HP.live.length + ' buttons, ' + innerWidth + 'x' + innerHeight + (HP.orb ? '' : ', orb missing') + (HP.assist ? '' : ', assistant missing'));
@@ -506,10 +506,10 @@ async function serverMode(server, cfg) {
       const dev = Object.assign({width: innerWidth, height: innerHeight, scale: devicePixelRatio}, HP.device);
       const r = await (await fetch(server + '/api/hello', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(dev)})).json();
       if (r.status === 'approved') HP.key = r.key;
-      else splash('Waiting for approval', 'Open HomePanel Studio in Home Assistant and approve "' + r.name + '".');
+      else splash('Waiting for approval', 'Open Daedalus Workshop in Home Assistant and approve "' + r.name + '".');
     } catch (e) {
       if (keep.get('key')) HP.key = keep.get('key');  // server away: carry on with what we had
-      else splash('Looking for HomePanel Studio', server);
+      else splash('Looking for Daedalus Workshop', server);
     }
     if (!HP.key) await sleep(4000);
   }
@@ -518,7 +518,7 @@ async function serverMode(server, cfg) {
 
   if (keep.get('panels') && !cfg.preview) HP.setPanels(keep.get('panels'), null, keep.get('start'));  // last known panels at once, fresh ones right after
   connectHA(server, HP.key);
-  pull().catch(e => { if (!HP.design) splash('Cannot reach HomePanel Studio', e.message); });
+  pull().catch(e => { if (!HP.design) splash('Cannot reach Daedalus Workshop', e.message); });
 
   if (cfg.preview) {  // the Studio sends unsaved edits straight in
     window.addEventListener('message', ev => {
@@ -554,8 +554,8 @@ native('ping').then(async m => {
   if (server) return serverMode(server.replace(/\/$/, ''), cfg);
 
   // No server known: draw the design bundled with the app and talk to Home Assistant directly.
-  if (!window.HP_DESIGN) return splash('Looking for HomePanel Studio', 'No server found on the network yet.');
-  if (!cfg.ha_url || !cfg.ha_token) return splash('Not set up', 'No HomePanel Studio found and no Home Assistant address in config.json.');
+  if (!window.HP_DESIGN) return splash('Looking for Daedalus Workshop', 'No server found on the network yet.');
+  if (!cfg.ha_url || !cfg.ha_token) return splash('Not set up', 'No Daedalus Workshop found and no Home Assistant address in config.json.');
   HP.startPage = cfg.start_page;
   HP.setDesign(window.HP_DESIGN);
   connectHA(cfg.ha_url, cfg.ha_token);

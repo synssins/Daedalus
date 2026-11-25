@@ -3,7 +3,7 @@
 // assistant button it belongs to starts, exactly as if it had been tapped.
 //
 // It runs the same models Home Assistant's openWakeWord uses, so the words are the ones set up there (the
-// standard ones and any custom ones). HomePanel Studio hands the model files and the runtime to the tablet.
+// standard ones and any custom ones). Daedalus Workshop hands the model files and the runtime to the tablet.
 // The method is openWakeWord's: every 80 ms the newest sound becomes 8 spectrum rows (computed here, see
 // wake-mel.js), the last 76 rows become one "embedding" (a model), and the last 16 embeddings go to each
 // word's own small model, which answers with a score from 0 to 1.

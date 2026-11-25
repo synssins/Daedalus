@@ -1,4 +1,4 @@
-/* HomePanel Studio has no look of its own. Every colour, the font and the corner radius come from the active
+/* Daedalus Workshop has no look of its own. Every colour, the font and the corner radius come from the active
    Home Assistant theme: studio.js copies the theme's variables from the page around it onto :root. The values
    after each comma are Home Assistant's own defaults, used only when the page is opened outside HA. */
 :root { color-scheme: light;

@@ -2,10 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>CFBundleExecutable</key><string>HomePanel</string>
-	<key>CFBundleIdentifier</key><string>home.panel.app</string>
-	<key>CFBundleName</key><string>HomePanel</string>
-	<key>CFBundleDisplayName</key><string>HomePanel</string>
+	<key>CFBundleExecutable</key><string>DaedalusPanel</string>
+	<key>CFBundleIdentifier</key><string>daedalus.panel.app</string>
+	<key>CFBundleName</key><string>Daedalus Panel</string>
+	<key>CFBundleDisplayName</key><string>Daedalus Panel</string>
 	<key>CFBundlePackageType</key><string>APPL</string>
 	<key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
 	<key>CFBundleShortVersionString</key><string>0.1</string>
@@ -27,7 +27,7 @@
 		<key>NSAllowsArbitraryLoads</key><true/>
 		<key>NSAllowsLocalNetworking</key><true/>
 	</dict>
-	<key>NSBonjourServices</key><array><string>_homepanel._tcp</string></array>
+	<key>NSBonjourServices</key><array><string>_daedalus._tcp</string></array>
 	<key>NSLocalNetworkUsageDescription</key><string>Talks to Home Assistant and cameras on the home network.</string>
 	<key>NSCameraUsageDescription</key><string>Wakes the panel when someone approaches.</string>
 	<key>NSMicrophoneUsageDescription</key><string>Push-to-talk voice assistant.</string>

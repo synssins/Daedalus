@@ -1,5 +1,5 @@
 'use strict';
-// HomePanel Studio: devices, panels, themes, and (in editor.js) the grid editor. No framework.
+// Daedalus Workshop: devices, panels, themes, and (in editor.js) the grid editor. No framework.
 // Words used on screen: a Panel is a finished set of dashboards; a Dashboard is one screen of buttons; a Device is
 // a tablet running a panel; a Theme is a set of backgrounds and tile designs that panels can follow.
 // Everything placed on a dashboard is a Tile; a Button is one kind of tile (others: Camera, Clock, ...).
@@ -156,7 +156,7 @@ const BLANK = () => ({format: 1, grid: {cols: 64, rows: 48}, start: 'home', room
 const newPanel = () => send('POST', 'designs', {name: 'New panel', design: BLANK()}).then(rec => openDesign(rec.id), fail);
 const importPanel = () => pickFile('.json,application/json', async f => {
   try { const d = JSON.parse(await f.text()); const rec = await send('POST', 'designs', {name: f.name.replace(/\.json$/i, ''), design: d.design || d}); openDesign(rec.id); }
-  catch (err) { toast('That file is not a HomePanel panel: ' + err.message, true); }
+  catch (err) { toast('That file is not a Daedalus panel: ' + err.message, true); }
 });
 const exportPanel = id => api('designs/' + id).then(rec => saveFile(rec.name + '.json', JSON.stringify(rec.design, null, 1)), fail);
 const deletePanel = d => { const on = usedBy(d.id); if (confirm('Delete "' + d.name + '"?' + (on.length ? ' ' + on.join(', ') + ' will show no panel.' : ''))) api('designs/' + d.id, {method: 'DELETE'}).then(s => { if (A.view === 'panel' && A.panel === d.id) { A.state = s; go('gallery'); } else setState(s); }, fail); };
@@ -216,7 +216,7 @@ function viewDevices() {
     h('div', {class: 'head'}, h('h1', null, 'Devices')),
     h('div', {class: 'body'}, ts.length
       ? h('div', {class: 'card fit'}, h('table', null, h('thead', null, h('tr', null, ...['Name', 'Model', 'Status', 'Panels', 'Preview', ''].map(x => h('th', null, x)))), h('tbody', null, ...rows)))
-      : h('div', {class: 'empty', html: '<b>No devices</b>Open the HomePanel app on a tablet on this network.'})));
+      : h('div', {class: 'empty', html: '<b>No devices</b>Open the Daedalus Panel app on a tablet on this network.'})));
 }
 
 // ---------- Panels: one finished panel, live, at any device's size ----------
@@ -322,7 +322,7 @@ const importTheme = () => pickFile('.hptheme,application/json', async f => {
     if (themes().some(x => x.name === t.name)) t.name += ' (imported)';
     A.state = await send('PUT', 'library', {themes: [...themes(), t]});
     openTheme(t.id); redraw(); toast('Theme "' + t.name + '" added.');
-  } catch (e) { toast('That file is not a HomePanel theme pack: ' + e.message, true); }
+  } catch (e) { toast('That file is not a Daedalus theme pack: ' + e.message, true); }
 });
 
 /** Colour plus see-through amount, stored as rgba(). */
@@ -521,7 +521,7 @@ async function viewSettings() {
     key: h('input', {type: 'password', value: '', placeholder: llm.key ? 'Stored' : 'Optional', 'aria-label': 'API key', autocomplete: 'off'}),
     system: h('textarea', {rows: 3, placeholder: '', 'aria-label': 'System prompt'}, llm.system || '')};
   const saveLlm = () => { const body = {url: f.url.value.trim(), model: f.model.value.trim(), system: f.system.value.trim()}; if (f.key.value) body.key = f.key.value; send('PUT', 'settings', {llm: body}).then(() => { toast('Saved.'); viewSettings(); }, fail); };
-  const restore = () => pickFile('.hpbackup,application/json', async file => {
+  const restore = () => pickFile('.dbackup,.hpbackup,application/json', async file => {
     if (!confirm('Restore from "' + file.name + '"? Panels, themes and devices in the file replace the ones here with the same identity.')) return;
     try { const r = await send('POST', 'restore', JSON.parse(await file.text())); A.state = r.state; const d = r.restored;
       toast(`Restored ${d.panels} panels, ${d.devices} devices, ${d.pictures} pictures` + (d.skipped ? `. ${d.skipped} damaged items skipped.` : '.')); redraw(); }
@@ -530,7 +530,7 @@ async function viewSettings() {
   $('#main').replaceChildren(h('div', {class: 'head'}, h('h1', null, 'Settings')),
     h('div', {class: 'body narrow'},
       h('div', {class: 'card pad'}, h('h2', null, 'Backup'),
-        h('div', {class: 'acts'}, h('a', {class: 'btn go', href: 'admin/api/backup', download: 'homepanel-' + new Date().toISOString().slice(0, 10) + '.hpbackup', html: icon('download') + '<span>Download backup</span>'}), btn('Restore', 'upload', restore))),
+        h('div', {class: 'acts'}, h('a', {class: 'btn go', href: 'admin/api/backup', download: 'daedalus-' + new Date().toISOString().slice(0, 10) + '.dbackup', html: icon('download') + '<span>Download backup</span>'}), btn('Restore', 'upload', restore))),
       h('div', {class: 'card pad'}, h('h2', null, 'LLM'),
         row('Address', f.url), row('Model', f.model), row('API key', f.key), row('System prompt', f.system),
         h('div', {class: 'acts'}, btn('Save', null, saveLlm, 'go')))));
@@ -563,7 +563,7 @@ haTheme();
     else if (has(q.get('panel'))) { A.view = 'panel'; A.panel = q.get('panel'); redraw(); }
     else { const v = Object.keys(VIEWS).find(k => q.has(k) && k !== 'panel'); A.view = v || 'gallery'; redraw(); }
   }, err => {  // nothing loaded: say so on the page, with a way to try again, instead of a blank screen
-    $('#main').replaceChildren(h('div', {class: 'body'}, h('div', {class: 'empty'}, h('b', null, 'HomePanel Studio did not answer'),
+    $('#main').replaceChildren(h('div', {class: 'body'}, h('div', {class: 'empty'}, h('b', null, 'Daedalus Workshop did not answer'),
       'The add-on may still be starting. ' + err.message, h('p', {style: 'margin-top:16px'}, btn('Try again', null, start, 'go')))));
   });
 })();

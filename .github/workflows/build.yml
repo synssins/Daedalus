@@ -11,6 +11,6 @@ jobs:
       - run: sh build.sh
       - uses: actions/upload-artifact@v4
         with:
-          name: HomePanel
-          path: build/HomePanel.app.tar
+          name: DaedalusPanel
+          path: build/DaedalusPanel.app.tar
           retention-days: 7

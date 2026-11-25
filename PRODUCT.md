@@ -8,7 +8,7 @@ web
 
 ## Stack
 
-Two parts. Tablet app: static HTML/CSS/JS renderer bundled inside a native Swift shell (WKWebView). HomePanel Studio: a Home Assistant add-on (Python, aiohttp) with a plain HTML/CSS/JS page in the HA sidebar. No framework, no build step for either UI, no network fonts or CDNs: the tablets have no internet access and the Studio is served through HA ingress.
+Two parts. Tablet app: static HTML/CSS/JS renderer bundled inside a native Swift shell (WKWebView). Daedalus Workshop: a Home Assistant add-on (Python, aiohttp) with a plain HTML/CSS/JS page in the HA sidebar. No framework, no build step for either UI, no network fonts or CDNs: the tablets have no internet access and the Studio is served through HA ingress.
 
 ## Users
 
@@ -41,7 +41,7 @@ The look and layout are designed inside Home Assistant, in the Studio, on a smal
 
 ## Brand Commitments
 
-Name: HomePanel. No logo or identity assets exist. The owner rejected the first interface for three reasons, which bind future work: it looked like Home Assistant, it was text only with nothing to look at, and it was flat and dull.
+Name: Daedalus. No logo or identity assets exist. The owner rejected the first interface for three reasons, which bind future work: it looked like Home Assistant, it was text only with nothing to look at, and it was flat and dull.
 
 ## Evidence on Hand
 

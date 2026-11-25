@@ -1,4 +1,4 @@
-"""Persistent state for HomePanel Studio: tablets, designs, uploaded assets. Plain JSON files, no database.
+"""Persistent state for Daedalus Workshop: tablets, designs, uploaded assets. Plain JSON files, no database.
 
 Layout under the data directory:
     tablets.json          every tablet that has ever said hello
@@ -210,15 +210,15 @@ class Store:
         """Everything needed to rebuild this server on a fresh install, in one JSON object."""
         designs = [d for d in (self._read(p, None) for p in sorted(self.designs_dir.glob("*.json"))) if d]
         assets = {p.name: base64.b64encode(p.read_bytes()).decode() for p in self.assets_dir.iterdir() if p.is_file()}
-        return {"format": "hpbackup", "version": 1, "made": int(time.time()), "tablets": self.tablets, "designs": designs,
+        return {"format": "daedalus-backup", "version": 1, "made": int(time.time()), "tablets": self.tablets, "designs": designs,
                 "library": self.get_library(), "settings": self.get_settings(), "assets": assets}
 
     def restore(self, data: dict) -> dict:
         """Put a backup back. Nothing is checked against Home Assistant: a design that names an entity
         which no longer exists restores as it is and shows that button as not found. Bad items are skipped,
         never fatal, so one damaged entry cannot block the rest."""
-        if not isinstance(data, dict) or data.get("format") != "hpbackup":
-            raise ValueError("not a HomePanel backup file")
+        if not isinstance(data, dict) or data.get("format") not in ("daedalus-backup", "hpbackup"):  # hpbackup: files made under the old name
+            raise ValueError("not a Daedalus backup file")
         done = {"devices": 0, "panels": 0, "pictures": 0, "skipped": 0}
         for name, b64 in (data.get("assets") or {}).items():
             try:

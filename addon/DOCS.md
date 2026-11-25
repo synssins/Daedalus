@@ -1,12 +1,12 @@
-# HomePanel Studio
+# Daedalus Workshop
 
-Design dashboards for wall tablets on a grid, inside Home Assistant. Tablets running the HomePanel app find this
+Design dashboards for wall tablets on a grid, inside Home Assistant. Tablets running the Daedalus Panel app find this
 add-on on the network, wait for your approval, then draw the design you give them.
 
 ## Use
 
-1. Start the add-on and open **HomePanel** in the sidebar.
-2. Open the HomePanel app on a tablet on the same network. It appears under **Tablets** as waiting.
+1. Start the add-on and open **Daedalus** in the sidebar.
+2. Open the Daedalus Panel app on a tablet on the same network. It appears under **Tablets** as waiting.
 3. Press **Approve**, then choose a design for it.
 4. Open a design to edit it. Drag tiles on the sheet, change their properties on the right, press **Save**.
    Tablets using that design update within a few seconds.
@@ -19,5 +19,5 @@ which stops working when you remove the tablet.
 
 ## Network
 
-The add-on uses the host network on port 8722 and advertises itself over mDNS as `_homepanel._tcp`.
+The add-on uses the host network on port 8722 and advertises itself over mDNS as `_daedalus._tcp`.
 The Studio page and its settings answer only through Home Assistant; tablets on the network cannot reach them.

@@ -76,7 +76,7 @@ class PanelViewController: UIViewController, WKScriptMessageHandler, WKUIDelegat
         var out: [String: Any] = ["id": m["id"] ?? NSNull(), "cmd": cmd]
         switch cmd {
         case "log":
-            NSLog("[HomePanel web %@] %@", (m["level"] as? String) ?? "log", (m["text"] as? String) ?? "")
+            NSLog("[Daedalus web %@] %@", (m["level"] as? String) ?? "log", (m["text"] as? String) ?? "")
             return
         case "ping":
             out["model"] = UIDevice.current.model
@@ -87,7 +87,7 @@ class PanelViewController: UIViewController, WKScriptMessageHandler, WKUIDelegat
                              "name": UIDevice.current.name, "width": Int(view.bounds.width), "height": Int(view.bounds.height),
                              "scale": Double(UIScreen.main.scale)]
         case "discover":
-            // Look for HomePanel Studio on the network; answers after a short listen, with whatever was found.
+            // Look for Daedalus Workshop on the network; answers after a short listen, with whatever was found.
             discovery.find(seconds: 2.5) { servers in
                 out["servers"] = servers
                 self.reply(out)
@@ -159,7 +159,7 @@ class PanelViewController: UIViewController, WKScriptMessageHandler, WKUIDelegat
         micTaps = 0; micFrames = 0; micSent = 0
         guard let outFormat = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 16000, channels: 1, interleaved: true),
               let converter = AVAudioConverter(from: inFormat, to: outFormat) else {
-            throw NSError(domain: "HomePanel", code: 1, userInfo: [NSLocalizedDescriptionKey: "no usable input format"])
+            throw NSError(domain: "Daedalus", code: 1, userInfo: [NSLocalizedDescriptionKey: "no usable input format"])
         }
         input.installTap(onBus: 0, bufferSize: 4096, format: inFormat) { [weak self] buffer, _ in
             self?.micTaps += 1
@@ -211,7 +211,7 @@ class PanelViewController: UIViewController, WKScriptMessageHandler, WKUIDelegat
     }
 }
 
-/// Finds HomePanel Studio servers advertised over mDNS as _homepanel._tcp.
+/// Finds Daedalus Workshop servers advertised over mDNS as _daedalus._tcp.
 final class Discovery: NSObject, NetServiceBrowserDelegate, NetServiceDelegate {
     private let browser = NetServiceBrowser()
     private var services: [NetService] = []   // must be kept alive while they resolve
@@ -221,7 +221,7 @@ final class Discovery: NSObject, NetServiceBrowserDelegate, NetServiceDelegate {
         services = []
         found = []
         browser.delegate = self
-        browser.searchForServices(ofType: "_homepanel._tcp.", inDomain: "local.")
+        browser.searchForServices(ofType: "_daedalus._tcp.", inDomain: "local.")
         DispatchQueue.main.asyncAfter(deadline: .now() + seconds) {
             self.browser.stop()
             done(self.found)

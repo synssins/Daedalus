@@ -1,5 +1,5 @@
 ---
-name: HomePanel
+name: Daedalus
 description: Two separate visual systems. The Studio is a lighting plot for laying out wall tablets; the tablet renderer is a theme-driven glass panel.
 colors:
   ground: "#18233f"
@@ -166,9 +166,9 @@ components:
     textColor: "{colors.tablet-text-on}"
 ---
 
-# Design System: HomePanel
+# Design System: Daedalus
 
-> **Changed 2026-11-24 (owner's decision).** HomePanel Studio no longer has a look of its own. It takes every colour,
+> **Changed 2026-11-24 (owner's decision).** Daedalus Workshop no longer has a look of its own. It takes every colour,
 > the font and the corner radius from the active Home Assistant theme (`addon/studio/studio.css` reads HA's theme
 > variables; `haTheme()` in `studio.js` copies them from the page around it). The "lighting plot" palette described
 > below for the Studio is retired; only the selection colour rule survives, now using HA's accent colour.
@@ -179,7 +179,7 @@ components:
 
 **Creative North Star: "The Lighting Plot"**
 
-HomePanel carries two visual systems that must not be merged. This document's eight main sections describe **HomePanel Studio** (`addon/studio/`), the admin page inside Home Assistant. The final section, **Tablet Renderer (separate system)**, describes the wall-tablet look (`web/`), which is theme-driven and has no fixed palette. Tokens prefixed `tablet-` belong only to the renderer.
+Daedalus carries two visual systems that must not be merged. This document's eight main sections describe **Daedalus Workshop** (`addon/studio/`), the admin page inside Home Assistant. The final section, **Tablet Renderer (separate system)**, describes the wall-tablet look (`web/`), which is theme-driven and has no fixed palette. Tokens prefixed `tablet-` belong only to the renderer.
 
 The Studio is a lighting designer's plot of the house: a measured sheet on a night-blue work-light ground, where every tile is a numbered instrument at a known position. Text is chalk on blue. Surfaces are separated by hairline seams, never by shadow. Colour is rationed to four gels, and each gel means one thing. The sheet in the middle of the editor is the real renderer in an iframe with live house state, so what the sheet shows is what the wall shows.
 

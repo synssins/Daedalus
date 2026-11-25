@@ -1,4 +1,4 @@
-/* HomePanel look. Everything here reads theme variables that the design file sets (see applyTheme in core.js),
+/* Daedalus look. Everything here reads theme variables that the design file sets (see applyTheme in core.js),
    so a different design changes the look without touching this file. */
 :root { --text: #fff; --font: "Avenir Next", "Segoe UI", system-ui, sans-serif;
   --fill: rgba(255,255,255,.15); --fill-on: linear-gradient(155deg, rgba(255,222,140,.92), rgba(255,142,66,.86));
