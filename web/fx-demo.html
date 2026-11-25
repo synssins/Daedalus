@@ -12,7 +12,7 @@
   #stage { flex: none; }
   #side { width: 300px; height: 100vh; overflow-y: auto; box-sizing: border-box; border-left: 1px solid #2c3358; }
   /* the photo, dimmed a little; the old gradient shows if the photo is not there (docs/img is not shipped with the app) */
-  #stage, .frost { background: linear-gradient(rgba(0,0,0,.22), rgba(0,0,0,.22)), url(../docs/img/mountains.jpg) center / cover, linear-gradient(180deg, #1b1f5e, #42207a 55%, #a03a6e); }
+  #stage, .frost { background: linear-gradient(rgba(4,8,30,var(--dim,.22)), rgba(4,8,30,var(--dim,.22))), url(../docs/img/mountains.jpg) center / cover, linear-gradient(180deg, #1b1f5e, #42207a 55%, #a03a6e); }
   #stage { position: relative; overflow: hidden; font-family: "Segoe UI", system-ui, sans-serif; }
   .clk { position: absolute; color: #fff; text-shadow: 0 2px 14px rgba(0,0,0,.45); pointer-events: none; }
   .clk b { display: block; font-size: 104px; line-height: 1; font-weight: 600; }
@@ -46,7 +46,7 @@
   <label>Growth <input id="p" type="range" min="0" max="1" step="0.01" value="0.6"><span id="pv"></span></label>
   <label><input id="night" type="checkbox"> Night</label>
   <label>Weather <select id="weather"><option>sunny</option><option>cloudy</option><option>rainy</option><option>pouring</option><option>snowy</option><option>clear-night</option><option>fog</option><option>lightning</option><option>windy</option></select></label>
-  <label>Temp °F <input id="temp" type="number" value="60" style="width:60px"></label>
+  <input id="temp" type="hidden" value="60"><!-- no overlay reads the temperature yet; the address may still set it -->
   <label>Month <input id="month" type="number" min="1" max="12" value="6" style="width:50px"></label>
   <button id="press">Press a button</button>
   <span id="fps"></span> <span id="note"></span>
@@ -106,6 +106,7 @@ if (q.has('temp')) $('temp').value = q.get('temp'); if (q.has('month')) $('month
 const opt = {}; (q.get('opt') || '').split(';').filter(Boolean).forEach(kv => { const [k, v] = kv.split(':'); opt[k] = v === 'true' ? true : v === 'false' ? false : isNaN(+v) ? v : +v; });
 function apply() {
   const temp = +$('temp').value;
+  stage.style.setProperty('--dim', $('night').checked ? 0.66 : 0.22);  // the panel darkens its picture at night; so does this page
   HP.fx.env({night: $('night').checked, elevation: $('night').checked ? -20 : 40, weather: $('weather').value, temp, freezing: 32, cold: temp <= 32, month: +$('month').value, date: q.has('date') ? new Date(q.get('date') + 'T12:00:00') : new Date()});
   const sel = [...$('kind').selectedOptions], first = sel.some(o => o.value === want[0]) ? want[0] : sel[0] && sel[0].value;  // opt goes to the kind named first in the address
   const list = sel.map(o => Object.assign({kind: o.value}, o.value === first ? opt : {}, cfg[o.value]));
@@ -134,7 +135,7 @@ function controls() {
     $('opts').append(fs);
   }
 }
-['night', 'weather', 'temp', 'month'].forEach(id => $(id).addEventListener('change', apply));
+['night', 'weather', 'month'].forEach(id => $(id).addEventListener('change', apply));
 $('kind').addEventListener('change', () => { controls(); apply(); });
 controls();
 $('p').addEventListener('input', () => { HP.fx.preview(+$('p').value); $('pv').textContent = Math.round($('p').value * 100) + '%'; });

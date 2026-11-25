@@ -253,7 +253,7 @@
   const KOI_W = [0.05, 0.105, 0.125, 0.11, 0.075, 0.04];  // half width along the body, as a share of its length
   HP.fx.add('koi', {
     label: 'Koi pond', live: true, fps: 12,
-    options: [{key: 'count', label: 'How many', type: 'range', min: 2, max: 10, step: 1, default: 5}],
+    options: [{key: 'count', label: 'How many', type: 'range', min: 2, max: 10, step: 1, default: 5}, {key: 'light', label: 'Sunlight', type: 'bool', default: true}],
     create(ctx) {
       const net = network(ctx), r = ctx.rand, fish = [], n = U.clamp(Math.round(ctx.opts.count), 2, 10);
       for (let i = 0; i < n; i++) {
@@ -280,6 +280,7 @@
       }
     },
     draw(g, st, ctx, t, dt) {
+      if (ctx.opts.light !== false && !ctx.env.night) HP.fx.rays(g, ctx.w, ctx.h, t);
       const S = st.sp, q = st.q;
       st.now = t; if (st.food && t - st.food.t > 10) st.food = null;
       const food = st.food && t - st.food.t > 1 ? st.food : null;  // they need a moment to notice

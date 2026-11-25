@@ -294,7 +294,7 @@
     if (!cur.ok || (cur.i && (f.x < cur.x1 - 8 || f.x > cur.x2 + 8))) { dropFig(st, f, cur.ok ? null : cur); return; }  // nothing under its feet, or no way off: down
     // now and then one of them tramps straight over to where a workmate is busy, and walks into them: that starts a row
     if (!st.row && st.clock > st.rowNext && st.snowing && Math.random() < (st.force === 'brawl' ? 1 : 0.6)) {
-      const m = st.crew.filter(o => o !== f && !o.gone && !o.fear && !o.ov && !o.grp && !o.boss && !o.guest && o.act && (o.act.a === 'dig' || o.act.a === 'rest') && st.plats[o.pl].ok)[0];
+      const m = nearTo(st.crew.filter(o => o !== f && !o.gone && !o.fear && !o.ov && !o.grp && !o.boss && !o.guest && o.act && (o.act.a === 'dig' || o.act.a === 'rest') && st.plats[o.pl].ok), f.x, f.y, f);
       if (m) { if (m.pl !== f.pl) fetchLad(st, f); if (travel(st, f, st.plats[m.pl]) !== undefined) { f.job = null; q.push({a: 'walk', x: m.x}); return; } }
     }
     // a job is a whole tile top (along the bottom: a stretch of about 250 px): the nearest heap left on it comes next,
@@ -1001,15 +1001,18 @@
     const fr = freeCrew(st); if (fr.length < 2) return;
     const a = fr.filter(f => { const L = f.lad.link; return f.lad.on && L && L.a.ok && !L.a.away && !L.b.away && (f.pl === L.a.i || f.pl === L.b.i); })[0]; if (!a) return;
     const F = a.lad.link.a, b = nearTo(fr, a.x, F.y, a);
-    const A = actStart(st, 'tongue', {max: 90, need: 2, a, b, stuck: 0, free: 0, fail: 0, idle: idleRest, step: A => A.fail || (A.stuck && !a.lad.on) || (A.free && quiet(a) && quiet(b))});
-    claim(A, a); claim(A, b);
+    // now and then nobody comes, and never from far away: it pulls itself free and goes down alone
+    const solo = Math.random() < 0.35 || Math.abs(b.x - a.x) + Math.abs(b.y - F.y) * 1.5 > 420;
+    const A = actStart(st, 'tongue', {max: 90, need: solo ? 1 : 2, a, b, stuck: 0, free: 0, fail: 0, idle: idleRest, step: A => A.fail || (A.stuck && !a.lad.on) || (A.free && quiet(a) && (solo || quiet(b)))});
+    claim(A, a); if (!solo) claim(A, b);
     if (!go(st, a, F, null)) { actEnd(st, A, true); return true; }
     a.q.push(call(g => {
       const L = g.lad.link; if (!g.lad.on || !L || L.a.i !== g.pl) { A.fail = 1; return; }
       const u = Math.min(0.85, 35 * g.s / (L.fy - L.ty)), pt = {x: L.fx + (L.tx - L.fx) * u, y: L.fy - 35 * g.s}, ax = U.clamp(pt.x + L.sd * 19, L.a.x1 + 2, L.a.x2 - 2);
-      g.q.push({a: 'walk', x: ax}, rest(SB.lick, 1, {dir: -L.sd}), call(() => { g.tong = pt; A.stuck = 1; A.ax = ax; A.sd = L.sd; bump('licks'); }), rest(SB.flail, 45, {dir: -L.sd, until: () => A.free}));
+      g.q.push({a: 'walk', x: ax}, rest(SB.lick, 1, {dir: -L.sd}), call(() => { g.tong = pt; A.stuck = 1; A.ax = ax; A.sd = L.sd; bump('licks'); }), rest(SB.flail, solo ? 2.5 + Math.random() * 1.5 : 45, {dir: -L.sd, until: () => A.free}),
+        call(h => { if (!solo || A.over || A.free) return; A.free = 1; h.tong = null; h.q.length = 0; react(h, SA.slip, 2.3); }));
     }));
-    b.q.push(rest(SA.stand, 45, {until: () => A.stuck || A.over}), call(g => {
+    if (!solo) b.q.push(rest(SA.stand, 45, {until: () => A.stuck || A.over}), call(g => {
       if (A.over || a.grp !== A) return;  // (the game ended meanwhile: the other one is about its own business)
       if (!go(st, g, F, A.ax + A.sd * 13)) { A.fail = 1; return; }
       g.q.push(call(() => bump('pulls')), rest(SB.pull, 2, {dir: -A.sd}), call(() => { if (A.over || a.grp !== A || !a.tong) return; A.free = 1; a.tong = null; a.act = null; a.q.length = 0; react(a, SA.slip, 2.3); react(g, SA.slip, 2.3); }));

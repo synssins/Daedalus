@@ -330,7 +330,7 @@
     // once on a visit it drops what it is doing and goes for someone (not while it has its beak on a tile)
     if (!v.chased && /enter|look|honk|exit/.test(v.mode) && v.x > -40 && v.x < ctx.w + 40) {
       const prey = quarry(ctx, v.x, v.y);
-      if (prey) { v.chased = true; v.back = {mode: v.mode, T: v.T, x: U.clamp(v.x, 30, ctx.w - 30), y: v.y, f: v.f}; v.prey = prey; v.left = 6 + Math.random() * 6; go('chase'); }
+      if (prey) { v.chased = true; v.back = {mode: v.mode, T: v.T, x: U.clamp(v.x, 30, ctx.w - 30), y: v.y, f: v.f}; v.prey = prey; v.left = 4 + Math.random() * 3; v.near = 0; go('chase'); }
     }
     // a snowman with a carrot for a nose (the snow crew posts its snowmen): on some visits it goes and takes the carrot
     if (!v.veg && /enter|look|honk|exit/.test(v.mode) && v.x > -40 && v.x < ctx.w + 40) {
@@ -384,8 +384,10 @@
       if (!close) v.x = U.clamp(v.x + v.f * Math.min(Math.abs(dx), 235 * dt), 30, ctx.w - 30);
       v.y = U.clamp(v.y + U.clamp(dy, -300 * dt, 300 * dt), 70, ctx.h - 6);
       pose = Math.abs(dy) > 30 ? 'flap' : close && v.T % 0.5 < 0.25 ? 'peck' : 'charge'; walk = close ? 0.8 : 2.6;
-      bt = v.T % 1; honk = bt < 0.62;
-      v.left -= dt; if (v.left <= 0 || v.prey.lost > 1.2) go('gloat');
+      // caught up: a peck or two and one honk, then it has made its point and moves on
+      if (close) v.near += dt;
+      bt = close ? v.near : v.T % 1; honk = bt < 0.62;
+      v.left -= dt; if (v.left <= 0 || v.prey.lost > 1.2 || v.near > 1.5) go('gloat');
     } else if (v.mode === 'gloat') {  // stands tall, one triumphant honk, a shake of the tail
       pose = 'tall'; wig = 1; honk = v.T < 1.1; bt = v.T;
       if (v.T > 1.7) go('back');

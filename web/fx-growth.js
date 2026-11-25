@@ -300,16 +300,21 @@
         for (const e of [[q.x1, q.y1], [q.x2, q.y2]]) {
           const key = Math.round(e[0] / 16) + ':' + Math.round(e[1] / 16), roll = r();
           if (seen[key]) continue; seen[key] = 1;
-          if (roll > 0.18 + 0.36 * amt) continue;
+          if (roll > 0.18 + 0.36 * amt + Math.max(0, amt - 0.7) * 1.5) continue;   // at the top of the slider: every corner
           const at = 0.03 + r() * 0.5;
           // a small fan from one foot, like the big ones in the corners: the middle crystal longest, leaning along the channel where there is room
           const main = axis ? (r() < 0.8 ? -Math.PI / 2 : Math.PI / 2) : (r() < 0.5 ? -0.4 : Math.PI + 0.4);
-          for (let i = 0, n = 4 + Math.floor(r() * 3); i < n; i++) { const off = (i / (n - 1) - 0.5) * 1.9 + (r() - 0.5) * 0.25; add(e[0], e[1], main + off, (16 + r() * 26) * (1 - Math.abs(off) * 0.5), 7 + r() * 4.5, at + Math.abs(off) * 0.15 + r() * 0.15); }
+          for (let i = 0, n = 4 + Math.floor(r() * 3); i < n; i++) { const off = (i / (n - 1) - 0.5) * 1.9 + (r() - 0.5) * 0.25; add(e[0], e[1], main + off, (16 + r() * 26) * (1 + amt) * (1 - Math.abs(off) * 0.5), (7 + r() * 4.5) * (0.8 + 0.6 * amt), at + Math.abs(off) * 0.15 + r() * 0.15); }
         }
+      }
+      // above the middle of the slider they also stand along the tops of the buttons, up to three clumps on each
+      for (const b of c.rects) if (solid(b)) for (let k = 0, m = Math.round(Math.max(0, amt - 0.6) * 7.5); k < m; k++) {
+        const rr = Math.min(b.r || 0, b.w / 2), x = b.x + rr + r() * Math.max(1, b.w - 2 * rr), at = 0.1 + r() * 0.5;
+        for (let i = 0, n = 3 + Math.floor(r() * 3); i < n; i++) { const off = (i / (n - 1) - 0.5) * 1.5 + (r() - 0.5) * 0.25; add(x, b.y + 1, -Math.PI / 2 + off, (14 + r() * 24) * (1 - Math.abs(off) * 0.4), 6 + r() * 5, at + Math.abs(off) * 0.15 + r() * 0.15); }
       }
       for (const side of [1, -1]) {
         const at = r() * 0.15;
-        for (let i = 0, n = Math.round(5 + 6 * amt); i < n; i++) add((side > 0 ? 4 : c.w - 4) + side * r() * 14, c.h - 2, -Math.PI / 2 + side * (-0.2 + r() * 1.7), 50 + r() * 140, 12 + r() * 16, at + r() * 0.35);
+        for (let i = 0, n = Math.round(5 + 14 * amt); i < n; i++) add((side > 0 ? 4 : c.w - 4) + side * r() * 14, c.h - 2, -Math.PI / 2 + side * (-0.2 + r() * 1.7), 50 + r() * 140, 12 + r() * 16, at + r() * 0.35);
       }
       list.sort((a, b) => b.L - a.L);   // tall ones behind, short ones in front
       return {list, ring: null};
@@ -583,7 +588,7 @@
   }
   HP.fx.add('coral', {
     label: 'Coral reef', grows: true, days: 14, live: true, fps: 12, covers: true,
-    options: [amount(), {key: 'fish', label: 'Fish', type: 'bool', default: true}],
+    options: [amount(), {key: 'fish', label: 'Fish', type: 'bool', default: true}, {key: 'light', label: 'Sunlight', type: 'bool', default: true}],
     create(c) {
       const r = c.rand, amt = c.opts.amount, corals = [], lanes = [], schools = [];
       const plant = (x, y) => {
@@ -628,6 +633,7 @@
       for (const s of st.schools) for (const f of s.fish) { const dx = f.px - x, dy = f.py - y, d = Math.hypot(dx, dy) || 1; if (d < 150) { const k = 120 + 260 * (1 - d / 150); f.vx += dx / d * k; f.vy += dy / d * k; } }
     },
     draw(g, st, c, t, dt) {
+      if (c.opts.light !== false && !c.env.night) HP.fx.rays(g, c.w, c.h, t);
       g.drawImage(still(st, c, gg => paintReef(gg, st, c.progress)), 0, 0);
       g.lineCap = 'round';
       for (const a of st.nems) {

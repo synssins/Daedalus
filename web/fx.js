@@ -237,4 +237,20 @@
     preview(p) { preview = p; items.forEach(it => { if (it.def.grows) it.ctx.progress = progressOf(it.def, it.ctx.opts); }); redraw(); },
     get count() { return items.length; },
   };
+  /** Sunlight under water, for the koi pond and the coral reef: slanted beams from the surface and wavering
+   *  patches of light on the seabed. Both kinds call it; it draws once a frame. */
+  HP.fx.rays = (g, w, h, t) => {
+    if (HP.fx.rays.t === t) return; HP.fx.rays.t = t;
+    g.save();
+    for (let i = 0; i < 7; i++) {
+      const x = w * (0.08 + i * 0.14) + Math.sin(t * 0.13 + i * 1.7) * 40, wd = 26 + 22 * Math.sin(i * 2.3) ** 2, a = 0.07 + 0.07 * (0.5 + 0.5 * Math.sin(t * 0.4 + i * 2.1)), lean = h * 0.22;
+      const gr = g.createLinearGradient(0, 0, 0, h); gr.addColorStop(0, `rgba(255,250,210,${a.toFixed(3)})`); gr.addColorStop(1, 'rgba(160,230,255,0)');
+      g.fillStyle = gr; g.beginPath(); g.moveTo(x, 0); g.lineTo(x + wd, 0); g.lineTo(x + wd * 2.6 - lean, h); g.lineTo(x - wd * 1.2 - lean, h); g.closePath(); g.fill();
+    }
+    for (let i = 0; i < 14; i++) {
+      const x = (i * 97 + Math.sin(t * 0.5 + i) * 30 + t * 6) % (w + 120) - 60, a = 0.11 + 0.07 * Math.sin(t * 0.9 + i * 2);
+      g.fillStyle = `rgba(210,245,255,${Math.max(0, a).toFixed(3)})`; g.beginPath(); g.ellipse(x, h - 14 - (i % 4) * 16, 46 + 20 * Math.sin(t * 0.7 + i * 1.3), 5, 0, 0, 6.2832); g.fill();
+    }
+    g.restore();
+  };
 })();

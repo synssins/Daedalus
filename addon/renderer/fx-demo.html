@@ -8,8 +8,11 @@
      (p = point in the growth cycle 0..1; temp in Fahrenheit; date=2026-12-24 sets the day; opt = options for the first kind; t = seconds to let it run before "ready") -->
 <style>
   html, body { margin: 0; background: #05060f; color: #cfd6ee; font: 13px system-ui, sans-serif; }
+  body { display: flex; align-items: flex-start; }
+  #stage { flex: none; }
+  #side { width: 300px; height: 100vh; overflow-y: auto; box-sizing: border-box; border-left: 1px solid #2c3358; }
   /* the photo, dimmed a little; the old gradient shows if the photo is not there (docs/img is not shipped with the app) */
-  #stage, .frost { background: linear-gradient(rgba(0,0,0,.22), rgba(0,0,0,.22)), url(../docs/img/mountains.jpg) center / cover, linear-gradient(180deg, #1b1f5e, #42207a 55%, #a03a6e); }
+  #stage, .frost { background: linear-gradient(rgba(4,8,30,var(--dim,.22)), rgba(4,8,30,var(--dim,.22))), url(../docs/img/mountains.jpg) center / cover, linear-gradient(180deg, #1b1f5e, #42207a 55%, #a03a6e); }
   #stage { position: relative; overflow: hidden; font-family: "Segoe UI", system-ui, sans-serif; }
   .clk { position: absolute; color: #fff; text-shadow: 0 2px 14px rgba(0,0,0,.45); pointer-events: none; }
   .clk b { display: block; font-size: 104px; line-height: 1; font-weight: 600; }
@@ -24,22 +27,31 @@
   .b.on { color: #2b1400; border-color: rgba(255,236,200,.8); }
   .b.on .frost { display: none; } .b.on::after { background: linear-gradient(155deg, rgba(255,222,140,.95), rgba(255,142,66,.9)); }
   #fx { position: absolute !important; }
-  #panel { padding: 10px 12px; display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; }
+  #panel { padding: 10px 12px; display: flex; flex-direction: column; gap: 10px; }
   #panel label { display: flex; gap: 6px; align-items: center; }
+  #panel label:first-child { flex-direction: column; align-items: stretch; }
+  #note { word-break: break-all; font-size: 11px; opacity: .7; }
   select, input, button { font: inherit; }
+  #opts { padding: 0 12px 12px; display: flex; flex-direction: column; gap: 10px; }
+  #opts fieldset { border: 1px solid #2c3358; border-radius: 6px; display: flex; flex-direction: column; gap: 8px; padding: 6px 10px 10px; margin: 0; }
+  #opts label { display: flex; gap: 6px; align-items: center; }
+  #opts input[type=range] { flex: 1; min-width: 0; }
 </style>
 </head>
 <body>
 <div id="stage"></div>
+<div id="side">
 <div id="panel">
-  <label>Overlay <select id="kind" multiple size="5"></select></label>
+  <label>Overlay <select id="kind" multiple size="12"></select></label>
   <label>Growth <input id="p" type="range" min="0" max="1" step="0.01" value="0.6"><span id="pv"></span></label>
   <label><input id="night" type="checkbox"> Night</label>
   <label>Weather <select id="weather"><option>sunny</option><option>cloudy</option><option>rainy</option><option>pouring</option><option>snowy</option><option>clear-night</option><option>fog</option><option>lightning</option><option>windy</option></select></label>
-  <label>Temp °F <input id="temp" type="number" value="60" style="width:60px"></label>
+  <input id="temp" type="hidden" value="60"><!-- no overlay reads the temperature yet; the address may still set it -->
   <label>Month <input id="month" type="number" min="1" max="12" value="6" style="width:50px"></label>
   <button id="press">Press a button</button>
   <span id="fps"></span> <span id="note"></span>
+</div>
+<div id="opts"></div>
 </div>
 <script>
 // Headless Chrome with a virtual time budget runs only one animation frame. For screenshots (a "t" in the address)
@@ -94,12 +106,38 @@ if (q.has('temp')) $('temp').value = q.get('temp'); if (q.has('month')) $('month
 const opt = {}; (q.get('opt') || '').split(';').filter(Boolean).forEach(kv => { const [k, v] = kv.split(':'); opt[k] = v === 'true' ? true : v === 'false' ? false : isNaN(+v) ? v : +v; });
 function apply() {
   const temp = +$('temp').value;
+  stage.style.setProperty('--dim', $('night').checked ? 0.66 : 0.22);  // the panel darkens its picture at night; so does this page
   HP.fx.env({night: $('night').checked, elevation: $('night').checked ? -20 : 40, weather: $('weather').value, temp, freezing: 32, cold: temp <= 32, month: +$('month').value, date: q.has('date') ? new Date(q.get('date') + 'T12:00:00') : new Date()});
   const sel = [...$('kind').selectedOptions], first = sel.some(o => o.value === want[0]) ? want[0] : sel[0] && sel[0].value;  // opt goes to the kind named first in the address
-  const list = sel.map(o => Object.assign({kind: o.value}, o.value === first ? opt : {}));
+  const list = sel.map(o => Object.assign({kind: o.value}, o.value === first ? opt : {}, cfg[o.value]));
   HP.fx.layout(rects); HP.fx.use(list, 'demo/one', false, ['demo/one', 'demo/two']); HP.fx.preview(+$('p').value); $('pv').textContent = Math.round($('p').value * 100) + '%';
 }
-['kind', 'night', 'weather', 'temp', 'month'].forEach(id => $(id).addEventListener('change', apply));
+// every option of every chosen overlay, as the Studio offers them; a change builds the overlays again
+const cfg = {};
+function controls() {
+  $('opts').replaceChildren();
+  for (const o of $('kind').selectedOptions) {
+    const def = HP.fx.kinds[o.value], c = cfg[o.value] = cfg[o.value] || {}; if (!(def.options || []).length) continue;
+    const fs = document.createElement('fieldset'), lg = document.createElement('legend'); lg.textContent = def.label || o.value; fs.append(lg);
+    for (const op of def.options) {
+      const lab = document.createElement('label'), cur = c[op.key] != null ? c[op.key] : o.value === want[0] && opt[op.key] != null ? opt[op.key] : op.default; lab.append(op.label);
+      if (op.type === 'range') {
+        const el = Object.assign(document.createElement('input'), {type: 'range', min: op.min, max: op.max, step: op.step || 1}), out = document.createElement('span'), show = () => { out.textContent = el.value + (op.unit ? ' ' + op.unit : ''); };
+        el.value = cur; show(); el.oninput = show; el.onchange = () => { c[op.key] = +el.value; apply(); }; lab.append(el, out);
+      } else if (op.type === 'select') {
+        const el = document.createElement('select'); op.choices.forEach((ch, k) => el.append(new Option(ch[1], k))); el.value = Math.max(0, op.choices.findIndex(ch => String(ch[0]) === String(cur)));
+        el.onchange = () => { c[op.key] = op.choices[el.value][0]; apply(); }; lab.append(el);
+      } else {
+        const el = Object.assign(document.createElement('input'), {type: 'checkbox', checked: !!cur}); el.onchange = () => { c[op.key] = el.checked; apply(); }; lab.prepend(el);
+      }
+      fs.append(lab);
+    }
+    $('opts').append(fs);
+  }
+}
+['night', 'weather', 'month'].forEach(id => $(id).addEventListener('change', apply));
+$('kind').addEventListener('change', () => { controls(); apply(); });
+controls();
 $('p').addEventListener('input', () => { HP.fx.preview(+$('p').value); $('pv').textContent = Math.round($('p').value * 100) + '%'; });
 $('press').onclick = () => HP.fx.press(Math.floor(Math.random() * rects.length));
 if (q.has('demo')) HP.fx.demo = true;  // as in the Studio's Preview: kinds that wait start at once
