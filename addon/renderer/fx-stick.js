@@ -246,6 +246,7 @@
   /** Queue the walking, hopping and ladder work that takes a figure to another platform. The ladder comes along:
    *  it is only ever left standing while its owner is on the platform at one of its ends. Returns where it stands. */
   function travel(st, f, to) {
+    ladFix(f);  // (a ladder left leaning somewhere its owner no longer is, after a flight or a fall, is not walked to through the air)
     let cur = st.plats[f.pl], placed = f.lad.on ? f.lad.link : null; const q = f.q, path = route(cur, to);
     if (!path) return undefined;
     const take = () => { if (placed) { const top = placed.b === cur; q.push({a: 'walk', x: top ? placed.xb : placed.xf}, {a: 'grab', link: placed, top}); placed = null; } };
@@ -261,7 +262,7 @@
   function ghost(st, la) { if (st.ghosts.length < 8) st.ghosts.push({x: la.gx, y: la.gy, h: la.gd * la.len / 2, a: 1}); la.d = 0; bump('ghosts'); }
   /** Its ladder lies where it was put down. It is only fetched when the figure has to leave for another level. */
   function fetchLad(st, f) {
-    const la = f.lad, C = st.plats[f.pl]; f.fetch = 1;
+    const la = f.lad, C = st.plats[f.pl]; f.fetch = 1; ladFix(f);
     // it lies on some other platform (its owner fell, fled or slid away from it): that one is left to fade, and
     // another is carried. A ladder is never seen crossing the screen by itself.
     if (la.d > 0 && !la.on && (Math.abs(C.y - 2 - la.gyT) >= 4 || la.gx < C.x1 - 20 || la.gx > C.x2 + 20)) { ghost(st, la); return; }
@@ -273,42 +274,63 @@
     if (x != null) f.q.push({a: 'walk', x: U.clamp(x, P.x1 + 2, P.x2 - 2)});
     return true;
   }
+  /** Where a figure stands to dig the heap at cx. */
+  const standAt = (P, cx) => U.clamp(cx - (cx > (P.x1 + P.x2) / 2 ? -1 : 1) * 20, P.x1 + 2, P.x2 - 2);
+  /** Has a workmate this heap, or a place to stand, within 40 px of the one f would take? */
+  function taken(st, f, P, cx) {
+    const sx = standAt(P, cx);
+    for (const o of st.crew) {
+      if (o === f || o.gone || o.boss || o.guest) continue;
+      if (o.job === P && (Math.abs(o.tx - cx) < 40 || Math.abs(o.sx - sx) < 40)) return true;
+      if (o.pl === P.i && o.act && o.act.a === 'dig' && (Math.abs(o.x - sx) < 40 || Math.abs(o.x - cx) < 40)) return true;
+    }
+    return false;
+  }
   /** Decide what a figure does next: carry on along the tile it is clearing; when that is done, the deepest snow
    *  it can get to; or rest, or clock off. */
   function plan(st, f) {
     const cur = st.plats[f.pl], q = f.q; let best = null, bx = 0, bs = -1;
     f.fetch = 0; f.hide = null;
+    if (!cur.ok || (cur.i && (f.x < cur.x1 - 8 || f.x > cur.x2 + 8))) { dropFig(st, f, cur.ok ? null : cur); return; }  // nothing under its feet, or no way off: down
     // now and then one of them tramps straight over to where a workmate is busy, and walks into them: that starts a row
     if (!st.row && st.clock > st.rowNext && st.snowing && Math.random() < (st.force === 'brawl' ? 1 : 0.6)) {
       const m = st.crew.filter(o => o !== f && !o.gone && !o.fear && !o.ov && !o.grp && !o.boss && !o.guest && o.act && (o.act.a === 'dig' || o.act.a === 'rest') && st.plats[o.pl].ok)[0];
       if (m) { if (m.pl !== f.pl) fetchLad(st, f); if (travel(st, f, st.plats[m.pl]) !== undefined) { f.job = null; q.push({a: 'walk', x: m.x}); return; } }
     }
-    // a job is a whole tile top (along the bottom: a stretch of about 250 px): the nearest heap left on it comes next
+    // a job is a whole tile top (along the bottom: a stretch of about 250 px): the nearest heap left on it comes next,
+    // but never one a workmate is at or making for
     const J = f.job;
     if (J && J === cur && J.ok && !J.away) {
       let bd = 1e9;
-      for (let i = 0; i < J.n; i++) { if (J.cols[i] < J.cap * 0.3) continue; const cx = J.x1 + i * J.dx, d = Math.abs(cx - f.x); if (!J.i && Math.abs(cx - f.jx) > 125) continue; if (d < bd) { bd = d; best = J; bx = cx; } }
+      for (let i = 0; i < J.n; i++) { if (J.cols[i] < J.cap * 0.3) continue; const cx = J.x1 + i * J.dx, d = Math.abs(cx - f.x); if ((!J.i && Math.abs(cx - f.jx) > 125) || taken(st, f, J, cx)) continue; if (d < bd) { bd = d; best = J; bx = cx; } }
       if (best) bump('jobStay');
     }
-    if (!best) {
-      f.job = null;
+    // otherwise the deepest snow it can get to. First among tile tops nobody has (and stretches of the bottom well
+    // away from anyone else's); only when there is no such work left does it share a tile, and then keeps its distance
+    for (let pass = 0; pass < 2 && !best; pass++) {
+      f.job = null; bs = -1;
       for (const P of st.plats) {
         if (!P.ok) continue;
+        let theirs = false; for (const o of st.crew) if (o !== f && !o.gone && o.job === P) theirs = true;
+        if (theirs && P.i && !pass) continue;
         const far = P === cur ? 0 : 0.06 + Math.abs(P.y - cur.y) / 2500, keen = P.i ? 1 : 0.45;  // the tile tops come first: the ground can wait
         for (let i = 0; i < P.n; i++) {
           const v = P.cols[i] / P.cap; if (v < 0.3) continue;
-          const cx = P.x1 + i * P.dx; let sc = v * keen - far - Math.abs(cx - f.x) / 3000 + Math.random() * 0.1;
-          for (const o of st.crew) if (o !== f && !o.gone && o.job === P && (P.i || Math.abs(o.jx - cx) < 250)) sc -= 0.5;  // one to a tile; the bottom has room for all
+          const cx = P.x1 + i * P.dx; let near = false;
+          if (theirs && !P.i && !pass) for (const o of st.crew) if (o !== f && !o.gone && o.job === P && Math.abs(o.jx - cx) < 250) near = true;
+          if (near || (theirs && taken(st, f, P, cx))) continue;
+          const sc = v * keen - far - Math.abs(cx - f.x) / 3000 + Math.random() * 0.1;
           if (sc > bs) { bs = sc; best = P; bx = cx; }
         }
       }
-      if (best && bs > -0.4) { f.job = best; f.jx = bx; bump('jobNew'); } else best = null;
+      if (best && bs > -0.4) { f.job = best; f.jx = bx; bump('jobNew'); if (pass) { bump('jobShare'); SEEN.ax = Math.round((best.x1 + best.x2) / 2); SEEN.ay = best.y; } } else best = null;
     }
+    if (best) { f.tx = bx; f.sx = standAt(best, bx); }
     if (best) {
       if (best !== cur) { fetchLad(st, f); travel(st, f, best); }
       // stand on the outer side and face the tile's middle, so the throw over the shoulder clears the edge
       const d = bx > (best.x1 + best.x2) / 2 ? -1 : 1;
-      q.push({a: 'walk', x: U.clamp(bx - d * 20, best.x1 + 2, best.x2 - 2)}, {a: 'dig', dir: d, n: 2 + (Math.random() * 3 | 0)});
+      q.push({a: 'walk', x: f.sx}, {a: 'dig', dir: d, n: 2 + (Math.random() * 3 | 0)});
       const r = Math.random();
       if (r < S_REST) q.push([{a: 'rest', an: SA.lean, tool: 2, dur: 2.6}, {a: 'rest', an: SA.wipe, tool: 2, dur: 1.6}, {a: 'rest', an: SA.stamp, tool: 0, dur: 1.4}][Math.random() * 3 | 0]);
       else if (r < S_REST + S_BALL) { const m = st.crew.filter(o => o !== f && !o.gone && !o.re && !o.grp && !o.guest && Math.abs(o.x - bx) + Math.abs(o.y - best.y) < 460)[0]; if (m) q.push({a: 'ball', to: m}); }
@@ -325,13 +347,13 @@
   /** One figure's turn: carry on with what it is doing, or pick the next thing. */
   function crewStep(st, f, dt) {
     f.tool = 0;
-    if (f.re) { f.re.t += dt; if (f.re.t < f.re.len && f.an) { tick(f, dt); return; } f.re = null; f.an = null; }  // (a row or a fright may have cut the reaction short)
+    if (f.re) { f.re.t += dt; if (f.re.hop) f.lift = f.re.t < 1 ? Math.abs(Math.sin(f.re.t * 6.283)) * f.re.hop : 0; if (f.re.t < f.re.len && f.an) { tick(f, dt); return; } if (f.re.hop) f.lift = 0; f.re = null; f.an = null; }  // (a row or a fright may have cut the reaction short)
     let a = f.act;
     if (!a) {
       if (!f.q.length) {
         if (f.grp) f.grp.idle(f.grp, f, st); else if (f.boss) bossPlan(st, f); else if (f.guest) f.q.push({a: 'exit', x: f.x < st.w / 2 ? -50 : st.w + 50, v: 0.5, an: SB.glum}); else plan(st, f);
       }
-      a = f.act = f.q.shift(); if (!a) return;
+      a = f.act || (f.act = f.q.shift()); if (!a) return;  // (planning may have set the act itself: a drop)
       a.t = 0; a.x0 = f.x; a.y0 = f.y; if (a.a === 'climb') a.u = a.up ? 0 : 0.9;
     }
     a.t += dt; let done = false; const P = st.plats[f.pl];
@@ -412,7 +434,14 @@
     f.fear = {t: 0, safe: 0, cling, sx: f.x, sy: f.y, pl: f.pl, hx: f.J[4], hy: f.J[5], yelp: 0, hop: 0, run: false, away: 0, flip: 0, hang: null, path: []}; f.re = null; f.load = 0; f.an = null;
     if (!cling) { f.q.length = 0; f.act = null; }
   }
-  const SEEN = HP.fx.stickTest = {fears: 0, hangs: 0, climbs: 0, drops: 0, now: ''};  // counted for the self-checks
+  const SEEN = HP.fx.stickTest = {fears: 0, hangs: 0, climbs: 0, drops: 0, now: ''};
+  /** A figure where none can be (1 off the side of the screen on a tile top, 2 not at its platform's height, 3 beside
+   *  its tile in mid-air): counted, and the first of each kind written down with what it was doing. */
+  function flag(st, f, bad) {
+    const k = 'bad' + bad; SEEN[k] = (SEEN[k] || 0) + 1; if (SEEN['at' + bad]) return;
+    SEEN['at' + bad] = (f.boss ? 'boss' : f.guest ? 'bunny' : 'crew') + ' act:' + (f.act ? f.act.a : '-') + ' next:' + (f.q.length ? f.q[0].a : '-') + ' game:' + (f.grp ? f.grp.n : '-') + (f.fear ? ' fear' : '') + (f.row ? ' row' : '') + (f.ov ? ' ov' : '') + (f.re ? ' re' : '') + (f.sh ? ' sh' : '') +
+      ' x:' + Math.round(f.x) + ' y:' + Math.round(f.y) + ' pl:' + f.pl + ' ply:' + Math.round(st.plats[f.pl].y) + ' t:' + Math.round(st.clock);
+  }  // counted for the self-checks
   const O_DANGLE = pose(0, 8, 14, -8, 14, 174, 4, 168, 6, 0);
   function fearStep(st, f, dt, gz) {
     const fe = f.fear, P = st.plats[f.pl], p = f.p; fe.t += dt; f.tool = 0; fe.run = false;
@@ -433,11 +462,12 @@
       const want = f.x >= gz.g.x ? 1 : -1;
       if (!fe.away || (want !== fe.away && Math.abs(gz.g.x - f.x) > 40 && st.clock - fe.flip > 1.5)) { fe.away = want; fe.flip = st.clock; }
       const away = fe.away, end = !P.i ? (away > 0 ? st.w + 40 : -40) : away > 0 ? P.x2 - 3 : P.x1 + 3;
+      if ((f.x - end) * away > 0) f.x = end;  // (already past the end it runs to: it must never run on from there)
       if (fe.hop > 0) {  // pecked: straight up with a yelp, hands to the backside
         fe.hop -= dt; f.lift = Math.sin(Math.max(0, fe.hop) / 0.6 * Math.PI) * 34; for (let j = 0; j < 10; j++) p[j] += (O_YELP[j] - p[j]) * 0.6;
         f.x += away * Math.min(Math.abs(end - f.x), 90 * dt); f.an = null;
       } else if (gz.d < 28 && fe.yelp <= 0) { fe.hop = 0.6; fe.yelp = 1.5; }
-      else if (Math.abs(end - f.x) > 4) { f.lift = 0; f.dir = away; f.x += away * Math.min(Math.abs(end - f.x), 150 * dt); play(f, O_PANIC, 0.05); tick(f, dt); fe.run = true; }
+      else if ((end - f.x) * away > 4) { f.lift = 0; f.dir = away; f.x += away * Math.min(Math.abs(end - f.x), 150 * dt); play(f, O_PANIC, 0.05); tick(f, dt); fe.run = true; }
       else if (P.i) {
         // the end of the tile: across the gap to the next one if there is one, otherwise over the edge
         let to = null, tx = 0; for (const L of P.links) if (!L.type && (away > 0 ? L.a === P : L.b === P)) { to = away > 0 ? L.b : L.a; tx = away > 0 ? L.xb : L.xa; }
@@ -482,7 +512,7 @@
       const a = f.act, la = f.lad;
       if (a && a.a === 'drop') { if (a.pl === P.i) dropFig(st, f, P); }
       else if (f.pl === P.i || uses(a)) dropFig(st, f, P);
-      else if (f.q.some(uses) || f.job === P) { if (a && (a.a === 'hop' || a.a === 'climb')) dropFig(st, f, P); else { f.q.length = 0; f.job = null; } }
+      else if (f.q.some(uses) || f.job === P) { if ((a && (a.a === 'hop' || a.a === 'climb')) || Math.abs(f.y - st.plats[f.pl].y) > 3) dropFig(st, f, P); else { f.q.length = 0; f.job = null; } }
       if (la.on && la.link && (la.link.a === P || la.link.b === P)) { la.on = false; la.k = 0; }
       if (la.d && Math.abs(la.gyT - (P.y - 2)) < 3 && la.gx > P.x1 - 80 && la.gx < P.x2 + 80) la.gyT = below(st, la.gx, P.y, P).y - 2;  // a ladder lying on it falls too
     }
@@ -609,6 +639,11 @@
     punch: anim(0.7, false, [0, S_STAND], [0.25, pose(6, 10, 4, -10, 4, 88, 4, -8, 10, 2), 1], [0.5, pose(6, 10, 4, -10, 4, 88, 4, -8, 10, 2)], [0.7, S_STAND]),
     hose: lp(0.9, pose(14, 8, 2, -8, 2, 40, 20, 30, 34, 14), pose(16, 8, 2, -8, 2, 36, 20, 28, 34, 16)),
     look: anim(1, false, [0, pose(-2, 6, 2, -6, 2, 8, 10, -8, 10, -6)]),
+    // a present: held up high with a jump or two, then shaken by the ear; later torn open on one knee; held up; or kicked away
+    yay: anim(2.1, false, [0, pose(0, 10, 6, -10, 6, 165, 5, 170, -5, -10)], [1, pose(0, 14, 10, -6, 10, 160, 10, 166, 0, -12)], [1.15, pose(-4, 6, 2, -6, 2, 128, 62, 120, 70, 10)], [1.3, pose(-4, 6, 2, -6, 2, 136, 50, 128, 58, 10)], [1.45, pose(-4, 6, 2, -6, 2, 128, 62, 120, 70, 10)], [1.6, pose(-4, 6, 2, -6, 2, 136, 50, 128, 58, 10)], [1.8, pose(-4, 6, 2, -6, 2, 128, 62, 120, 70, 10)], [2.1, S_STAND]),
+    unwrap: lp(0.3, pose(18, 70, 95, -10, 95, 44, 58, 30, 72, 16), pose(18, 70, 95, -10, 95, 60, 40, 50, 52, 16)),
+    show: anim(1.4, false, [0, pose(0, 6, 2, -6, 2, 150, 10, -8, 10, -12)], [1.1, pose(0, 6, 2, -6, 2, 154, 6, -8, 10, -12)], [1.4, S_STAND]),
+    kick: anim(1.9, false, [0, pose(24, 6, 2, -6, 2, 6, 6, 4, 8, 30)], [1.1, pose(26, 6, 2, -6, 2, 6, 6, 4, 8, 32)], [1.3, pose(-12, 62, 8, -10, 4, -20, 10, 30, 10, 10), 1], [1.6, pose(-12, 62, 8, -10, 4, -20, 10, 30, 10, 10)], [1.9, S_STAND]),
     hi: lp(0.4, pose(0, 8, 0, -8, 0, 126, 46, -14, 6, 0), pose(0, 8, 0, -8, 0, 112, 18, -14, 6, 0)),
   };
   const rest = (an, dur, o) => Object.assign({a: 'rest', an, tool: 0, dur}, o), call = fn => ({a: 'call', fn});
@@ -655,7 +690,7 @@
   const nearTo = (list, x, y, not) => { let b = null, bd = 1e9; for (const f of list) { const d = Math.abs(f.x - x) + Math.abs(f.y - y) * 1.5; if (f !== not && d < bd) { bd = d; b = f; } } return b; };
   /** Is this stretch of the bottom strip clear of snowmen, the fort, the time clock and the motorhome? */
   function clearAt(st, x, d) {
-    for (const M of st.men) if (Math.abs(M.x - x) < d) return false;
+    for (const M of st.men) if (!M.P.i && Math.abs(M.x - x) < d) return false;
     if (st.fort && Math.abs(st.fort.x - x) < d) return false;
     if (st.shift && Math.abs(st.shift.x - x) < d) return false;
     return !(st.rv && Math.abs(st.rv.x - x) < d + 110);
@@ -711,7 +746,7 @@
       if ((Math.abs(V.x - J.x) < 22 && V.q.length < 1) || quiet(V)) {
         if (Math.abs(V.x - J.x) > 90) return true;  // never came near
         const d = V.x >= J.x ? 1 : -1, jx = U.clamp(J.x - d * 100, Q.x1 + 2, Q.x2 - 2); A.ph = 2; bump('boo'); J.hide = null;
-        J.act = null; J.q.length = 0; V.act = null; V.q.length = 0; V.shv = {x: V.x + d * 12, y: V.y - 2};
+        J.act = null; J.q.length = 0; V.act = null; V.q.length = 0; V.shv = {x: U.clamp(V.x + d * 12, Q.x1 + 2, Q.x2 - 2), y: V.y - 2};
         J.q.push(rest(SB.boo, 1, {face: V, hopH: 12})); V.q.push(rest(SB.jump, 0.9, {face: J, hopH: 16}));
         if (Math.random() < 0.5 && Math.abs(jx - J.x) > 50) { J.q.push({a: 'walk', x: jx, v: 2.7}, rest(SB.laugh, 1.6, {face: V})); V.q.push({a: 'walk', x: jx + d * 24, v: 2.5}, rest(SB.laugh, 1.3, {face: J})); }
         else { J.q.push(rest(SB.laugh, 2, {face: V})); V.q.push(rest(SA.wipe, 0.9), rest(SB.laugh, 1.2, {face: J})); }
@@ -818,7 +853,7 @@
     const sp = Math.min(27, (P.x2 - P.x1 - 8) / (n - 1)), x0 = (P.x1 + P.x2) / 2 - sp * (n - 1) / 2;
     const A = actStart(st, 'cocoa', {grp: 1, max: 160, P, ph: 0, k: 0, bx: x0 + (n - 1) * sp, idle: cocoaIdle, step: cocoaStep});
     // each stands its shovel up in the snow beside its place, blade down, and has both hands for the mug
-    A.join = f => { claim(A, f); f.slot = A.k++; const rx = U.clamp(x0 + f.slot * sp - 10, P.x1 + 3, P.x2 - 3); if (go(st, f, P, rx)) f.q.push(call(g => { g.shv = {x: rx, y: P.y, up: 1}; }), {a: 'walk', x: x0 + f.slot * sp}, call(g => { g.ready = 1; g.mug = 1; })); };
+    A.join = f => { claim(A, f); f.slot = A.k++ % (n - 1); const sx = U.clamp(x0 + f.slot * sp, P.x1 + 2, P.x2 - 2), rx = U.clamp(sx - 10, P.x1 + 3, P.x2 - 3); if (go(st, f, P, rx)) f.q.push(call(g => { g.shv = {x: rx, y: P.y, up: 1}; }), {a: 'walk', x: sx}, call(g => { g.ready = 1; g.mug = 1; })); };
     fr.forEach(A.join);
     return true;
   }
@@ -828,7 +863,7 @@
     const a = A.a, b = A.b, M = A.man, x0 = A.x0; A.pt += dt;
     if (A.ph === 0) {
       if (A.balls[0].on && A.balls[1].on && quiet(a) && quiet(b)) {
-        A.ph = 1; A.pt = 0; A.man = {x: x0, y: st.plats[0].y - 5, type: A.type, k: A.type ? 0 : 1, sy: 1, life: st.force ? 22 : rnd(150, 270), carrot: true, cv: null, stage: 0, done: false, actor: null};
+        A.ph = 1; A.pt = 0; A.man = {x: x0, y: A.P.y - (A.P.i ? 2 : 5), P: A.P, type: A.type, k: A.type ? 0 : 1, sy: 1, life: st.force ? 22 : rnd(150, 270), carrot: true, cv: null, stage: 0, done: false, actor: null};
         st.men.push(A.man); a.act = b.act = null;
         if (A.type) { a.q.push(rest(SB.pat, 5.2, {dir: 1})); b.q.push(rest(SB.pat, 5.2, {dir: -1})); }
         else { b.q.push(rest(SB.lift, 0.9, {dir: -1}), rest(SA.stand, 1.2, {dir: -1}), rest(SB.reach, 2.2, {dir: -1})); a.q.push(rest(SA.stand, 0.9, {dir: 1}), rest(SB.pat, 0.8, {dir: 1}), rest(SB.lift, 0.6, {dir: 1}), rest(SA.stand, 2, {dir: 1})); }
@@ -845,34 +880,39 @@
         if (t > 4.6) A.ph = 2;
       }
       if (A.ph === 2) {
-        M.done = true; bump('built'); const w = A.type ? 104 : 52;
+        M.done = true; bump('built'); const w = HALF[A.type] + 24, P = A.P;
         a.act = b.act = null; a.q.length = b.q.length = 0;
-        a.q.push({a: 'walk', x: x0 - w}, rest(SB.proud, 2.8, {dir: 1})); b.q.push({a: 'walk', x: x0 + w + 6}, rest(A.type ? SB.horror : SA.wave, 2.8, {dir: -1}));
+        a.q.push({a: 'walk', x: U.clamp(x0 - w, P.x1 + 2, P.x2 - 2)}, rest(SB.proud, 2.8, {dir: 1})); b.q.push({a: 'walk', x: U.clamp(x0 + w + 6, P.x1 + 2, P.x2 - 2)}, rest(A.type ? SB.horror : SA.wave, 2.8, {dir: -1}));
       }
     } else return quiet(a) && quiet(b);
   }
+  const HALF = [26, 28, 28, 78, 40, 66, 56, 82, 50];  // half the width of each sculpture
   function manStart(st, type) {
-    const G = st.plats[0], fr = freeCrew(st); if (fr.length < 2 || st.men.length >= 3) return;
-    const x0 = spotOn(st, 170); if (x0 == null) return;
-    const a = nearTo(fr, x0 - 125, G.y), b = nearTo(fr, x0 + 125, G.y, a);
-    const A = actStart(st, type ? 'tableau' : 'snowman', {grp: 1, max: 130, need: 2, type, x0, a, b, ph: 0, bx: x0 + 27, by: G.y - 13, man: null, balls: [{x: 0, y: 0, r: 0, on: 0}, {x: 0, y: 0, r: 0, on: 0}], idle: idleRest, step: manStep,
-      fin: A => { const M = A.man; A.balls[0].on = A.balls[1].on = 0; if (M && !M.done) { M.done = true; M.k = 1; M.stage = 9; M.cv = sculpt(M.type, M.type ? 9 : 6, true); } }});
-    if (type) bump('tab' + type);
+    const fr = freeCrew(st), hw = HALF[type]; if (fr.length < 2 || st.men.length >= 3) return;
+    // anywhere there is room: any tile top the crew can get to that is wide enough and has none yet, or the bottom strip
+    const c = st.plats.filter(Q => Q.i && Q.ok && !Q.away && Q.y > 110 && Q.x2 - Q.x1 >= Math.max(2 * hw + 12, 104) && !st.men.some(M => M.P === Q) && !(Q.hi && Q.cols.some(v => v > Q.cap * 1.5)));
+    let P = c.length && Math.random() < 0.72 ? pickOf(c) : st.plats[0], x0 = P.i ? U.clamp((P.x1 + P.x2) / 2 + rnd(-30, 30), P.x1 + Math.max(hw, 36), P.x2 - Math.max(hw, 50)) : spotOn(st, 170);
+    if (x0 == null) { if (!c.length) return; P = pickOf(c); x0 = U.clamp((P.x1 + P.x2) / 2, P.x1 + Math.max(hw, 36), P.x2 - Math.max(hw, 50)); }
+    const where = P.i ? 'Tile' : 'Ground', xa = Math.max(P.x1 + 3, x0 - 125), xb = Math.min(P.x2 - 3, x0 + 125), a = nearTo(fr, xa, P.y), b = nearTo(fr, xb, P.y, a);
+    const A = actStart(st, type ? 'tableau' : 'snowman', {grp: 1, max: 150, need: 2, type, P, x0, a, b, ph: 0, bx: x0 + 27, by: P.y - 13, man: null, balls: [{x: 0, y: 0, r: 0, on: 0}, {x: 0, y: 0, r: 0, on: 0}], idle: idleRest, step: manStep,
+      fin: A => { const M = A.man; A.balls[0].on = A.balls[1].on = 0; bump(A.n + where + 'End'); if (M && !M.done) { M.done = true; M.k = 1; M.stage = 9; M.cv = sculpt(M.type, M.type ? 9 : 6, true); } }});
+    bump(A.n + where); if (type) bump('tab' + type);
     claim(A, a); claim(A, b);
-    if (go(st, a, G, x0 - 125)) a.q.push({a: 'roll', x: x0 - 13 - 8 * a.s, r0: 3, r1: 13, ball: A.balls[0]});
-    if (go(st, b, G, x0 + 125)) b.q.push({a: 'roll', x: x0 + 27 + 9 + 8 * b.s, r0: 3, r1: 9, ball: A.balls[1]});
+    if (go(st, a, P, xa)) a.q.push({a: 'roll', x: x0 - 13 - 8 * a.s, r0: 3, r1: 13, ball: A.balls[0]});
+    if (go(st, b, P, xb)) b.q.push({a: 'roll', x: x0 + 27 + 9 + 8 * b.s, r0: 3, r1: 9, ball: A.balls[1]});
     return true;
   }
   /** Snowmen stand for a few minutes, then sag and melt away; now and then someone shovels one up first. */
   function menStep(st, g, dt, sc) {
     for (let i = st.men.length - 1; i >= 0; i--) {
       const M = st.men[i];
+      if (M.P.away) { st.men.splice(i, 1); puff(st, M.x, M.y - 30, 7); puff(st, M.x, M.y - 10, 7); bump('manFell'); continue; }  // its tile was taken: it falls to bits
       if (M.done) {
         M.life -= dt;
         if (M.life < 0) {
           if (!M.tried) {
-            M.tried = 1; const f = nearTo(freeCrew(st).filter(o => !o.pl && Math.abs(o.x - M.x) < 420), M.x, M.y);
-            if (f && Math.random() < 0.6) { f.q.length = 0; f.act = null; f.job = null; f.q.push({a: 'walk', x: M.x - 22}, {a: 'dig', dir: 1, n: 2, toss: () => { M.sy -= 0.5; puff(st, M.x, M.y - 20, 6); }}); }
+            M.tried = 1; const f = nearTo(freeCrew(st).filter(o => o.pl === M.P.i && Math.abs(o.x - M.x) < 420), M.x, M.y);
+            if (f && Math.random() < 0.6) { f.q.length = 0; f.act = null; f.job = null; f.q.push({a: 'walk', x: U.clamp(M.x - 22, M.P.x1 + 2, M.P.x2 - 2)}, {a: 'dig', dir: 1, n: 2, toss: () => { M.sy -= 0.5; puff(st, M.x, M.y - 20, 6); }}); }
           }
           M.sy -= dt / 9;
         }
@@ -969,9 +1009,10 @@
       const u = Math.min(0.85, 35 * g.s / (L.fy - L.ty)), pt = {x: L.fx + (L.tx - L.fx) * u, y: L.fy - 35 * g.s}, ax = U.clamp(pt.x + L.sd * 19, L.a.x1 + 2, L.a.x2 - 2);
       g.q.push({a: 'walk', x: ax}, rest(SB.lick, 1, {dir: -L.sd}), call(() => { g.tong = pt; A.stuck = 1; A.ax = ax; A.sd = L.sd; bump('licks'); }), rest(SB.flail, 45, {dir: -L.sd, until: () => A.free}));
     }));
-    b.q.push(rest(SA.stand, 45, {until: () => A.stuck}), call(g => {
+    b.q.push(rest(SA.stand, 45, {until: () => A.stuck || A.over}), call(g => {
+      if (A.over || a.grp !== A) return;  // (the game ended meanwhile: the other one is about its own business)
       if (!go(st, g, F, A.ax + A.sd * 13)) { A.fail = 1; return; }
-      g.q.push(call(() => bump('pulls')), rest(SB.pull, 2, {dir: -A.sd}), call(() => { A.free = 1; a.tong = null; a.act = null; a.q.length = 0; react(a, SA.slip, 2.3); react(g, SA.slip, 2.3); }));
+      g.q.push(call(() => bump('pulls')), rest(SB.pull, 2, {dir: -A.sd}), call(() => { if (A.over || a.grp !== A || !a.tong) return; A.free = 1; a.tong = null; a.act = null; a.q.length = 0; react(a, SA.slip, 2.3); react(g, SA.slip, 2.3); }));
     }));
     return true;
   }
@@ -1018,7 +1059,8 @@
 
   // ---------- C6: the foreman ----------
   function bossPlan(st, f) {
-    const q = f.q; f.fetch = 0; f.hide = null;
+    const q = f.q, cur = st.plats[f.pl]; f.fetch = 0; f.hide = null;
+    if (!cur.ok || (cur.i && (f.x < cur.x1 - 8 || f.x > cur.x2 + 8))) { dropFig(st, f, cur.ok ? null : cur); return; }
     if (!st.snowing && !st.work) {  // by the clock, ticking them off; he is the last to leave
       fetchLad(st, f); const left = travel(st, f, st.plats[0]); if (left) q.push({a: 'walk', x: left.xf}, {a: 'grab', link: left, top: false});
       if (!st.shift) { q.push(rest(SB.clip, 1.5, {clip: 1})); return; }
@@ -1271,6 +1313,11 @@
       g.fillStyle = '#5a3d28'; g.strokeStyle = INK; g.lineWidth = 1.1; g.beginPath(); g.arc(x, y - 0.8, R + 1.3, Math.PI, 0); g.closePath(); g.fill(); g.stroke();
       g.beginPath(); g.rect(x - R - 1.8, y - 1.2, 3.4, 7.4); g.rect(x + R - 1.6, y - 1.2, 3.4, 7.4); g.fill(); g.stroke();
       g.fillStyle = '#d9c9a3'; g.fillRect(x - d * 1.2 - 3, y - R - 0.6, 6, 2.2);
+    } else if (f.gift && f.gift.st === 2 && f.gift.k === 'hat') {  // from Santa: striped, with a bobble
+      g.save(); g.translate(x, y); g.rotate(a + Math.PI / 2);
+      g.fillStyle = '#3d9a4d'; g.beginPath(); g.arc(0, 0, R + 1.2, Math.PI * 1.02, Math.PI * 1.98); g.quadraticCurveTo(0, -R - 9, -R - 1.1, -0.3); g.fill();
+      g.strokeStyle = '#fff'; g.lineWidth = 1.5; g.beginPath(); g.moveTo(-R - 0.6, -1.4); g.lineTo(R + 0.6, -1.4); g.moveTo(-R * 0.7, -R * 0.75 - 1); g.lineTo(R * 0.7, -R * 0.75 - 1); g.stroke();
+      g.fillStyle = '#e2473d'; g.beginPath(); g.arc(0, -R - 5.2, 2.5, 0, 6.3); g.fill(); g.restore();
     } else {
       g.fillStyle = f.hat; g.beginPath();
       if (f.ov && f.ov.hat) g.arc(J[20], J[21] + 1, R + 0.9, 0, Math.PI);
@@ -1308,22 +1355,38 @@
       const c = st.glow = document.createElement('canvas'); c.width = c.height = 32; const q = c.getContext('2d'), gr = q.createRadialGradient(16, 16, 0, 16, 16, 16);
       gr.addColorStop(0, 'rgba(255,90,60,.95)'); gr.addColorStop(0.35, 'rgba(255,40,30,.5)'); gr.addColorStop(1, 'rgba(255,30,20,0)'); q.fillStyle = gr; q.fillRect(0, 0, 32, 32);
     }
-    const S = st.santa = {ph: 0, t: 0, f, P, x: -180, y: 40, x0: -180, y0: 30 + rnd(0, 16), lx: U.clamp((P.x1 + P.x2) / 2 - 67, 30, st.w - 170), ang: 0, todo: [], cur: null, wait: 0, tp: null, sp: [], si: 0, bag: 0, give: 0, seat: 1, snort: 0, hd: new Float32Array(6), rq: st.req ? st.req.id : 0};
+    const S = st.santa = {ph: 0, t: 0, f, P, x: -190, y: 40, y0: 30 + rnd(0, 16), lx: U.clamp((P.x1 + P.x2) / 2 - 67, 30, st.w - 170), ang: 0, todo: [], cur: null, wait: 0, tp: null, sp: [], si: 0, bag: 0, give: 0, seat: 1, snort: 0, hd: new Float32Array(6), u: new Float32Array(9), nx: 0, ny: 0, fl: 0, xl: -60, xT: 0, xA: 0, xR: 0, rq: st.req ? st.req.id : 0};
+    // the path of the whole team: level, then down to the tile (xA to xT); later up and away from xR. Everyone on it follows it.
+    S.xT = S.lx; S.xA = S.xT - Math.max(240, 2.6 * (P.y - S.y0)); S.xR = S.lx + 142;
+    if (!st.crew.some(c => !c.gone && !c.guest && !c.gift)) { S.ph = 5; S.fl = 2; bump('flyover'); }  // everyone still has one: he only flies over and waves
     for (let i = 0; i < 48; i++) S.sp.push({x: 0, y: 0, l: 0});
     actStart(st, 'santa', {grp: 1, max: 280, step: santaStep, idle: idleRest, fin: () => { st.santa = null; }});
     return true;
   }
+  /** The height of the team's path at x. The slope there is left in TILT. */
+  let TILT = 0, RX = 0, RY = 0, RC = 1, RS = 0;
+  function teamY(S, x) {
+    const y1 = S.P.y, y0 = S.y0; TILT = 0;
+    if (S.fl === 2) { TILT = Math.cos(x * 0.011) * 0.08; return y0 + 14 + Math.sin(x * 0.011) * 8; }
+    if (S.fl === 1) { const d = x - S.xR; if (d <= 0) return y1; if (d < 150) { TILT = -Math.atan(0.0044 * d); return y1 - 0.0022 * d * d; } TILT = -Math.atan(0.66); return y1 - 49.5 - 0.66 * (d - 150); }
+    if (x >= S.xT) return y1; if (x <= S.xA) return y0;
+    const v = (x - S.xA) / (S.xT - S.xA); TILT = Math.atan(6 * v * (1 - v) * (y1 - y0) / (S.xT - S.xA)); return y0 + (y1 - y0) * v * v * (3 - 2 * v);
+  }
+  const rmv = (g, x, y) => g.moveTo(RX + x * RC - y * RS, RY + x * RS + y * RC), rln = (g, x, y) => g.lineTo(RX + x * RC - y * RS, RY + x * RS + y * RC);
   const twinkle = (S, x, y) => { const p = S.sp[S.si = (S.si + 1) % S.sp.length]; p.x = x; p.y = y; p.l = 1.5; };
   const canTake = (st, c) => !c.gone && !c.fear && !c.row && !c.ov && !c.bury && !c.sled && grounded(st, c);
   function santaStep(A, dt, st) {
-    const S = st.santa, f = S.f, P = S.P, px = S.x, py = S.y; S.t += dt;
-    if (S.ph === 0) {  // across the top of the screen, then down onto the tile
-      const u = Math.min(1, S.t / 6.5), e = 1 - (1 - u) * (1 - u), v = U.clamp((u - 0.4) / 0.6, 0, 1);
-      S.x = S.x0 + (S.lx - S.x0) * e; S.y = S.y0 + (P.y - S.y0) * v * v * (3 - 2 * v) + Math.sin(S.t * 3) * 3 * (1 - v);
-      S.ang = u < 1 ? Math.atan2(S.y - py, Math.max(0.5, S.x - px)) * 0.8 : 0; twinkle(S, S.x - 28 + rnd(-4, 4), S.y - 6 + rnd(-5, 5));
+    const S = st.santa, f = S.f, P = S.P; S.t += dt;
+    if (S.ph === 5) {  // only a pass overhead
+      S.xl += 150 * dt; S.x = S.xl - 130; S.y = teamY(S, S.x); S.ang = TILT; twinkle(S, S.x - 28 + rnd(-4, 4), S.y - 6 + rnd(-5, 5));
+      return S.x > st.w + 60;
+    }
+    if (S.ph === 0) {  // across the top of the screen, then down onto the tile: the leader first, the sleigh last
+      const u = Math.min(1, S.t / 7), e = 1 - (1 - u) * (1 - u);
+      S.xl = -60 + (S.lx + 190) * e; S.x = S.xl - 130; S.y = teamY(S, S.x); S.ang = TILT; if (u < 0.97) twinkle(S, S.x - 28 + rnd(-4, 4), S.y - 6 + rnd(-5, 5));
       if (u >= 1) { S.ph = 1; S.t = 0; }
     } else if (S.ph === 1) {
-      if (S.t > 0.9) { S.ph = 2; S.seat = 0; f.x = U.clamp(S.x - 34, P.x1 + 3, P.x2 - 3); f.y = P.y; f.pl = P.i; f.dir = -1; S.todo = st.crew.filter(c => !c.gone && !c.guest); }
+      if (S.t > 0.9) { S.ph = 2; S.seat = 0; f.x = U.clamp(S.x - 34, P.x1 + 3, P.x2 - 3); f.y = P.y; f.pl = P.i; f.dir = -1; S.todo = st.crew.filter(c => !c.gone && !c.guest && !c.gift); }  // not those who still have one
     } else if (S.ph === 2 || S.ph === 3) {
       if (loose(st, f, dt, S)) return;
       const tp = S.tp;
@@ -1371,11 +1434,11 @@
       f.dir = d; const was = S.give; S.give += dt;
       if (S.give < 0.8) ease(f, SB.bag.k[0][1]); else ease(f, SB.give.k[0][1]);
       if (was < 0.8 && S.give >= 0.8) { react(c, SB.take, 1.6); c.dir = -d; bump('gives'); }
-      if (S.give > 1.7) { c.gift = st.clock; S.todo.splice(S.todo.indexOf(c), 1); S.cur = null; S.give = 0; bump('gifts'); }
+      if (S.give > 1.7) { c.gift = {st: 0, at: st.clock + rnd(6, 15), k: '', t1: 0, until: 0, sx: c.x, n: 0}; react(c, SB.yay, 2.1); c.re.hop = 9; S.todo.splice(S.todo.indexOf(c), 1); S.cur = null; S.give = 0; bump('gifts'); SEEN.gx = Math.round(c.x); SEEN.gy = Math.round(c.y); }
     } else {  // a moment to settle in, and away
-      const u = Math.max(0, (S.t - 0.9) / 5.5);
-      if (u > 0) { S.x = S.lx + (st.w + 240 - S.lx) * u * u; S.y = P.y - 330 * u * u * (3 - 2 * Math.min(1, u)) * 0.6 - 60 * u; S.ang = Math.atan2(S.y - py, Math.max(0.5, S.x - px)) * 0.8; twinkle(S, S.x - 28 + rnd(-4, 4), S.y - 6 + rnd(-5, 5)); }
-      if (u >= 1) return true;
+      const tt = S.t - 0.9;
+      if (tt > 0) { if (!S.fl) bump('takeoff'); S.fl = 1; S.xl = S.lx + 130 + (tt < 3 ? 45 * tt * tt : 405 + 270 * (tt - 3)); S.x = S.xl - 130; S.y = teamY(S, S.x); S.ang = TILT; if (S.y < P.y - 2) twinkle(S, S.x - 28 + rnd(-4, 4), S.y - 6 + rnd(-5, 5)); }
+      if (S.x > st.w + 80 || S.y < -90) return true;
     }
   }
   /** Santa's sack: very big, red, with a white fur rim round its mouth. */
@@ -1390,38 +1453,45 @@
     g.closePath(); g.fill(); g.stroke(); g.restore();
   }
   function santaDraw(g, st, dt, sc) {
-    const S = st.santa, f = S.f, c = st.clock, fly = S.ph === 0 || (S.ph === 4 && S.t > 0.9), P = S.P;
+    const S = st.santa, f = S.f, c = st.clock, P = S.P, parked = S.ph >= 1 && S.ph <= 4 && !S.fl, yo = parked && P.away ? Math.sin(c * 2) * 2 - 3 : 0, un = S.u;
     // a goose near the team: the reindeer lower their heads at it and snort
-    let gs = false; if (sc && !fly) for (const a of sc.actors) if (a.kind === 'goose' && Math.abs(a.x - S.x - 80) < 280 && Math.abs(a.y - S.y) < 200) gs = true;
-    if (gs && (S.snort -= dt) < 0) { S.snort = 0.9; puff(st, S.x + S.hd[4] + 9, S.y + S.hd[5] + 3, 3); bump('snorts'); }
+    let gs = false; if (sc && parked) for (const a of sc.actors) if (a.kind === 'goose' && Math.abs(a.x - S.x - 80) < 280 && Math.abs(a.y - S.y) < 200) gs = true;
+    if (gs && (S.snort -= dt) < 0) { S.snort = 0.9; puff(st, S.nx, S.ny, 3); bump('snorts'); }
     g.lineCap = g.lineJoin = 'round';
     g.strokeStyle = '#ffe9a0'; g.lineWidth = 1.4; g.beginPath();
     for (const p of S.sp) if (p.l > 0) { p.l -= dt; const r = (0.8 + 3.4 * Math.abs(Math.sin(p.l * 8 + p.x))) * Math.min(1, p.l * 1.6); g.moveTo(p.x - r, p.y); g.lineTo(p.x + r, p.y); g.moveTo(p.x, p.y - r); g.lineTo(p.x, p.y + r); }
     g.stroke();
-    g.save(); g.translate(S.x, S.y + (!fly && P.away ? Math.sin(c * 2) * 2 - 3 : 0)); g.rotate(S.ang);
-    g.strokeStyle = '#6b4a2b'; g.lineWidth = 1; g.beginPath(); g.moveTo(24, -17); g.lineTo(140, -22); g.stroke();  // the traces
-    // three reindeer in one path: flying they gallop, each a little out of step; parked they stamp, nod and shake
+    // each reindeer stands at its own point of the path, tilted to the path there; the traces run from one to the next
+    for (let i = 0; i < 3; i++) { const x = S.xl - (2 - i) * 38; un[i * 3] = x; un[i * 3 + 1] = teamY(S, x) + yo; un[i * 3 + 2] = TILT; }
+    const sa = Math.sin(S.ang), ca = Math.cos(S.ang);
+    g.strokeStyle = '#6b4a2b'; g.lineWidth = 1.1; g.beginPath(); g.moveTo(S.x + 25 * ca + 16 * sa, S.y + yo + 25 * sa - 16 * ca);
+    for (let i = 0; i < 3; i++) { RX = un[i * 3]; RY = un[i * 3 + 1]; RC = Math.cos(un[i * 3 + 2]); RS = Math.sin(un[i * 3 + 2]); rln(g, -12, -22); rmv(g, 12, -22); }
+    g.stroke();
+    // three reindeer in one path: in the air they gallop, each a little out of step; on the tile they stamp, nod and shake
     g.beginPath(); const hd = S.hd;
     for (let i = 0; i < 3; i++) {
-      const x = 54 + i * 38, ph = c * 11 + i * 1.3, u = (c * 0.29 + i * 0.37) % 1; let a1 = 0, a2 = 0, k1 = 0, k2 = 0, nk = 0.5, sh = 0;
-      if (fly) { a1 = Math.sin(ph) * 0.95; a2 = Math.sin(ph + 2.5) * 0.95; k1 = 0.5 + 0.5 * Math.cos(ph); k2 = 0.5 + 0.5 * Math.cos(ph + 2.5); nk = 0.8; }
+      RX = un[i * 3]; RY = un[i * 3 + 1]; RC = Math.cos(un[i * 3 + 2]); RS = Math.sin(un[i * 3 + 2]);
+      const fly = S.fl === 2 || RY < P.y + yo - 1.5, run = !fly && !parked, ph = c * 11 + i * 1.3, u = (c * 0.29 + i * 0.37) % 1; let a1 = 0, a2 = 0, k1 = 0, k2 = 0, nk = 0.5, sh = 0;
+      if (fly || run) { const m = run ? 0.55 : 0.95; a1 = Math.sin(ph) * m; a2 = Math.sin(ph + 2.5) * m; k1 = (0.5 + 0.5 * Math.cos(ph)) * (run ? 0.5 : 1); k2 = (0.5 + 0.5 * Math.cos(ph + 2.5)) * (run ? 0.5 : 1); nk = 0.8; }
       else { if (u < 0.08) { a1 = Math.sin(u / 0.08 * Math.PI) * 0.75; k1 = a1 * 1.6; } if (u > 0.3 && u < 0.5) nk += Math.sin((u - 0.3) / 0.2 * Math.PI) * 1.1; if (u > 0.7 && u < 0.8) sh = Math.sin(c * 42) * 1.8; if (gs) nk = 1.5; }
-      g.moveTo(x - 12, -23); g.lineTo(x + 12, -23); g.moveTo(x - 11, -20.5); g.lineTo(x + 11, -20.5); g.moveTo(x - 12, -23); g.lineTo(x - 16, -27);
+      rmv(g, -12, -23); rln(g, 12, -23); rmv(g, -11, -20.5); rln(g, 11, -20.5); rmv(g, -12, -23); rln(g, -16, -27);
       for (let j = 0; j < 4; j++) {
-        const lx = j < 2 ? x + 10.5 : x - 10.5, a = (j < 2 ? a1 : a2) * (j & 1 ? -0.8 : 1) + (j & 1 ? 0.1 : -0.1), k = (j < 2 ? k1 : k2) * (j & 1 && !fly ? 0 : 1), mx = lx + Math.sin(a) * 10.5, my = -21 + Math.cos(a) * 10.5;
-        g.moveTo(lx, -21); g.lineTo(mx, my); g.lineTo(mx + Math.sin(a - k) * 10.5, my + Math.cos(a - k) * 10.5);
+        const lx = j < 2 ? 10.5 : -10.5, a = (j < 2 ? a1 : a2) * (j & 1 ? -0.8 : 1) + (j & 1 ? 0.1 : -0.1), k = (j < 2 ? k1 : k2) * (j & 1 && !fly ? 0 : 1), mx = lx + Math.sin(a) * 10.5, my = -21 + Math.cos(a) * 10.5;
+        rmv(g, lx, -21); rln(g, mx, my); rln(g, mx + Math.sin(a - k) * 10.5, my + Math.cos(a - k) * 10.5);
       }
-      const hx = x + 12 + Math.sin(nk) * 13 + sh, hy = -23 - Math.cos(nk) * 13; hd[i * 2] = hx; hd[i * 2 + 1] = hy;
-      g.moveTo(x + 12, -22); g.lineTo(hx, hy); g.lineTo(hx + 8, hy + 3);
+      const hx = 12 + Math.sin(nk) * 13 + sh, hy = -23 - Math.cos(nk) * 13; hd[i * 2] = RX + hx * RC - hy * RS; hd[i * 2 + 1] = RY + hx * RS + hy * RC;
+      rmv(g, 12, -22); rln(g, hx, hy); rln(g, hx + 8, hy + 3);
+      if (i === 2) { S.nx = RX + (hx + 8.6) * RC - (hy + 3.2) * RS; S.ny = RY + (hx + 8.6) * RS + (hy + 3.2) * RC; }
     }
     g.strokeStyle = INK; g.lineWidth = 5.4; g.stroke(); g.strokeStyle = '#a8703c'; g.lineWidth = 2.9; g.stroke();
     g.beginPath(); for (let i = 0; i < 6; i += 2) { const x = hd[i], y = hd[i + 1]; g.moveTo(x, y - 1); g.lineTo(x - 4, y - 12); g.moveTo(x - 2, y - 6.5); g.lineTo(x + 3, y - 12); g.moveTo(x - 3.2, y - 9.5); g.lineTo(x - 8, y - 12.5); }
     g.strokeStyle = INK; g.lineWidth = 3; g.stroke(); g.strokeStyle = '#ecdcb4'; g.lineWidth = 1.4; g.stroke();
     // the first one's red nose, glowing
-    const nx = hd[4] + 8.6, ny = hd[5] + 3.2, r = 11 + 4 * Math.sin(c * 5);
+    const nx = S.nx, ny = S.ny, r = 11 + 4 * Math.sin(c * 5);
     g.globalCompositeOperation = 'lighter'; g.drawImage(st.glow, nx - r, ny - r, r * 2, r * 2); g.globalCompositeOperation = 'source-over';
     g.fillStyle = '#ff3b2f'; g.beginPath(); g.arc(nx, ny, 2.6, 0, 6.3); g.fill();
-    if (S.seat) { sack(g, -17, -27, 0.95, -0.25); f.x = -1; f.y = -8; f.dir = 1; f.lift = 0; ease(f, S_REINS, 1); solve(f); inkOne(g, f, RED, 2.8, BONE); hat(g, f); }
+    g.save(); g.translate(S.x, S.y + yo); g.rotate(S.ang);
+    if (S.seat) { sack(g, -17, -27, 0.95, -0.25); f.x = -1; f.y = -8; f.dir = 1; f.lift = 0; ease(f, S_REINS, 1); if (S.fl === 2) { f.p[5] = 150 + Math.sin(c * 9) * 18; f.p[6] = 12; } solve(f); inkOne(g, f, RED, 2.8, BONE); hat(g, f); }
     // the sleigh: a high curved back, a front that curls over, and runners
     g.fillStyle = '#b3261e'; g.strokeStyle = INK; g.lineWidth = 1.6; g.beginPath(); g.moveTo(-25, -29); g.quadraticCurveTo(-29, -8, -17, -8); g.lineTo(13, -8); g.quadraticCurveTo(26, -9, 27, -25); g.quadraticCurveTo(27, -31, 21, -29); g.quadraticCurveTo(20, -17, 9, -17); g.lineTo(-13, -17); g.quadraticCurveTo(-18, -18, -20, -29); g.closePath(); g.fill(); g.stroke();
     g.strokeStyle = '#f2c94c'; g.lineWidth = 1.3; g.beginPath(); g.moveTo(-22, -13); g.lineTo(18, -13); g.stroke();
@@ -1435,6 +1505,52 @@
       if (!f.ov && !S.tp) reach(f, 1, bx + d * 2, by - 15);  // one hand on its mouth, always; into it for each present
       inkOne(g, f, RED, 2.8, BONE); hat(g, f); dots(st.wp, f); eye(st.ep, f);
       if (S.give >= 0.8) present(g, J[16] + d * 2, J[17] - 2, 0);
+    }
+  }
+  const INSIDE = ['scarf', 'muffs', 'hat', 'mitts', 'sled', 'cane', 'coal'], PAPER = ['#d8362e', '#3d9a4d', '#ffd94a', '#1b2238'];
+  function scrap(st, x, y, vx, vy, c, y0) { if (st.scraps.length < 26) st.scraps.push({x, y, vx, vy, c, y0, l: c === 3 ? 6 : 22}); }
+  /** One figure's present: under the arm until it is opened, then what was in it. */
+  function giftStep(st, f, g, dt) {
+    const G = f.gift, J = f.J, d = f.dir, c = st.clock, s = f.s, hx = (J[16] + J[20]) / 2, hy = (J[17] + J[21]) / 2;
+    if (G.st === 0) {
+      const up = f.re && f.re.an === SB.yay; present(g, up ? hx : J[0] - d * 6, up ? hy - 3 : J[1] - 5, f.n >> 1);
+      if (c > G.at && canTake(st, f) && !f.re && !f.grp) { react(f, SB.unwrap, 3.4); G.st = 1; G.t1 = c; G.n = 0; bump('unwraps'); SEEN.gx = Math.round(f.x); SEEN.gy = Math.round(f.y); }  // down on one knee to open it
+    } else if (G.st === 1) {
+      const t = c - G.t1;
+      if (t < 1.6) present(g, hx, hy, f.n >> 1);
+      if (t > 0.8 && t < 2.6 && t > 0.8 + G.n * 0.22) { G.n++; scrap(st, hx, hy, (Math.random() - 0.5) * 120, -50 - Math.random() * 70, (f.n >> 1) & 1 ? (G.n & 1 ? 1 : 2) : (G.n & 1 ? 0 : 2), f.y - 1); }
+      if (!f.re || f.re.an !== SB.unwrap) {
+        if (t < 3.2 || !canTake(st, f)) { G.st = 0; G.at = c + 4; return; }  // interrupted: later
+        let k = pickOf(INSIDE); if (f.boss && k === 'hat') k = 'scarf';
+        bump('opens'); bump('open_' + k); SEEN.gx = Math.round(f.x); SEEN.gy = Math.round(f.y);
+        if (k === 'coal') {  // a lump of coal: a slump, a kick, and a workmate who finds it funny
+          f.gift = null; react(f, SB.kick, 1.9); scrap(st, f.x + d * 8, f.y - 6, d * 150, -90, 3, f.y - 1);
+          const m = nearTo(st.crew.filter(o => o !== f && !o.guest && canTake(st, o) && !o.re), f.x, f.y); if (m) { react(m, SB.laugh, 1.7); m.dir = f.x >= m.x ? 1 : -1; }
+        } else { G.st = 2; G.k = k; G.until = c + rnd(120, 200); G.sx = f.x; react(f, SB.show, 1.4); }
+      }
+    } else if (c > G.until) f.gift = null;
+    else if (!f.hide) {
+      const k = G.k, show = f.re && f.re.an === SB.show;
+      if (k === 'scarf') {
+        const nx = J[2] + (J[4] - J[2]) * 0.3, ny = J[3] + (J[5] - J[3]) * 0.3, w = Math.sin(c * 6 + f.n) * 2;
+        g.lineCap = 'round'; g.strokeStyle = '#e2473d'; g.lineWidth = 2.6; g.beginPath(); g.moveTo(nx + d * 3, ny); g.lineTo(nx - d * 3, ny + 0.5); g.quadraticCurveTo(nx - d * 9, ny + 3 + w, nx - d * 12, ny + 10 - w); g.stroke();
+      } else if (k === 'muffs') {
+        g.strokeStyle = '#1b2238'; g.lineWidth = 1.4; g.beginPath(); g.arc(J[4], J[5], HR * s + 1.8, Math.PI * 1.08, Math.PI * 1.92); g.stroke();
+        g.fillStyle = '#3f8fd6'; g.beginPath(); g.arc(J[4], J[5] + 0.6, 3, 0, 6.3); g.fill(); g.stroke();
+      } else if (k === 'mitts') { g.fillStyle = '#e2473d'; g.beginPath(); g.arc(J[16], J[17], 2.7, 0, 6.3); g.arc(J[20], J[21], 2.7, 0, 6.3); g.fill(); }
+      else if (k === 'cane') {
+        const x = J[16], y = J[17]; g.lineCap = 'round'; g.strokeStyle = '#fff'; g.lineWidth = 2.6; g.beginPath(); g.moveTo(x, y + 4); g.lineTo(x, y - 6); g.arc(x + d * 2.6, y - 6, 2.6, d > 0 ? Math.PI : 0, d > 0 ? 0 : Math.PI, d < 0); g.stroke();
+        g.strokeStyle = '#e2473d'; g.lineWidth = 2.6; g.beginPath(); g.moveTo(x, y + 2.5); g.lineTo(x, y + 0.5); g.moveTo(x, y - 2.5); g.lineTo(x, y - 4.5); g.moveTo(x + d * 2.4, y - 8.6); g.lineTo(x + d * 3.4, y - 8.4); g.stroke();
+        if (!f.re && !f.grp && canTake(st, f) && Math.random() < dt / 14) react(f, SB.sip, 1.9);  // a lick now and then
+      } else if (k === 'sled') {  // a toy sled, pulled along on a string (held up to be admired at first)
+        G.sx += (f.x - d * 22 - G.sx) * Math.min(1, dt * 4);
+        const x = show ? J[16] : G.sx, y = show ? J[17] - 2 : f.y - 1, e = G.sx < f.x ? 1 : -1;
+        if (show || Math.abs(f.y - st.plats[f.pl].y) < 3) {
+          g.lineCap = 'round'; if (!show) { g.strokeStyle = '#d9c9a3'; g.lineWidth = 0.9; g.beginPath(); g.moveTo(J[20], J[21]); g.lineTo(x + e * 7, y - 2); g.stroke(); }
+          g.strokeStyle = INK; g.lineWidth = 3.4; g.beginPath(); g.moveTo(x - e * 7, y); g.lineTo(x + e * 6, y); g.quadraticCurveTo(x + e * 10, y, x + e * 9, y - 4); g.moveTo(x - e * 5, y - 3); g.lineTo(x + e * 5, y - 3); g.stroke(); g.strokeStyle = '#d0453a'; g.lineWidth = 1.6; g.stroke();
+        }
+      }
+      if (show && k !== 'sled' && k !== 'cane') { /* what it is wearing is already on it */ }
     }
   }
   function present(g, x, y, k) {
@@ -1582,7 +1698,7 @@
       // a panel that wakes while it is snowing shows snow that has been falling for a while
       if (ctx.opts.always || /^snowy/.test(ctx.env.weather || '')) for (const P of plats) { const nz = U.noise(ctx.seed + P.i * 13); for (let i = 0; i < P.n; i++) P.cols[i] = P.cap * (0.3 + 0.55 * (nz(i * 0.37) * 0.5 + 0.5)); }
       const crew = [], n = U.clamp(Math.round(+ctx.opts.crew || 3), 1, 6);
-      for (let i = 0; i < n + 2; i++) { const f = figure(0, plats[0].y, 0.9 + r() * 0.2); Object.assign(f, {gone: true, grp: null, hide: null, sh: 0, mug: 0, bury: 0, tong: null, shv: null, sled: 0, duck: 0, gift: 0, ready: 0, slot: 0, side: 0, cv: null, went: 0, tr: null, boss: false, guest: false, look: '', suit: '', noLad: false, noTool: false, q: [], act: null, re: null, job: null, jx: 0, pl: 0, tool: 0, load: 0, hat: HATS[i], n: i * 2 + 1, rq: 0, ov: null, fear: null, row: null, gd: null, cur: null, em: [], wpn: 0, tt: 0, x0: 0, y0: 0, fxi: 0, fetch: 0, lad: {on: false, k: 0, link: null, len: 130, d: 0, gx: 0, gy: 0, gyT: 0, gd: 1}, T: new Float32Array(4)}); crew.push(f); }
+      for (let i = 0; i < n + 2; i++) { const f = figure(0, plats[0].y, 0.9 + r() * 0.2); Object.assign(f, {gone: true, tx: 0, sx: 0, grp: null, hide: null, sh: 0, mug: 0, bury: 0, tong: null, shv: null, sled: 0, duck: 0, gift: 0, ready: 0, slot: 0, side: 0, cv: null, went: 0, tr: null, boss: false, guest: false, look: '', suit: '', noLad: false, noTool: false, q: [], act: null, re: null, job: null, jx: 0, pl: 0, tool: 0, load: 0, hat: HATS[i], n: i * 2 + 1, rq: 0, ov: null, fear: null, row: null, gd: null, cur: null, em: [], wpn: 0, tt: 0, x0: 0, y0: 0, fxi: 0, fetch: 0, lad: {on: false, k: 0, link: null, len: 130, d: 0, gx: 0, gy: 0, gyT: 0, gd: 1}, T: new Float32Array(4)}); crew.push(f); }
       // two who are not shovellers: the foreman (hard hat, clipboard), and now and then someone in a pink bunny suit
       const boss = crew[n], bunny = crew[n + 1]; Object.assign(boss, {boss: true, look: 'boss', noTool: true, s: 1.04}); Object.assign(bunny, {guest: true, look: 'bunny', suit: '#f7a8cb', noTool: true, noLad: true, s: 0.98});
       // where one can stand out of sight: on the platform just under a tile, behind that tile
@@ -1598,7 +1714,7 @@
       const flakes = []; for (let i = 0; i < 38; i++) flakes.push({x: r() * W, y: r() * H, v: 22 + r() * 30, w: 0.6 + r() * 1.2, ph: r() * 6.28, z: 1.4 + r() * 1.4});
       const layer = document.createElement('canvas'); layer.width = W; layer.height = H;
       return {plats, crew, flakes, layer, lg: layer.getContext('2d'), bits: [], balls: [], req: null, quake: 0, row: null, bumpGap: (+ctx.opts.bump || 24), rowNext: (+ctx.opts.bump || 24) * 0.6, force, on: false,
-        boss, bunny, covers, ice, iceP: null, iceDirty: true, iceF: [], stuck: [], iceN: 0, acts: [], men: [], ghosts: [], yeti: null, sinceYeti: 0, yetiN: 0, fort: null, fortP: null, shift: null, santa: null, rv: null, rvCv: null, glow: null, wp: null, ep: null,
+        boss, bunny, covers, ice, iceP: null, iceDirty: true, iceF: [], stuck: [], iceN: 0, acts: [], men: [], ghosts: [], scraps: [], yeti: null, sinceYeti: 0, yetiN: 0, fort: null, fortP: null, shift: null, santa: null, rv: null, rvCv: null, glow: null, wp: null, ep: null,
         play, playNext: force ? 7 : play * 0.5, gagNext: force ? 7 : play * 0.25, tabN: 0, sinceRv: 0, work: true, fz: 0, snowing: false, rr: 0, clock: 0, look: 0, chk: 0, w: W, h: H};
     },
     // a finger dragged along a pile brushes it off, as on the plain snow overlay
@@ -1683,6 +1799,8 @@
         if (a.pl === b.pl && Math.abs(a.x - b.x) < 15 && firm(a) && firm(b) && (a.act.a === 'walk' || b.act.a === 'walk') && (!a.lad.k || a.lad.on) && (!b.lad.k || b.lad.on)) { rowStart(st, a, b); break; }
       }
       if (st.row) rowStep(st, st.row, dt);
+      // (counted for the checks: two at work on one spot)
+      for (let i = 0; i < st.crew.length; i++) { const a = st.crew[i]; if (a.gone || a.grp || !a.act || a.act.a !== 'dig') continue; for (let j = i + 1; j < st.crew.length; j++) { const b = st.crew[j]; if (!b.gone && !b.grp && b.pl === a.pl && b.act && b.act.a === 'dig' && Math.abs(a.x - b.x) < 30) bump('crowd'); } }
       const rails = new Path2D(), rungs = new Path2D(), pa = new Path2D(), hd = new Path2D(), shafts = new Path2D(), blades = new Path2D(), white = new Path2D(), eyes = new Path2D(), whl = new Path2D(), snow = new Path2D(), mugs = new Path2D();
       let stuckF = null; st.wp = white; st.ep = eyes;
       for (const f of st.crew) {
@@ -1691,7 +1809,7 @@
         const rq = st.req, on = f.act && f.act.a;
         if (rq && f.rq !== rq.id && on !== 'hop' && on !== 'sled' && on !== 'ride') { f.rq = rq.id; if (!f.fear) awe(f, rq.x, rq.y, f.n + rq.id, on === 'climb', on === 'climb' || (f.tool === 1 && !f.row)); }
         const gz = goose(sc, f); if (!gz) f.gd = null;
-        if (!f.fear && gz && !AIR[on] && scared(f, gz)) fearStart(st, f);
+        if (!f.fear && gz && !AIR[on] && (on === 'climb' || Math.abs(f.y - st.plats[f.pl].y) < 3) && scared(f, gz)) fearStart(st, f);
         const row = st.row;
         if (f.fear) fearStep(st, f, dt, gz);
         else if (f.ov) ovStep(f, dt, st.crew);
@@ -1701,6 +1819,11 @@
         }
         else crewStep(st, f, dt);
         if (f.gone) continue;
+        {
+          const B = st.plats[f.pl], an = f.act && f.act.a, nx = !an && f.q.length ? f.q[0].a : '', air = AIR[an] || an === 'climb' || nx === 'hop' || nx === 'climb' || (f.fear && (f.fear.hang || f.fear.cling)) || f.row;
+          const bad = f.pl && (f.x < -5 || f.x > W + 5) ? 1 : !air && Math.abs(f.y - B.y) > 3 ? 2 : !air && !f.ov && f.pl && (f.x < B.x1 - 8 || f.x > B.x2 + 8) ? 3 : 0;
+          if (bad) flag(st, f, bad);
+        }
         const hang = f.fear && f.fear.hang;
         if (sc) sc.next.push({kind: 'stick', role: 'crew', x: f.x, y: f.y, h: 40 * f.s, hid: !!hang});  // hid: out of a goose's sight
         solve(f);
@@ -1777,7 +1900,12 @@
       ink(g, pa, hd);
       tools(g, shafts, blades);
       for (const f of st.crew) if (!f.gone && !f.hide && !f.suit) hat(g, f);
-      for (const f of st.crew) if (f.gift && !f.gone) { if (st.clock - f.gift > 80) f.gift = 0; else present(g, f.J[0] - f.dir * 6, f.J[1] - 5, f.n >> 1); }  // Santa's present, kept under the arm for a while
+      for (const f of st.crew) if (f.gift && !f.gone) giftStep(st, f, g, dt);  // Santa's presents: carried, opened, and what was inside
+      for (let i = st.scraps.length - 1; i >= 0; i--) {  // torn wrapping paper: it flies, and lies in the snow for a while
+        const c = st.scraps[i]; if ((c.l -= dt) < 0) { st.scraps.splice(i, 1); continue; }
+        if (c.y < c.y0 || c.vy < 0) { c.vy += 420 * dt; c.x += c.vx * dt; c.y = Math.min(c.y0, c.y + c.vy * dt); if (c.y >= c.y0) c.vx = 0; }
+        g.fillStyle = PAPER[c.c]; if (c.c === 3) { g.beginPath(); g.arc(c.x, c.y - 2, 2.6, 0, 6.3); g.fill(); } else g.fillRect(c.x - 1.6, c.y - 1.2, 3.4, 2.4);
+      }
       if (stuckF && stuckF.tong) { const f = stuckF; g.lineCap = 'round'; g.strokeStyle = '#ff7f96'; g.lineWidth = 2.2; g.beginPath(); g.moveTo(f.J[4] + f.dir * HR * f.s * 0.8, f.J[5] + 1.5); g.lineTo(f.tong.x, f.tong.y); g.stroke(); }
       g.fillStyle = '#c8553a'; g.fill(mugs);
       if (st.yeti) yetiDraw(g, st);
