@@ -280,7 +280,7 @@
   // The jobs, after the classic eight: floater (leaf umbrella), climber (up a tile's side, or up a gap), builder (a
   // stair of bricks, with a pickaxe through any tile in its way), tunneler (straight through a tile), blocker (stands
   // and turns the others back), digger (straight down), miner (down and forward), bomber (counts down and bursts).
-  const ROLES = [['walker', 44], ['floater', 12], ['climber', 8], ['builder', 10], ['tunneler', 6], ['blocker', 6], ['digger', 5], ['miner', 4], ['bomber', 5]], JOBS = ROLES.slice(1);
+  const ROLES = [['walker', 58], ['floater', 12], ['climber', 8], ['builder', 5], ['tunneler', 3], ['blocker', 6], ['digger', 2], ['miner', 1], ['bomber', 5]], JOBS = ROLES.slice(1);
   const DROP = {key: 'drop', label: 'Drop interval', type: 'range', min: 0.3, max: 10, step: 0.1, unit: 's', default: 1.5};  // about this long between two walkers leaving the hatch
   const TEST = HP.fx.walkTest = {out: 0, home: 0, splat: 0, boom: 0, guard: 0, round: 0, most: 0, off: 0, cut: 0};  // counts, for checks
 
@@ -510,20 +510,20 @@
       bang(c, W) {
         const S = W.S, R = 7 * S, cy = c.y - 3 * S; TEST.boom++;
         burst(W, c.x, c.y - 4 * S, 16, ['#fffaf0', '#ffd978', '#ff8a3c', '#e2543a'], 170, {g: 300});
-        for (let dy = -R; dy < R; dy += S) { const hw = Math.sqrt(R * R - (dy + S / 2) * (dy + S / 2)); carve(W, c.x - hw, cy + dy, c.x + hw, cy + dy + S); }
+        if (!c.dud) for (let dy = -R; dy < R; dy += S) { const hw = Math.sqrt(R * R - (dy + S / 2) * (dy + S / 2)); carve(W, c.x - hw, cy + dy, c.x + hw, cy + dy + S); }
         for (const o of W.list) if (o !== c && !o.dead && !o.s.hide && o.st !== 'hopin' && o.st !== 'home' && o.st !== 'splat' && Math.hypot(o.x - c.x, o.y - c.y) < 16 * S) { o.dir = o.x < c.x ? -1 : 1; if (o.role !== 'floater') o.role = 'walker'; go(o, 'blown', W); }
       },
       // A stair of little bricks, up and forward, one up for two along: as high as the door when that is higher,
       // otherwise twelve bricks, or as many as it takes to get over a gap.
       stair(c, W) {
         if (c.keep) { c.keep = 0; return; }  // back from the pickaxe: the same stair
-        const up = c.y - W.door.y; c.role = 'walker'; c.bn = 0; c.bair = 0; c.bmax = up > 10 ? Math.min(100, Math.ceil(up / W.S) + 3) : 12;
+        const up = c.y - W.door.y; c.role = 'walker'; c.bn = 0; c.bair = 0; c.dig = c.goal; c.goal = 0;  // only a stair sent up to the door goes through tiles c.bmax = up > 10 ? Math.min(100, Math.ceil(up / W.S) + 3) : 12;
       },
       brick(c, W) {
         if (c.f) return;
         const S = W.S, h = c.def.half * S, nx = c.x + c.dir * 2 * S, ny = c.y - S;
         if (c.bn >= c.bmax || nx < 8 + h || nx > W.w - 8 - h || ny < 14 * S) { fire(c, 'built', W); return; }
-        if (blocked(W, c, nx, ny)) { go(c, 'pick', W); return; }
+        if (blocked(W, c, nx, ny)) { if (c.dig) go(c, 'pick', W); else fire(c, 'built', W); return; }
         lay(W, nx - S, ny, c.bn++); c.x = nx; c.y = ny;
         // over a gap, then over ground again and too high to be stepped on from the far side: the bridge is done
         let k = 1; while (k <= 6 && at(W, nx, ny + k * S) !== 1) k++;
@@ -572,7 +572,7 @@
     if (Math.abs(up) <= 10) { if (!ahead && Math.abs(c.x - D.x) > 12 * S) post(30); return; }  // level with the door and walking away from it
     if (up > 10) {  // the door is higher: stairs, begun about where they will come out by it
       if (!ahead) post(25);
-      else if (Math.abs(D.x - c.x) < 2 * up + 20 * S && W.live < W.maxLive && !W.list.some(o => near(o) && (o.st === 'build' || o.st === 'pick') && Math.abs(o.x - c.x) < 40 * S)) { c.role = 'builder'; go(c, 'build', W); }
+      else if (Math.abs(D.x - c.x) < 2 * up + 20 * S && W.live < W.maxLive && !W.list.some(o => near(o) && (o.st === 'build' || o.st === 'pick') && Math.abs(o.x - c.x) < 40 * S)) { c.role = 'builder'; c.goal = 1; go(c, 'build', W); }
       return;
     }
     // the door is lower: down through the tile once over the door's own, if nobody has cut a way down there yet
@@ -624,11 +624,11 @@
         c.role = pick(ROLES); c.alpha = 0; c.born = W.t; if (c.role === 'bomber') c.fuse = W.t + 5 + Math.random() * 12;
         go(c, 'drop', W); W.list.push(c); W.left--; W.wait = about(W.drop); TEST.out++;
       }
-      W.posts = 0; W.live = 0; W.maxPosts = Math.max(3, W.list.length / 6); W.maxLive = Math.max(4, W.list.length / 8);
+      W.posts = 0; W.live = 0; W.maxPosts = Math.max(3, W.list.length / 6); W.maxLive = Math.max(2, W.list.length / 20);
       for (const c of W.list) { if (c.st === 'block') W.posts++; else if (c.st === 'build' || c.st === 'pick') W.live++; }
       let n = 0, busy = false;
       for (const c of W.list) {
-        if (W.t - c.born > 150 && !c.fuse && !c.s.solid) c.fuse = W.t + 5;  // shut in somewhere: do not pile up for ever
+        if (W.t - c.born > 150 && !c.fuse && !c.s.solid) { c.fuse = W.t + 5; c.dud = 1; }  // shut in somewhere: do not pile up for ever
         if (c.fuse && W.t >= c.fuse && !c.s.end && c.st !== 'hopin' && c.st !== 'home' && c.st !== 'splat') { go(c, 'boom', W); continue; }
         if (c.st === 'walk' && c.role === 'climber') flue(c, W);
         if (c.st === 'walk' && (c.role === 'walker' || c.role === 'floater' || c.role === 'climber') && Math.random() < dt * 2) hand(c, W);
@@ -638,7 +638,7 @@
       }
       W.list.length = n; if (n > TEST.most) TEST.most = n;
       if (!W.left && !busy && W.rest <= 0) {  // only the ones standing guard are left: they go off one after another
-        if (!n) W.rest = 2.5; else W.list.forEach((c, i) => { if (!c.fuse) c.fuse = W.t + 1.5 + i * .3; });
+        if (!n) W.rest = 2.5; else W.list.forEach((c, i) => { if (!c.fuse) { c.fuse = W.t + 1.5 + i * .3; c.dud = 1; } });
       }
       W.fl -= dt; if (W.dirty && W.fl <= 0) { W.dirty = 0; W.fl = .25; flush(W); }  // the real tiles get their new holes a few times a second
       g.imageSmoothingEnabled = false;
