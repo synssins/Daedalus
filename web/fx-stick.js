@@ -1662,7 +1662,7 @@
 
   HP.fx.add('snowcrew', {
     label: 'Snow crew',
-    live: true, fps: 12,
+    live: true, z: 1, fps: 12,
     options: [{key: 'crew', label: 'Crew', type: 'range', min: 1, max: 6, step: 1, default: 3},
       {key: 'always', label: 'Whatever the weather', type: 'bool', default: false},
       {key: 'bump', label: 'Bump interval', type: 'range', min: 8, max: 300, step: 2, unit: 's', default: 24},
@@ -2535,7 +2535,7 @@
 
   HP.fx.add('kungfu', {
     label: 'Stick fight',
-    live: true, fps: 12,
+    live: true, z: 1, fps: 12,
     options: [{key: 'fighters', label: 'Fighters', type: 'range', min: 2, max: 6, step: 1, default: 2},
       {key: 'weapons', label: 'Weapons', type: 'bool', default: true},
       {key: 'powers', label: 'Powers', type: 'bool', default: true},

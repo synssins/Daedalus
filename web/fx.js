@@ -20,6 +20,8 @@
 //   days: 7,                  // default cycle length for a kind that grows
 //   live: false,              // true = animated (redrawn at fps); false = slow layer
 //   fps: 12,                  // for live kinds, at most 15
+//   z: 0,                     // drawing order among live kinds: 0 scenery, 1 creatures, 2 the goose. Higher is drawn later, so in front,
+//                             // whatever the order of the dashboard's list. Kinds with the same z keep the list's order.
 //   options: [{key, label, type: 'range'|'select'|'bool', min, max, step, unit: 's'|'min' (shown after a range's value), choices: [[value, label]], default}],
 //   create(ctx) -> state      // build whatever the kind needs to remember; called again when the layout changes
 //   draw(g, state, ctx, t, dt)// g is a 2D canvas context in CSS pixels; t seconds since start, dt since last frame
@@ -166,6 +168,7 @@
       let st = null; try { st = def.create ? def.create(ctx) : {}; } catch (e) { fail(c.kind, e); return; }
       items.push({def, ctx, st, kind: c.kind});
     });
+    items.sort((a, b) => (a.def.z || 0) - (b.def.z || 0));
     redraw(); loop();
   }
   function fail(kind, e) { console.error('overlay ' + kind + ': ' + e.message); if (HP.report && !fail[kind]) { fail[kind] = 1; HP.report('overlay ' + kind + ' failed: ' + e.message); } }

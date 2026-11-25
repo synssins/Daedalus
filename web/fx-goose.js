@@ -522,7 +522,7 @@
 
   HP.fx.add('goose', {
     label: 'Goose',
-    live: true, fps: 12,
+    live: true, z: 2, fps: 12,
     options: [{key: 'visit', label: 'Visit interval', type: 'range', min: 0.5, max: 60, step: 0.5, unit: 'min', default: 3},
       {key: 'keep', label: 'Keeps a tile for', type: 'select', choices: [[30, '30 seconds'], [60, '1 minute'], [120, '2 minutes'], [300, '5 minutes'], [600, '10 minutes']], default: 60}],
     create(ctx) {

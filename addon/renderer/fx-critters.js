@@ -823,7 +823,7 @@
 
   HP.fx.add('walkers', {
     label: 'Walkers',
-    live: true, fps: 12,
+    live: true, z: 1, fps: 12,
     options: [{key: 'count', label: 'How many', type: 'range', min: 3, max: 200, step: 1, default: 40}, SIZE, DROP],
     create(ctx) {
       heal();  // whatever an earlier round cut
@@ -1073,7 +1073,7 @@
 
   HP.fx.add('sheep', {
     label: 'Sheep',
-    live: true, fps: 12,
+    live: true, z: 1, fps: 12,
     options: [{key: 'count', label: 'How many', type: 'range', min: 1, max: 5, step: 1, default: 1}, {key: 'sound', label: 'Sound', type: 'bool', default: false}, SIZE, AWAY, TRICK],
     create(ctx) {
       const S = scale(ctx), W = world(ctx, S), r = ctx.rand;
