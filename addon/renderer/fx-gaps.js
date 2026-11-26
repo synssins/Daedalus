@@ -297,6 +297,30 @@
     return c;
   }
   const koiRing = (st, x, y, big, wait) => { if (st.rings.length < 18) st.rings.push({x, y, t: -(wait || 0), big: !!big}); };
+  const koiAt = by => !!by && by.x === +by.x && by.y === +by.y;
+  /** Another kind's "lure": a light over the water at by = {x, y}. Fish f turns and swims after it; called about once
+   *  a second it follows, and each call may draw in a fish or two that are near, three at most, so a light can gather
+   *  a small shoal. When the calls stop they go their own ways again. Not while it darts away from a touch or a threat. */
+  function koiLure(fish, f, by) {
+    if (!koiAt(by) || f.flee > 0 || f.up) return false;
+    let n = 0; for (const o of fish) if (o.lj === f && o.lt > 0) n++;
+    for (const o of fish) {
+      if (o === f || o.flee > 0 || o.up) continue;
+      const d = Math.hypot(o.x - f.x, o.y - f.y);
+      if (o.lj === f && o.lt > 0 ? d < 320 : n < 3 && o.lt <= 0 && d < 220 && Math.random() < 0.5 && ++n) { o.lj = f; o.lx = by.x; o.ly = by.y; o.lt = 2.5; }
+    }
+    f.lj = null; f.lx = by.x; f.ly = by.y; f.lt = 2.5;
+    return true;
+  }
+  /** Another kind's "carry": fish f is taken up out of the water toward by = {x, y, secs, out} and is back after secs
+   *  seconds, at out or where it was. by.mark means nothing to a fish. */
+  function koiCarry(f, by, ctx) {
+    if (!koiAt(by) || f.up) return false;
+    const out = koiAt(by.out) ? by.out : f;
+    f.up = {x: by.x, y: by.y, x0: f.x, y0: f.y, T: 0, due: 0, secs: by.secs > 0 ? +by.secs : 6, bx: U.clamp(out.x, 6, ctx.w - 6), by: U.clamp(out.y, 6, ctx.h - 6)};
+    f.lt = 0; f.eat = null;
+    return true;
+  }
   HP.fx.add('koi', {
     label: 'Koi pond', live: true, fps: 12, covers: true,
     options: [{key: 'count', label: 'How many', type: 'range', min: 2, max: 10, step: 1, default: 5}, {key: 'light', label: 'Sunlight', type: 'bool', default: true}, {key: 'pads', label: 'Lily pads', type: 'bool', default: true}],
@@ -324,6 +348,9 @@
         fish.push({len, kind, patches, sp, v: sp, ph: r() * TAU, nz: U.noise(ctx.seed + i * 13 + 5), burst: 0, shy: 0, x, y, a, w: 0, sx, sy, flee: 0, fa: 0, rest: 0, next: 6 + r() * 30, mate: -1, mt: 4 + r() * 20, eat: null, ring: 0,
           post: {kind: 'koi', tags: ['creature', 'animal'], view: 'top', x, y, h: 10, dir: 1}});
       }
+      // what others may do to a fish: lead it with a light (lt: seconds it still follows the light at lx, ly; lj: the
+      // fish it joined), and take it up out of the water (up, while it is going or away)
+      for (const f of fish) { f.lt = 0; f.lx = 0; f.ly = 0; f.lj = null; f.up = null; f.post.lure = by => koiLure(fish, f, by); f.post.carry = by => koiCarry(f, by, ctx); }
       const sp = []; for (let k = 0; k < 7; k++) sp.push({x: 0, y: 0, a: 0, nx: 0, ny: 0});
       return {fish, pads, rings: [], sp, q: new Array(26), food: [], pat: null, now: 0};
     },
@@ -356,7 +383,22 @@
       }
       for (let i = food.length - 1; i >= 0; i--) if (food[i].gone || t - food[i].t > 30) food.splice(i, 1);  // eaten, or sunk
       for (let n = 0; n < F.length; n++) {
-        const f = F[n], L = f.len, K = KOI[f.kind];
+        const f = F[n], K = KOI[f.kind], up = f.up; let lift = 0;
+        // taken up by another kind: a splash ring where it leaves the water, then it rises wriggling and shrinks
+        // (lift: 0 to 1). While it is away nothing is drawn and its actor is "hid"; it comes back with a splash.
+        if (up) {
+          if (!up.due) {
+            if (!up.T) { koiRing(st, f.x, f.y, true); koiRing(st, f.x, f.y, true, 0.2); }
+            up.T += dt; lift = up.T / 1.3;
+            if (lift >= 1) { up.due = Date.now() + up.secs * 1000; f.x = up.bx; f.y = up.by; }  // by the clock, so it is back on time even if the dashboard was not shown meanwhile
+          }
+          if (up.due) {
+            if (Date.now() < up.due) { if (sc) { const P = f.post; P.x = f.x; P.y = f.y; P.hid = true; sc.next.push(P); } continue; }
+            f.up = null; f.post.hid = false; lift = 0; f.burst = 50; f.flee = 0; f.rest = 0;
+            koiRing(st, f.x, f.y, true); koiRing(st, f.x, f.y, true, 0.2);
+          }
+        }
+        const L = f.len * (1 - 0.65 * lift * lift);
         f.burst *= Math.exp(-dt * 1.5);  // calming down
         // something to fear within reach, anywhere on the surface: away with a splash, and no second fright for a moment
         f.shy -= dt;
@@ -379,7 +421,7 @@
           goal = d < 110 ? U.clamp(o.v + (d - 25) * 0.25, f.sp * 0.5, f.sp * 2) : f.sp * 1.5;  // catches up, then keeps the other's pace
         } else f.mate = -1;
         // a body length apart
-        for (let i = 0; i < F.length; i++) { const o = F[i]; if (o === f) continue; const dx = f.x - o.x, dy = f.y - o.y, R = (L + o.len) * 0.5, dd = dx * dx + dy * dy; if (dd < R * R && dd > 0.01) { const d = Math.sqrt(dd), k = (1 - d / R) * (f.eat ? 1 : 2.5); wx += dx / d * k; wy += dy / d * k; } }
+        for (let i = 0; i < F.length; i++) { const o = F[i]; if (o === f || o.up) continue; const dx = f.x - o.x, dy = f.y - o.y, R = (L + o.len) * 0.5, dd = dx * dx + dy * dy; if (dd < R * R && dd > 0.01) { const d = Math.sqrt(dd), k = (1 - d / R) * (f.eat ? 1 : 2.5); wx += dx / d * k; wy += dy / d * k; } }
         // food dropped for it. Food that other overlays offer (a carrot, a pumpkin) is left alone: koi eat only what is thrown to them.
         if (f.eat && f.eat.gone) f.eat = null;
         if (!f.eat) { let bd = 400; for (const p of food) { const d = Math.hypot(p.x - f.x, p.y - f.y); if (!p.gone && t - p.t > 0.6 && d < bd) { bd = d; f.eat = p; } } }  // they need a moment to notice
@@ -387,6 +429,14 @@
           const p = f.eat, dx = p.x - f.x, dy = p.y - f.y, d = Math.hypot(dx, dy) || 1;
           wx = wx * 0.3 + dx / d * 3; wy = wy * 0.3 + dy / d * 3; turn = 4; goal = Math.min(f.sp + 55, d * 1.5 + 6); f.rest = 0;  // slower as it nears, so it cannot circle the pellet for ever
           if (d < 6) { p.gone = true; f.eat = null; f.rest = 0.8; koiRing(st, p.x, p.y); }  // mouth at the surface: gone, with a small ring
+        }
+        // a light over the water: after it, and it keeps a little behind it (one that only joined, a little further)
+        if (f.lt > 0) {
+          f.lt -= dt;
+          if (f.flee <= 0) {
+            const dx = f.lx - f.x, dy = f.ly - f.y, d = Math.hypot(dx, dy) || 1, gap = L * (f.lj ? 1.3 : 0.6);
+            wx = wx * 0.3 + dx / d * 3; wy = wy * 0.3 + dy / d * 3; turn = 4; goal = U.clamp((d - gap) * 2.5, 0, f.sp + 90); f.rest = 0; f.next = Math.max(f.next, 3);
+          }
         }
         // the screen's edge turns it back, harder the nearer it is
         const M = 95, e0 = 1 - f.x / M, e1 = 1 - (W - f.x) / M, e2 = 1 - f.y / M, e3 = 1 - (H - f.y) / M;
@@ -403,6 +453,7 @@
         f.ring -= dt; if (Math.abs(f.w) > 1.7 && v > 14 && f.ring <= 0) { f.ring = 2.5; koiRing(st, f.x, f.y); }  // a sharp turn stirs the surface
         f.x = U.clamp(f.x + Math.cos(f.a) * v * dt, 6, W - 6); f.y = U.clamp(f.y + Math.sin(f.a) * v * dt, 6, H - 6);
         f.ph += dt * (2.2 + v * 0.11);
+        if (lift) { const k = lift * lift; f.x = U.clamp(U.lerp(up.x0, up.x, k), 6, W - 6); f.y = U.clamp(U.lerp(up.y0, up.y, k), 6, H - 6); f.ph += dt * 18; g.globalAlpha = Math.min(1, (1 - lift) * 4); }
         // the rope: each point of the spine keeps its distance behind the one before
         const sx = f.sx, sy = f.sy, seg = L / 6; sx[0] = f.x; sy[0] = f.y;
         for (let k = 1; k < 7; k++) { const dx = sx[k] - sx[k - 1], dy = sy[k] - sy[k - 1], d = Math.hypot(dx, dy) || 1; sx[k] = sx[k - 1] + dx / d * seg; sy[k] = sy[k - 1] + dy / d * seg; }
@@ -442,6 +493,7 @@
         g.fillStyle = '#1b1410'; g.beginPath();
         for (let sd = -1; sd <= 1; sd += 2) { const ex = U.lerp(h.x, b1.x, 0.45) + h.nx * sd * L * 0.058, ey = U.lerp(h.y, b1.y, 0.45) + h.ny * sd * L * 0.058; g.moveTo(ex + 1, ey); g.arc(ex, ey, 1, 0, TAU); }
         g.fill();
+        if (lift) g.globalAlpha = 1;
       }
       // rings on the surface, over the fish
       g.lineWidth = 1.2;

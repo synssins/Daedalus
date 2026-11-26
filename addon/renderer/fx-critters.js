@@ -287,7 +287,7 @@
   const ROLES = [['walker', 80], ['floater', 10], ['climber', 6], ['bomber', 4]];  // what one is born as; the working jobs are only given out by the hand (or by a tap)
   const JOBS = [['floater', 12], ['climber', 8], ['builder', 10], ['tunneler', 6], ['blocker', 6], ['digger', 5], ['miner', 4], ['bomber', 5]];
   const DROP = {key: 'drop', label: 'Drop interval', type: 'range', min: 0.3, max: 10, step: 0.1, unit: 's', default: 1.5};  // about this long between two walkers leaving the hatch
-  const TEST = HP.fx.walkTest = {out: 0, home: 0, splat: 0, boom: 0, guard: 0, round: 0, most: 0, off: 0, cut: 0, shy: 0, hail: 0};  // counts, for checks
+  const TEST = HP.fx.walkTest = {out: 0, home: 0, splat: 0, boom: 0, guard: 0, round: 0, most: 0, off: 0, cut: 0, shy: 0, hail: 0, lured: 0};  // counts, for checks
 
   // ---------- the walkers' ground: solid cells, one walker pixel each ----------
   // 0 air, 1 tile, 2 brick. A tile is solid all round. A brick only holds what comes down on it or steps up it:
@@ -464,6 +464,9 @@
       // something to run from: it hurries the other way for a moment, then turns back and goes on as before. An edge, a wall
       // or a blocker ends it at once, so it never leaves the ground it was on.
       flee:  {frames: ['walk0', 'walk1'], ft: .09, vx: 18, dur: [.7, 1], next: 'back', on: {jolt: 'slip', edge: 'back', wall: 'back', head: 'back', bump: 'back', screen: 'back', exit: 'hopin'}},
+      // something to follow, behind it: it turns and goes after it for a few steps, then turns back and goes on as before. Ended by
+      // the same things as a flight, so it never leaves the ground it was on either.
+      trail: {frames: ['walk0', 'walk1'], ft: .16, vx: 10, dur: [1, 1.6], next: 'back', on: {jolt: 'slip', edge: 'back', wall: 'back', head: 'back', bump: 'back', screen: 'back', exit: 'hopin'}},
       // somebody of another kind on two legs goes by: a wave, or only a look, and on
       hail:  {frames: ['wave0', 'wave1', 'wave0', 'wave1'], ft: .14, once: 1, next: 'back', on: {jolt: 'slip'}},
       peer:  {frames: ['walk0'], dur: .5, next: 'back', on: {jolt: 'slip'}},
@@ -620,8 +623,19 @@
     c.was = c.dir; c.tx = isFinite(by.x) ? +by.x : c.x; c.ty = isFinite(by.y) ? +by.y : c.y; c.ox = o && isFinite(o.x) ? +o.x : c.x; c.oy = o && isFinite(o.y) ? +o.y : c.y;
     return go(c, 'taken', W);
   }
+  /** Something to follow at `by`: if that is the way it is going, it is coming already; if it is behind, a turn and a few steps after it.
+   *  Not again for ten seconds, so nothing can lead them about. */
+  function drawn(c, W, by) {
+    if (!by || !isFinite(by.x)) return false;
+    if (c.st === 'trail') return true;
+    if (!strolling(c)) return false;
+    if (Math.abs(by.x - c.x) < 2 * W.S || (by.x < c.x ? -1 : 1) === c.dir) return true;
+    if (W.t < (c.lureT || 0)) return false;
+    c.was = c.dir; c.dir = -c.dir; c.lureT = W.t + 10; TEST.lured++;
+    return go(c, 'trail', W);
+  }
   /** What a walker shows the other kinds: made once, moved each frame. */
-  const card = (c, W) => ({kind: 'walker', tags: WALKER_TAGS, x: c.x, y: c.y, h: c.def.tall * W.S, dir: c.dir, scare: by => shy(c, W, by), carry: by => taken(c, W, by)});
+  const card = (c, W) => ({kind: 'walker', tags: WALKER_TAGS, x: c.x, y: c.y, h: c.def.tall * W.S, dir: c.dir, scare: by => shy(c, W, by), carry: by => taken(c, W, by), lure: by => drawn(c, W, by)});
   /** Who of the other kinds is about: a threat close by sends a walker off, a figure on two legs gets a wave or a look. */
   function meet(W, sc) {
     const T = W.thr, P = W.ppl; T.length = P.length = 0;
@@ -976,7 +990,12 @@
     o['stand' + F] = fr(d.h, d.L[0]); o['walk0' + F] = fr(d.h, d.L[1]); o['walk1' + F] = fr(d.h, d.L[2]);
     o['graze0' + F] = fr(at(d.g), d.L[0]); o['graze1' + F] = fr(at([d.g[0], d.g[1] - 1]), d.L[0]);
     if (d.c) { o['charge0' + F] = fr(at(d.c), d.L[1]); o['charge1' + F] = fr(at([d.c[0], d.c[1] + 1]), d.L[2]); }
+    // hanging in the air: the feet swing. And (d.e: its ears, pricked) going after something with its head up.
+    o['hang' + F] = fr(d.h, d.L[0].slice(0, -1).concat('.' + d.L[0][d.L[0].length - 1]));
+    if (d.e) ['perk', 'perk0', 'perk1'].forEach((n, i) => { o[n + F] = fr(at([0, -1]), d.L[i]).concat([[d.e[0], d.h[1] + d.e[1], d.h[2] - 1 + d.e[2]]]); });
   }
+  // the ears pricked, beside where the raised head goes: one from the side, both from the front and the back
+  const EAR1 = [['l', 'l'], 0, -1], EAR2 = [['l....l', 'l....l'], 0, -1], EARB = [['l', 'l'], 0, 0];
   const SHEEP_ART = {w: 18, h: 14,
     pal: {w: '#fffaf0', W: '#e6d1b3', p: '#f0a878', P: '#c97b52', e: '#3a2233', l: '#c7798d', y: '#f6c64f', h: '#f78f8f'},
     frames: {
@@ -990,11 +1009,11 @@
       sleep0S: [[FB, 4, 5], [FSHUT, 6, 8]],
       sleep1S: [[['..wwwwww..'], 4, 4], [FB, 4, 5], [FSHUT, 6, 8]],
     }};
-  facing(SHEEP_ART.frames, 'E', {b: [WOOL, 1, 5], h: [HEAD, 11, 3], lx: 4, ly: 12, L: L4, g: [1, 5]});
-  facing(SHEEP_ART.frames, 'SE', {b: [AB, 2, 4], h: [Q, 10, 6], lx: 4, ly: 12, L: L3, g: [1, 2]});
-  facing(SHEEP_ART.frames, 'S', {b: [FB, 4, 3], h: [FACE, 6, 6], lx: 6, ly: 12, L: L2, g: [0, 2]});
-  facing(SHEEP_ART.frames, 'NE', {b: [AB, 2, 4], h: [QB, 10, 1], t: [['W', 'W'], 1, 8], back: 1, lx: 4, ly: 12, L: L3, g: [1, 3]});
-  facing(SHEEP_ART.frames, 'N', {b: [FB, 4, 3], h: [POLL, 6, 1], t: [TAIL, 7, 7], back: 1, lx: 6, ly: 12, L: L2, g: [0, 3]});
+  facing(SHEEP_ART.frames, 'E', {b: [WOOL, 1, 5], h: [HEAD, 11, 3], lx: 4, ly: 12, L: L4, g: [1, 5], e: EAR1});
+  facing(SHEEP_ART.frames, 'SE', {b: [AB, 2, 4], h: [Q, 10, 6], lx: 4, ly: 12, L: L3, g: [1, 2], e: EAR1});
+  facing(SHEEP_ART.frames, 'S', {b: [FB, 4, 3], h: [FACE, 6, 6], lx: 6, ly: 12, L: L2, g: [0, 2], e: EAR2});
+  facing(SHEEP_ART.frames, 'NE', {b: [AB, 2, 4], h: [QB, 10, 1], t: [['W', 'W'], 1, 8], back: 1, lx: 4, ly: 12, L: L3, g: [1, 3], e: EARB});
+  facing(SHEEP_ART.frames, 'N', {b: [FB, 4, 3], h: [POLL, 6, 1], t: [TAIL, 7, 7], back: 1, lx: 6, ly: 12, L: L2, g: [0, 3], e: EAR2});
   // The ram: the same animal a size up, with curled horns, and a frame or two of its own in every facing for going
   // at something head down.
   const RWOOL = ['....wwwwwwww...', '..wwwwwwwwwwww.', '.wwwwWwwwwwwwww', 'wwwwwwwwwwWwwww', 'WwwwwwwwwwwwwWw', 'wwwwWwwwwwwwwww', '.wwwwwwwWwwwwww', '..wwwwwwwwwwww.', '....wWwwwwWww..'];
@@ -1023,7 +1042,51 @@
   facing(RAM_ART.frames, 'S', {b: [RFB, 5, 5], h: [RFACE, 7, 7], lx: 7, ly: 15, L: RL2, g: [0, 2], c: [0, 2]});
   facing(RAM_ART.frames, 'NE', {b: [RAB, 2, 5], h: [RQB, 13, 2], t: [['W', 'W'], 1, 10], back: 1, lx: 5, ly: 15, L: RL3, g: [1, 4], c: [1, 3]});
   facing(RAM_ART.frames, 'N', {b: [RFB, 5, 5], h: [RPOLL, 6, 2], t: [TAIL, 9, 10], back: 1, lx: 7, ly: 15, L: RL2, g: [0, 4], c: [0, 2]});
-  const POSES = ['stand', 'walk0', 'walk1', 'graze0', 'graze1', 'charge0', 'charge1', 'lie', 'sleep0', 'sleep1', 'pet0', 'pet1'];
+  const POSES = ['stand', 'walk0', 'walk1', 'graze0', 'graze1', 'charge0', 'charge1', 'lie', 'sleep0', 'sleep1', 'pet0', 'pet1', 'hang', 'perk', 'perk0', 'perk1'];
+  // ---------- shorn, and growing back ----------
+  // A sheep that comes back from a carry marked 'shorn' has lost its wool: a thin pink body on long legs, under the
+  // same head. The coat grows back in two steps: bare, then short and fuzzy with the skin showing through, then the
+  // wool again. These bodies are plain rounded shapes made from a size; the heads, the legs and where they go are the
+  // woolly animal's own (its kit), so the ram keeps its horns.
+  /** A rounded body w by h in colour a, with a speck of b every n. */
+  function blob(w, h, a, b, n) {
+    const out = [];
+    for (let y = 0; y < h; y++) {
+      const e = Math.min(y, h - 1 - y), cut = e ? (e === 1 && h > 5 ? 1 : 0) : h > 4 ? 2 : 1, row = new Array(w - 2 * cut).fill(a);
+      if (e) for (let x = (y * 5 + 2) % n; x < row.length; x += n) row[x] = b;
+      out.push('.'.repeat(cut) + row.join('') + '.'.repeat(cut));
+    }
+    return out;
+  }
+  // r: the column where a body seen from the side or at an angle ends; mid: twice the middle column of one seen from the front;
+  // d: for the bare coat (1) and the fuzzy one (2), the body's width and height from the side, at an angle and from the front, and the legs' length
+  const SHEEP_KIT = {art: SHEEP_ART, hE: [HEAD, 11, 3], sE: SHUT, hQ: [Q, 10, 6], hS: [FACE, 6, 6], sS: FSHUT, hQB: [QB, 10], hN: [POLL, 6], L: [L4, L3, L2], lx: [4, 4, 6], r: 12, mid: 17, tuck: TUCK,
+    g: [[1, 5], [1, 2], [0, 2], [1, 3], [0, 3]], c: [], e: [EAR1, EAR1, EAR2, EARB, EAR2], d: [null, {E: [10, 4], A: [9, 5], F: [8, 6], leg: 3}, {E: [11, 5], A: [10, 6], F: [10, 7], leg: 2}]};
+  const RAM_KIT = {art: RAM_ART, hE: [RHEAD, 14, 4], sE: RSHUT, hQ: [RQ, 13, 7], hS: [RFACE, 7, 7], sS: RFSHUT, hQB: [RQB, 13], hN: [RPOLL, 6], L: [L4, RL3, RL2], lx: [6, 5, 7], r: 15, mid: 22, tuck: RTUCK,
+    g: [[1, 5], [1, 2], [0, 2], [1, 4], [0, 4]], c: [[1, 3], [1, 2], [0, 2], [1, 3], [0, 2]], e: [], d: [null, {E: [13, 5], A: [11, 6], F: [11, 6], leg: 3}, {E: [14, 7], A: [13, 8], F: [13, 8], leg: 2}]};
+  /** The art of a flock animal in coat n (1 bare, 2 fuzzy): every frame the woolly one has. */
+  function coated(K, n) {
+    const d = K.d[n], a = n === 1 ? 's' : 'f', b = n === 1 ? 'S' : 's', sp = n === 1 ? 7 : 3, H = K.art.h, lg = d.leg, top = H - lg, o = {};
+    const legs = L => lg > 2 ? L.map(f => [f[0]].concat(f)) : L;
+    const E = blob(d.E[0], d.E[1], a, b, sp), A = blob(d.A[0], d.A[1], a, b, sp), F = blob(d.F[0], d.F[1], a, b, sp);
+    const ex = K.r + 1 - d.E[0], ey = top - d.E[1], ax = K.r + 1 - d.A[0], ay = top - d.A[1], fx = (K.mid + 1 - d.F[0]) >> 1, fy = top - d.F[1], hE = K.hE, hS = K.hS;
+    facing(o, 'E', {b: [E, ex, ey], h: hE, lx: K.lx[0], ly: top, L: legs(K.L[0]), g: K.g[0], c: K.c[0], e: K.e[0]});
+    facing(o, 'SE', {b: [A, ax, ay], h: K.hQ, lx: K.lx[1], ly: top, L: legs(K.L[1]), g: K.g[1], c: K.c[1], e: K.e[1]});
+    facing(o, 'S', {b: [F, fx, fy], h: hS, lx: K.lx[2], ly: top, L: legs(K.L[2]), g: K.g[2], c: K.c[2], e: K.e[2]});
+    // from behind the head is beyond the body: it comes down to where the lower back now is
+    facing(o, 'NE', {b: [A, ax, ay], h: [K.hQB[0], K.hQB[1], ay - 3], t: [[b, b], ax - 1, ay + 2], back: 1, lx: K.lx[1], ly: top, L: legs(K.L[1]), g: K.g[3], c: K.c[3], e: K.e[3]});
+    facing(o, 'N', {b: [F, fx, fy], h: [K.hN[0], K.hN[1], fy - K.hN[0].length + 1], t: [[b + b, b + b], fx + (d.F[0] >> 1) - 1, fy + 2], back: 1, lx: K.lx[2], ly: top, L: legs(K.L[2]), g: K.g[4], c: K.c[4], e: K.e[4]});
+    const le = [E, ex, ey + lg], lf = [F, fx, fy + lg], hl = [hE[0], hE[1], hE[2] + lg], sl = [K.sE, hE[1], hE[2] + 5], pl = [K.sE, hE[1], hE[2] + lg], fs = [K.sS, hS[1], hS[2] + 2];
+    o.lieE = [le, hl, K.tuck]; o.sleep0E = [le, sl]; o.sleep1E = [[[E[0]], ex, ey + lg - 1], le, sl];
+    o.pet0E = [le, pl, K.tuck]; o.pet1E = [[E, ex, ey + lg - 1], pl, K.tuck];
+    o.lieS = [lf, [hS[0], hS[1], hS[2] + 2]]; o.sleep0S = [lf, fs]; o.sleep1S = [[[F[0]], fx, fy + lg - 1], lf, fs];
+    return {w: K.art.w, h: H, pal: Object.assign({s: '#ffc4c9', S: '#e8939f', f: '#f3d9cc'}, K.art.pal), frames: o};
+  }
+  /** Put coat n on an animal: 0 its wool, 1 bare, 2 fuzzy. The two extra sheets are made the first time one is needed. */
+  function coat(c, W, n) {
+    const key = (c.ram ? 'r' : 's') + n; c.coat = n;
+    c.sh = n ? W.coats[key] || (W.coats[key] = herd(coated(c.ram ? RAM_KIT : SHEEP_KIT, n), W.S)) : c.ram ? W.rsh : W.sh;
+  }
   /** A flock animal's sheet, and for every pose the frame of each drawn facing. What is drawn from the side and the front only is borrowed by the others. */
   function herd(art, S) {
     const sh = sheet(art, S); sh.at = {};
@@ -1062,7 +1125,7 @@
   // Trick: about how long between a sheep's frolics (a short run with a skip in it); in between it walks, grazes and
   // lies down. Each sheep has a time for its next one (c.next). None at night.
   const TRICK = {key: 'trick', label: 'Trick interval', type: 'range', min: 3, max: 120, step: 1, unit: 's', default: 12};
-  const FLOCK = HP.fx.sheepTest = {flee: 0, charges: 0, butts: 0, won: 0, bites: 0, W: null};  // counts, for checks
+  const FLOCK = HP.fx.sheepTest = {flee: 0, charges: 0, butts: 0, won: 0, bites: 0, shorn: 0, regrow: 0, lured: 0, W: null};  // counts, for checks
   const WALK = 24, RUN = 84, CHARGE = 170;  // pixels a second at the large size
   const SHADE = 'rgba(8,6,18,.16)';
   // for each eighth of the compass, from east round by south: which drawn facing, and whether it is the mirrored one
@@ -1075,6 +1138,8 @@
   const duty = c => c.mode === 'charge' || c.mode === 'stamp' || c.mode === 'ward';
   /** Doing something a finger, a stroke or a new plan may break into. */
   const idle = c => c.mode === 'idle' || c.mode === 'walk' || c.mode === 'graze' || c.mode === 'lie' || c.mode === 'munch' || c.mode === 'gawk';
+  /** How far down the field it is, for what is drawn in front of what: one that is lifted counts as where it left the grass. */
+  const stood = c => c.mode === 'taken' && c.rise ? c.gy : c.y;
   /** Give up the tuft it had its eye on. */
   const release = c => { if (c.spot) { c.spot.by = null; c.spot = null; } };
   /** Turn to look along dx, dy. The facing is kept until the way has clearly swung into the next eighth, so it does not flicker between two. */
@@ -1095,6 +1160,14 @@
   /** A tuft of grass somewhere on the field, at fx, fy of its width and height. n: 3 full, 1 bitten short, 0 stubble. */
   const tuft = (W, fx, fy) => ({x: W.x1 + 10 + (W.x2 - W.x1 - 20) * fx, y: W.y1 + (W.y2 - W.y1) * fy, n: 3, back: 0, by: null});
 
+  /** The others turn to look at x, y ("!"). stamp: the ram, if it has nothing else on, faces it and stamps instead. */
+  function stare(W, who, x, y, stamp) {
+    for (const o of W.list) {
+      if (o === who || !calm(o)) continue;
+      if (o.ram && stamp) { if (idle(o) || o.mode === 'stamp') { release(o); turn(o, x - o.x, y - o.y); mood(o, 'stamp'); } }
+      else if (idle(o)) { release(o); turn(o, x - o.x, y - o.y); mood(o, 'gawk'); o.bang = W.t + 1.2; }
+    }
+  }
   /** What to do next, on coming to rest. */
   function choose(c, W) {
     const k = W.S / 3, sc = W.ctx.scene, r = Math.random();
@@ -1156,11 +1229,21 @@
     const S = W.S, k = S / 3, sc = W.ctx.scene, night = !!W.ctx.env.night;
     c.T += dt; c.f += dt; if (c.hop > 0) c.hop -= dt;
     let m = c.mode;
+    // the wool grows back: bare for half a minute, short and fuzzy for a little longer, then as it was
+    if (c.coat && W.t >= c.grow && m !== 'gone') { if (c.coat === 1) { coat(c, W, 2); c.grow = W.t + span(40, 50); } else { coat(c, W, 0); FLOCK.regrow = Math.round(W.t - c.shornT); } }
     if (m === 'held') { if (W.t - c.heldT > .3) mood(c, 'idle', 1); return; }  // let go when the finger stops moving or lifts
     // carried off by another kind: toward it, shrinking out of sight; and after a while back where it was, or where it was told
+    if (m === 'taken' && c.rise) {
+      // lifted (a beam from above): up to it, slowly at first, turning as it hangs, a little smaller the higher it is. The others watch it go.
+      const u = Math.min(1, c.T / c.up), e = u * u;
+      c.x = c.gx + (c.tx - c.gx) * u; c.y = c.gy + (c.ty - c.gy) * e; c.k = 1 - .4 * e; c.o = (c.o0 + Math.floor(c.T / .45)) & 7;
+      if ((c.look -= dt) <= 0) { c.look = 1.1; stare(W, c, c.tx, c.ty, true); }
+      if (u >= 1) { c.rise = 0; mood(c, 'gone', c.secs); }
+      return;
+    }
     if (m === 'taken') { stride(c, c.tx, c.ty, 260, dt); c.k = Math.max(0, 1 - c.T / .7); if (c.T >= .7) mood(c, 'gone', c.secs); return; }
-    if (m === 'gone') { if (c.T > c.dur) { c.x = U.clamp(c.ox, W.x1, W.x2); c.y = U.clamp(c.oy, W.y1, W.y2); mood(c, 'back'); } return; }
-    if (m === 'back') { c.k = Math.min(1, c.T / .4); if (c.T >= .4) { c.k = 1; mood(c, 'idle', 1); } return; }
+    if (m === 'gone') { if (c.T > c.dur) { c.x = U.clamp(c.ox, W.x1, W.x2); c.y = U.clamp(c.oy, W.y1, W.y2); if (c.mark === 'shorn') { coat(c, W, 1); c.shornT = W.t; c.grow = W.t + span(30, 40); FLOCK.shorn++; } mood(c, 'back'); } return; }
+    if (m === 'back') { c.k = Math.min(1, c.T / .4); if (c.T >= .4) { c.k = 1; if (c.mark) { c.mark = ''; mood(c, 'daze', span(2.5, 4)); stare(W, c, c.x, c.y); } else mood(c, 'idle', 1); } return; }
     if (c.ram) { if (duty(c)) { guard(c, W, dt); return; } }
     else {
       // something the flock runs from, wherever on the field it is: off, for as long as it is near
@@ -1204,14 +1287,29 @@
       else if (Math.random() < dt / 10) c.say = W.t + 1.1;  // a soft "baa": the bubble only, no jump, no sound
       if (c.T > 3) mood(c, 'idle', 1);
     }
+    else if (m === 'lure') {
+      // after something that called it (lure(), about once a second): toward it at a trot, ears up, and a body's length short of it.
+      // When the calls stop it loses interest and goes back to the others.
+      if (W.t > c.lureT) { head(c, W, W.cx + span(-40, 40) * k, W.cy + span(-25, 25) * k); return; }
+      const dx = c.lx - c.x, dy = c.ly - c.y, d = Math.hypot(dx, dy); turn(c, dx, dy);
+      c.go = d > 12 * S; if (c.go) { const st = Math.min(d - 10 * S, 46 * k * dt); c.x += dx / d * st; c.y += dy / d * st; }
+    }
+    else if (m === 'daze') {
+      // back from wherever it was taken, and not sure what happened: it stands and sees stars, shakes itself, and goes to find the others
+      if (Math.random() < dt * 2.5) W.parts.push({x: c.x + (Math.random() - .5) * 10 * S, y: c.y - 11 * S, vx: (Math.random() - .5) * 30, vy: -18, g: 0, t: 0, life: .7, col: '#ffe45c', sz: S, star: 1});
+      if (c.T > c.dur) mood(c, 'shake', .9);
+    }
+    else if (m === 'shake') { if (c.T > c.dur) head(c, W, W.cx + span(-40, 40) * k, W.cy + span(-25, 25) * k); }
     else if (c.T > (m === 'gawk' ? 1.5 : c.dur)) mood(c, 'idle', span(.5, 1.5));  // a look at the finger, or a chew, is over
   }
 
   /** Draw one animal: a soft shadow on the grass, and over it the frame for what it is doing and which way it faces. */
   function show(g, c, W) {
     const m = c.mode; if (m === 'gone') return;
-    const S = W.S, sh = c.sh, o = OCT[c.o], f = c.f; let p = 'stand', lift = 0;
-    if (m === 'walk') p = ['walk0', 'stand', 'walk1', 'stand'][Math.floor(f / .16) & 3];
+    const S = W.S, sh = c.sh, o = OCT[c.o], f = c.f, up = m === 'taken' && c.rise, gy = up ? c.gy : c.y; let p = 'stand', lift = 0;
+    if (up) p = Math.floor(f / .3) & 1 ? 'hang' : 'stand';
+    else if (m === 'lure') p = c.go ? ['perk0', 'perk', 'perk1', 'perk'][Math.floor(f / .13) & 3] : 'perk';
+    else if (m === 'walk') p = ['walk0', 'stand', 'walk1', 'stand'][Math.floor(f / .16) & 3];
     else if (m === 'flee' || m === 'frolic' || m === 'held' || m === 'taken' || m === 'ward') p = Math.floor(f / .1) & 1 ? 'walk1' : 'walk0';
     else if (m === 'graze' || m === 'munch') p = Math.floor(f / .22) & 1 ? 'graze1' : 'graze0';
     else if (m === 'charge' || m === 'stamp') p = Math.floor(f / (m === 'stamp' ? .16 : .1)) & 1 ? 'charge1' : 'charge0';
@@ -1220,11 +1318,11 @@
     else if (m === 'pet') p = (Math.floor(f / .3) & 3) === 2 ? 'pet1' : 'pet0';
     if (c.hop > 0) lift = Math.sin(3.1416 * (1 - c.hop / .5)) * 6 * S; else if (m === 'frolic') lift = Math.abs(Math.sin(f * 9)) * 3 * S;
     const slim = o[0] === 2 || o[0] === 4, rx = (c.ram ? 8.5 : 7) * S * (slim ? .75 : 1) * c.k, ry = 2.2 * S * c.k, i = sh.at[p][o[0]];
-    g.globalAlpha = c.k; g.fillStyle = SHADE;
-    g.beginPath(); g.ellipse(c.x, c.y - S, rx, ry, 0, 0, 6.2832); g.fill();  // two plain fills, the inner one smaller: a soft edge without a blur
-    g.beginPath(); g.ellipse(c.x, c.y - S, rx * .72, ry * .62, 0, 0, 6.2832); g.fill();
+    g.globalAlpha = up ? U.clamp((c.up - c.T) / .35, 0, 1) : c.k; g.fillStyle = SHADE;  // one that is lifted leaves its shadow on the grass, and is gone at the top
+    g.beginPath(); g.ellipse(c.x, gy - S, rx, ry, 0, 0, 6.2832); g.fill();  // two plain fills, the inner one smaller: a soft edge without a blur
+    g.beginPath(); g.ellipse(c.x, gy - S, rx * .72, ry * .62, 0, 0, 6.2832); g.fill();
     if (c.k < 1) g.drawImage(sh.c, i * sh.cw, o[1] ? sh.ch : 0, sh.cw, sh.ch, Math.round(c.x - sh.cw * c.k / 2), Math.round(c.y - sh.ch * c.k), sh.cw * c.k, sh.ch * c.k);
-    else blit(g, sh, i, o[1], c.x, c.y - lift);
+    else blit(g, sh, i, o[1], m === 'shake' ? c.x + (Math.floor(f / .08) & 1 ? S : -S) : c.x, c.y - lift);
     g.globalAlpha = 1;
   }
   /** The animal under the finger: the one in front first. */
@@ -1242,18 +1340,31 @@
     if (c.mode !== 'flee') { release(c); mood(c, 'flee'); }
     return true;
   }
-  /** Carried off toward `by` for by.secs seconds; set down at by.out, or where it was. */
-  function borne(c, by) {
+  /** Carried off toward `by` for by.secs seconds; set down at by.out, or where it was. Toward a point well above it, it is lifted
+   *  there (the ram too, unless it is busy with a threat); sideways it is pulled, which the ram is too heavy for. by.mark 'shorn': it comes back bare. */
+  function borne(c, W, by) {
     if (!by || !calm(c)) return false;
+    const tx = isFinite(by.x) ? +by.x : c.x, ty = isFinite(by.y) ? +by.y : c.y, up = c.y - ty, rise = up > 14 * W.S && up > Math.abs(tx - c.x);
+    if (c.ram && (!rise || duty(c))) return false;
     const o = by.out; c.secs = U.clamp(+by.secs || 3, .5, 120);
-    c.tx = isFinite(by.x) ? +by.x : c.x; c.ty = isFinite(by.y) ? +by.y : c.y; c.ox = o && isFinite(o.x) ? +o.x : c.x; c.oy = o && isFinite(o.y) ? +o.y : c.y;
+    c.mark = by.mark === 'shorn' ? 'shorn' : ''; c.rise = rise ? 1 : 0;
+    if (rise) { c.gx = c.x; c.gy = c.y; c.o0 = c.o; c.look = 0; c.up = U.clamp(up / 80, 1.2, 3); }
+    c.tx = tx; c.ty = ty; c.ox = o && isFinite(o.x) ? +o.x : c.x; c.oy = o && isFinite(o.y) ? +o.y : c.y;
     release(c); mood(c, 'taken'); return true;
   }
-  /** Made once for each, moved each frame. The ram stands its ground and is too heavy to carry: it offers neither. */
+  /** Called by something to follow at `by`: after it for three seconds, or three more. Not while it has something else on its mind. */
+  function drawnTo(c, W, by) {
+    if (!by || !isFinite(by.x) || !isFinite(by.y) || !(idle(c) || c.mode === 'lure')) return false;
+    c.lx = U.clamp(+by.x, W.x1, W.x2); c.ly = U.clamp(+by.y, W.y1, W.y2); c.lureT = W.t + 3;
+    if (c.mode !== 'lure') { release(c); c.go = false; mood(c, 'lure'); FLOCK.lured++; }
+    return true;
+  }
+  /** Made once for each, moved each frame. The ram stands its ground and follows no lights: it offers neither, and is carried only upward (see borne). */
   function flockCard(c, W) {
     const p = {kind: c.ram ? 'ram' : 'sheep', tags: c.ram ? RAM_TAGS : SHEEP_TAGS, view: 'top', x: c.x, y: c.y, h: (c.ram ? 11 : 9) * W.S, dir: c.dir, hid: false,
       pet() { if (c.mode === 'pet') c.T = 0; else if (idle(c) || c.mode === 'sleep') { release(c); mood(c, 'pet'); } }};
-    if (!c.ram) { p.scare = by => bolt(c, by); p.carry = by => borne(c, by); }
+    if (!c.ram) { p.scare = by => bolt(c, by); p.lure = by => drawnTo(c, W, by); }
+    p.carry = by => borne(c, W, by);
     return p;
   }
 
@@ -1262,7 +1373,7 @@
     live: true, z: 1, fps: 12, covers: true,
     options: [{key: 'count', label: 'How many', type: 'range', min: 1, max: 20, step: 1, default: 6}, {key: 'sound', label: 'Sound', type: 'bool', default: false}, SIZE, TRICK, {key: 'ram', label: 'Ram', type: 'bool', default: true}],
     create(ctx) {
-      const S = scale(ctx), k = S / 3, r = ctx.rand, W = FLOCK.W = {ctx, S, w: ctx.w, h: ctx.h, t: 0, list: [], parts: [], spots: [], grip: null, ram: null, scan: 0, grow: 12, dark: false};
+      const S = scale(ctx), k = S / 3, r = ctx.rand, W = FLOCK.W = {ctx, S, w: ctx.w, h: ctx.h, t: 0, list: [], parts: [], spots: [], grip: null, ram: null, scan: 0, grow: 12, dark: false, coats: {}};
       // the field: the whole screen, less a margin so that nobody stands half off it
       W.x1 = 10 * S; W.x2 = ctx.w - 10 * S; W.y1 = 18 * S; W.y2 = ctx.h - 2 * S;
       W.sh = herd(SHEEP_ART, S); W.ex = sheet(EXTRA_ART, S); W.trick = interval(ctx, TRICK);
@@ -1272,7 +1383,8 @@
       W.cx = W.rx = ctx.w * (.35 + .3 * r()); W.cy = W.ry = ctx.h * (.4 + .25 * r());
       for (let i = 0; i < n + (ram ? 1 : 0); i++) {
         const c = {ram: i === n, sh: W.sh, i, x: U.clamp(W.cx + (r() - .5) * 560 * k, W.x1, W.x2), y: U.clamp(W.cy + (r() - .5) * 380 * k, W.y1, W.y2), o: Math.floor(r() * 8), dir: 1, mode: 'idle', T: 0, dur: r() * 3, f: r(), k: 1,
-          tx: 0, ty: 0, fx: 0, fy: 0, fear: 0, spot: null, bite: 0, z: 0, hop: 0, say: 0, bang: 0, next: about(W.trick) * (.5 + i), wake: i === n || i % 5 === 4, secs: 0, ox: 0, oy: 0, heldT: 0, tries: 0, foe: null, wary: 0, post: null};
+          tx: 0, ty: 0, fx: 0, fy: 0, fear: 0, spot: null, bite: 0, z: 0, hop: 0, say: 0, bang: 0, next: about(W.trick) * (.5 + i), wake: i === n || i % 5 === 4, secs: 0, ox: 0, oy: 0, heldT: 0, tries: 0, foe: null, wary: 0, post: null,
+          coat: 0, grow: 0, shornT: 0, mark: '', rise: 0, up: 0, gx: 0, gy: 0, o0: 0, look: 0, lx: 0, ly: 0, lureT: 0, go: false};
         if (c.ram) { c.sh = W.rsh = herd(RAM_ART, S); W.ram = c; }
         c.dir = OCT[c.o][1] ? -1 : 1; c.post = flockCard(c, W); W.list.push(c);
       }
@@ -1333,7 +1445,7 @@
       }
       for (const c of L) if (calm(c)) { c.x = U.clamp(c.x, W.x1, W.x2); c.y = U.clamp(c.y, W.y1, W.y2); }
       // one lower on the screen is nearer: drawn later, so in front. (Nearly sorted from the frame before: a few swaps.)
-      for (let i = 1; i < L.length; i++) { const c = L[i]; let j = i - 1; while (j >= 0 && L[j].y > c.y) { L[j + 1] = L[j]; j--; } L[j + 1] = c; }
+      for (let i = 1; i < L.length; i++) { const c = L[i]; const d = stood(c); let j = i - 1; while (j >= 0 && stood(L[j]) > d) { L[j + 1] = L[j]; j--; } L[j + 1] = c; }
       g.imageSmoothingEnabled = false;
       // the grass: a new tuft now and then up to eighteen, and the eaten ones growing back. Faint, so that a tile's words still read.
       if ((W.grow -= dt) <= 0) { W.grow = span(12, 30); if (W.spots.length < 18) W.spots.push(tuft(W, Math.random(), Math.random())); }

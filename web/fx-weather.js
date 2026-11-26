@@ -478,11 +478,14 @@
   // Small soft lights in four pale colours wander the whole screen, each pulsing gently. Most of them like a button
   // that is on and circle its edge; the rest keep to their own corner. A touch scatters them and they drift back.
   //
-  // Now and then they gather over a figure that can be carried off, a round portal opens beside it onto a green place
-  // under another sky, and the figure goes through: a while later a second portal lets it out on another tile. With
+  // Now and then they gather over a creature that can be carried off, a round portal opens beside it onto a green place
+  // under another sky, and the creature goes through: a while later a second portal lets it out on another tile. With
   // nobody to take, the portal still opens, and a frond reaches out for a look round while a leaf blows through.
+  //
+  // Now and then one light leaves the others, goes down to a creature and leads it a way across the screen (the verb
+  // lure). One that has come along for a while may find the portal opening in front of it at the end of the walk.
   const FAIRY = ['255,232,180', '255,150,205', '150,255,205', '200,165,255'];
-  const PR = 46;  // the portal's radius
+  const PR = 46;  // the portal's radius for a figure 40 high; P.r is the radius of the one that is open
   /** A fern frond from x, y: heading a, curling by bend along its length. */
   function frond(g, x, y, a, len, bend, col, edge) {
     const n = Math.max(5, Math.round(len / 8)), step = len / n;
@@ -532,7 +535,7 @@
     return {back, front, rim, leaf: leafSprite(['#7fdc58', '#1f6e2c'], 0)};
   }
   function drawGate(g, st, P, t) {
-    const A = gate || (gate = gateArt()), e = P.k * P.k * (3 - 2 * P.k), r = PR * e * (1 + 0.02 * Math.sin(t * 3.1)), z = r / 128;
+    const A = gate || (gate = gateArt()), e = P.k * P.k * (3 - 2 * P.k), r = P.r * e * (1 + 0.02 * Math.sin(t * 3.1)), z = r / 128;
     g.globalAlpha = 1; g.save(); g.beginPath(); g.arc(P.x, P.y, r, 0, TAU); g.clip();
     g.drawImage(A.back, P.x - r, P.y - r, 2 * r, 2 * r);
     g.globalCompositeOperation = 'lighter'; g.globalAlpha = 0.85;
@@ -545,17 +548,17 @@
     if (P.step !== 3 || P.went) return;
     // nobody went through: a frond reaches out and looks about, and a leaf blows out the other way
     const u = P.tm / 7, grow = U.span(u, 0.04, 0.3) * (1 - U.span(u, 0.72, 0.95)), v = P.side, lt = P.tm - 1.5;
-    if (grow > 0.02) { g.save(); g.translate(P.x + v * PR * 0.1, P.y + PR * 0.5); g.scale(grow, grow); frond(g, 0, 0, -1.57 + v * (0.75 + 0.35 * Math.sin(P.tm * 1.7)), PR * 1.9, v * (0.9 + 0.5 * Math.sin(P.tm * 1.7 + 1)), '#86e860', '#1b6a2a'); g.restore(); }
+    if (grow > 0.02) { g.save(); g.translate(P.x + v * P.r * 0.1, P.y + P.r * 0.5); g.scale(grow, grow); frond(g, 0, 0, -1.57 + v * (0.75 + 0.35 * Math.sin(P.tm * 1.7)), P.r * 1.9, v * (0.9 + 0.5 * Math.sin(P.tm * 1.7 + 1)), '#86e860', '#1b6a2a'); g.restore(); }
     if (lt > 0 && lt < 4.5) {
       const sz = 22 * Math.min(1, 0.4 + lt);
       g.save(); g.globalAlpha = Math.min(1, 4.5 - lt); g.translate(P.x - v * (10 + 48 * lt) + Math.sin(lt * 3) * 8, P.y - 30 * lt + 10 * lt * lt); g.rotate(lt * 2.2); g.scale(0.4 + 0.6 * Math.abs(Math.cos(lt * 2.6)), 1);
       g.drawImage(A.leaf, -sz / 2, -sz / 2, sz, sz); g.restore();
     }
   }
-  /** The nearest figure on two legs within r pixels; carry: only one that can be carried off. */
-  const figure = (ctx, x, y, r, carry) => {
+  /** The nearest creature within r pixels, person or animal; verb: only one that offers it ('carry': it can be carried off). */
+  const figure = (ctx, x, y, r, verb) => {
     let best = null, bd = r;
-    for (const a of ctx.scene.actors) if (!a.hid && a.tags.indexOf('creature') >= 0 && a.tags.indexOf('person') >= 0 && (!carry || typeof a.carry === 'function')) { const d = Math.hypot(a.x - x, a.y - y); if (d < bd) { bd = d; best = a; } }
+    for (const a of ctx.scene.actors) if (!a.hid && a.tags.indexOf('creature') >= 0 && (!verb || typeof a[verb] === 'function')) { const d = Math.hypot(a.x - x, a.y - y); if (d < bd) { bd = d; best = a; } }
     return best;
   };
   /** A place on a tile top with room for a portal over it: {x, y}, y where feet stand. Not on the tile "not" if there is another. */
@@ -572,21 +575,25 @@
   function portal(g, st, ctx, t, dt) {
     let P = st.P;
     if (!P) {
-      st.wait -= dt; if (st.wait > 0) return;
-      const who = figure(ctx, st.mx, st.my, 1e9, true), at = who || perch(st, ctx);
-      P = st.P = {step: 0, tm: 0, who: !!who, ax: at.x, ay: at.y, ah: who ? who.h || 40 : 0, x: 0, y: 0, k: 0, lure: 1, tx: at.x, ty: at.y, tr: 22, left: 0, out: null, went: false, side: 1, seen: 0};
+      // one that has followed the lead light is taken first, and need not wait for the clock: its walk ends at a portal
+      st.wait -= dt;
+      const L = st.led || (st.L && st.L.won >= 5 && st.wait <= 0 ? st.L : null), led = L ? figure(ctx, L.cx, L.cy, 160, 'carry') : null; st.led = null;
+      if (!led && st.wait > 0) return;
+      const who = led || figure(ctx, st.mx, st.my, 1e9, 'carry'), at = who || perch(st, ctx);
+      // r: sized to what it takes, by its height (one on four legs is about twice as long as it is high); fs: the side to open on (ahead of one that was led), 0 = where there is room
+      P = st.P = {step: 0, tm: 0, who: !!who, ax: at.x, ay: at.y, ah: who ? who.h || 40 : 0, r: who ? U.clamp((who.h || 40) * (who.tags.indexOf('animal') >= 0 ? 1.9 : 1.15), PR, 76) : PR, fs: led ? L.dir : 0, x: 0, y: 0, k: 0, lure: 1, tx: at.x, ty: at.y, tr: 22, left: 0, out: null, went: false, side: 1, seen: 0};
     }
     P.tm += dt; if (P.went) P.left -= dt;
-    const top = y => Math.max(PR + 6, y - PR * 0.85), open = (x, y) => { P.x = P.tx = x; P.y = P.ty = y; P.tr = PR + 9; P.lure = 2; P.tm = 0; P.step++; };
-    if (P.who && P.step < 3) { const a = figure(ctx, P.ax, P.ay, 160, true); if (a) { P.ax = a.x; P.ay = a.y; P.ah = a.h || 40; } }  // it may walk on: keep over it
+    const top = y => Math.max(P.r + 6, y - P.r * 0.85), open = (x, y) => { P.x = P.tx = x; P.y = P.ty = y; P.tr = P.r + 9; P.lure = 2; P.tm = 0; P.step++; };
+    if (P.who && P.step < 3) { const a = figure(ctx, P.ax, P.ay, 160, 'carry'); if (a) { P.ax = a.x; P.ay = a.y; P.ah = a.h || 40; } }  // it may walk on: keep over it
     if (P.step < 2) { P.tx = P.ax; P.ty = P.who ? P.ay - P.ah - 16 : top(P.ay); }
     if (P.step === 0) { if ((P.tm > 2 && st.far < 60) || P.tm > 10) { P.step = 1; P.tm = 0; } }  // gathering
     else if (P.step === 1) {  // circling overhead; then the portal opens beside it, on the side with more room
-      if (P.tm > (P.who ? 2.5 : 0.8)) { P.side = P.ax < ctx.w / 2 ? 1 : -1; open(U.clamp(P.ax + (P.who ? P.side * (PR + 14) : 0), PR + 6, ctx.w - PR - 6), top(P.ay)); }
+      if (P.tm > (P.who ? 2.5 : 0.8)) { P.side = P.fs || (P.ax < ctx.w / 2 ? 1 : -1); open(U.clamp(P.ax + (P.who ? P.side * (P.r + 14) : 0), P.r + 6, ctx.w - P.r - 6), top(P.ay)); }
     } else if (P.step === 2 || P.step === 6) {
       P.k = Math.min(1, P.k + dt / 1.2);
       if (P.k >= 1) {
-        const a = P.step === 2 && P.who ? figure(ctx, P.ax, P.ay, 200, true) : null;
+        const a = P.step === 2 && P.who ? figure(ctx, P.ax, P.ay, 200, 'carry') : null;
         if (a) { const secs = 20 + Math.random() * 20; P.out = perch(st, ctx, U.over(st.solid, a.x, a.y + 4, 6)); P.went = U.act(a, 'carry', {x: P.x, y: P.y, secs, out: P.out}) === true; P.left = secs; }
         P.step++; P.tm = 0;
       }
@@ -603,7 +610,47 @@
     }
     if (P.k <= 0) return;
     drawGate(g, st, P, t);
-    if (P.k > 0.3) { const q = st.gatePost; q.x = P.x; q.y = P.y; ctx.scene.next.push(q); }
+    if (P.k > 0.3) { const q = st.gatePost; q.x = P.x; q.y = P.y; q.h = P.r * 2; ctx.scene.next.push(q); }
+  }
+  /** One frame of the lead light (st.L): light number L.i goes down to a creature that offers lure, hovers a little ahead of
+   *  it and moves off, calling it along. L.x, L.y is where the light is told to be; n is how many lights are out. */
+  function leading(st, ctx, n, dt) {
+    const acts = ctx.scene.actors, now = ctx.opts.now;
+    let L = st.L;
+    if (!L) {
+      st.lwait -= dt; if (st.lwait > 0) return;
+      let a = null, k = 0;  // any one of them, by chance
+      for (const o of acts) if (!o.hid && o.tags.indexOf('creature') >= 0 && typeof o.lure === 'function' && Math.random() * ++k < 1) a = o;
+      if (!a) { st.lwait = now ? 2 : 15; return; }
+      L = st.L = {a, i: n - 1, step: 0, tm: 0, cx: a.x, cy: a.y, ch: a.h || 30, side: a.view !== 'top' && a.view !== 'free', dir: 1, x: a.x, y: a.y, gx: 0, gy: 0, say: 0, no: 0, won: 0, lost: 0, stall: 0, by: {x: 0, y: 0}};
+      // where to: one seen from the side only along its own level (its tile top, or the ground); any other anywhere
+      if (L.side) { const b = U.over(st.solid, a.x, a.y + 4, 6), lo = b ? b.x + 12 : 30, hi = b ? b.x + b.w - 12 : ctx.w - 30; L.dir = a.x - lo > hi - a.x ? -1 : 1; L.gx = U.clamp(a.x + L.dir * (220 + Math.random() * 200), lo, hi); }
+      else { for (let j = 0; j < 5; j++) { L.gx = 60 + Math.random() * (ctx.w - 120); L.gy = 60 + Math.random() * (ctx.h - 120); if (Math.hypot(L.gx - a.x, L.gy - a.y) > 220) break; } L.dir = L.gx < a.x ? -1 : 1; }
+    }
+    const f = st.lights[L.i], home = () => { st.L = null; st.lwait = now ? 6 : 60 + Math.random() * 120; };
+    if (L.i >= n) return home();
+    // the same one as before while it is still about; if it is posted anew each frame, the nearest to where it was
+    const a = acts.indexOf(L.a) >= 0 && !L.a.hid ? L.a : figure(ctx, L.cx, L.cy, 140, 'lure');
+    if (a) { L.a = a; L.cx = a.x; L.cy = a.y; L.ch = a.h || 30; L.lost = 0; } else if ((L.lost += dt) > 3) return home();
+    L.tm += dt;
+    const hy = L.cy - L.ch * 0.8;
+    if (L.step < 2) {  // down to it, then a moment hovering ahead of it
+      L.x = L.cx + L.dir * 34; L.y = hy;
+      if (L.step === 0 ? Math.hypot(f.x - L.x, f.y - L.y) < 30 || L.tm > 8 : L.tm > 2) { L.step++; L.tm = 0; }
+      return;
+    }
+    // leading: it moves on only while the follower is close behind, and calls about once a second
+    const dx = L.gx - L.x, dy = L.side ? 0 : L.gy - L.y, d = Math.hypot(dx, dy);
+    if (L.side) L.y = hy;
+    if (d > 0 && Math.hypot(L.x - L.cx, L.side ? 0 : L.y - hy) < 70) { const s = Math.min(d, 28 * dt); L.x += dx / d * s; L.y += dy / d * s; L.stall = 0; } else L.stall += dt;
+    if ((L.say -= dt) <= 0) {
+      L.say = 1; L.by.x = f.x; L.by.y = f.y;
+      if (U.act(a, 'lure', L.by) === true) { L.no = 0; L.won++; } else if (++L.no >= 3) return home();  // it will not come: give up
+    }
+    if (d < 8 || L.stall > 6 || L.tm > 45) {  // the walk is over, or it can come no further: often a portal for one that came along
+      if (L.won >= 5 && ctx.opts.portal && (now || Math.random() < 0.6)) st.led = {cx: L.cx, cy: L.cy, dir: L.dir};
+      home();
+    }
   }
   HP.fx.add('fairylights', {
     label: 'Fairy lights',
@@ -615,8 +662,8 @@
       const r = ctx.rand, lights = [];
       for (let i = 0; i < 40; i++) { const x = r() * ctx.w, y = r() * ctx.h; lights.push({x, y, hx: x, hy: y, vx: 0, vy: 0, nx: U.noise(ctx.seed + i * 5 + 1), ny: U.noise(ctx.seed + i * 5 + 2), ph: r() * TAU, sp: 0.6 + r() * 0.8, k: i % 4, s: 24 + r() * 14, fond: r() < 0.65, look: r(), b: null}); }
       const posts = []; for (let i = 0; i < 4; i++) posts.push({kind: 'fairylight', tags: GLOW, x: 0, y: 0, h: 0});
-      // wait: seconds to the next portal (minutes apart; at once when testing)
-      return {lights, posts, gatePost: {kind: 'portal', tags: ['wonder', 'threat'], x: 0, y: 0, h: PR * 2}, solid: solidOf(ctx), P: null, wait: ctx.opts.now ? 1.5 : 120 + Math.random() * 240, far: 0, mx: ctx.w / 2, my: ctx.h / 2, dots: FAIRY.map(c => glow(48, [[0, 'rgba(255,255,255,1)'], [0.18, 'rgba(' + c + ',.9)'], [0.5, 'rgba(' + c + ',.28)'], [1, 'rgba(' + c + ',0)']]))};
+      // wait: seconds to the next portal (minutes apart; at once when testing); lwait: to the next lead light
+      return {lights, posts, gatePost: {kind: 'portal', tags: ['wonder', 'threat'], x: 0, y: 0, h: PR * 2}, solid: solidOf(ctx), P: null, wait: ctx.opts.now ? 1.5 : 120 + Math.random() * 240, L: null, led: null, lwait: ctx.opts.now ? 3 : 40 + Math.random() * 80, far: 0, mx: ctx.w / 2, my: ctx.h / 2, dots: FAIRY.map(c => glow(48, [[0, 'rgba(255,255,255,1)'], [0.18, 'rgba(' + c + ',.9)'], [0.5, 'rgba(' + c + ',.28)'], [1, 'rgba(' + c + ',0)']]))};
     },
     touch(st, x, y) {
       for (const f of st.lights) { const dx = f.x - x, dy = f.y - y, d = Math.hypot(dx, dy) || 1; if (d < 230) { const push = (230 - d) / 230 * 340; f.vx += dx / d * push; f.vy += dy / d * push; } }
@@ -632,6 +679,8 @@
       const n = Math.min(st.lights.length, Math.round(ctx.opts.count));
       if (ctx.opts.portal) portal(g, st, ctx, t, dt); else st.P = null;
       const P = st.P, lure = P ? P.lure : 0;
+      if (P) st.L = null; else leading(st, ctx, n, dt);  // a portal calls every light, the lead light too
+      const L = st.L;
       let far = 0, mx = 0, my = 0;
       g.globalCompositeOperation = 'lighter';
       for (let i = 0; i < n; i++) {
@@ -642,26 +691,139 @@
           f.look = 1 + Math.random(); f.b = null;
           if (f.fond) { let best = 420; for (const b of ctx.rects) if (b.on && !b.hidden) { const d = Math.hypot(b.x + b.w / 2 - f.x, b.y + b.h / 2 - f.y); if (d < best) { best = d; f.b = b; } } }
         }
+        const led = L && L.i === i;
         let tx = f.hx, ty = f.hy;
-        if (lure) {  // called to the portal: a flat ring over a head, or round the rim
+        if (led) { tx = L.x; ty = L.y + Math.sin(t * 3) * 5; }  // the lead light, bobbing
+        else if (lure) {  // called to the portal: a flat ring over a head, or round the rim
           const a = f.ph + t * (lure === 2 ? 1.1 : 1.9) * f.sp;
           tx = P.tx + Math.cos(a) * P.tr; ty = P.ty + Math.sin(a) * P.tr * (lure === 2 ? 1 : 0.4); far += Math.abs(tx - f.x) + Math.abs(ty - f.y);
         } else if (f.b && f.b.on) {  // circle just outside the button's edge, never over its label
           const a = f.ph + t * 0.1 * f.sp, b = f.b;
           tx = b.x + b.w / 2 + U.clamp(Math.cos(a) * 1.5, -1, 1) * (b.w / 2 + 9); ty = b.y + b.h / 2 + U.clamp(Math.sin(a) * 1.5, -1, 1) * (b.h / 2 + 9);
         }
-        const ease = Math.min(1, dt * (lure ? 3 : 1.2)), pull = lure ? 2.5 : 0.35, lim = lure ? 170 : 22;  // they hurry to a portal
+        const ease = Math.min(1, dt * (lure || led ? 3 : 1.2)), pull = lure || led ? 2.5 : 0.35, lim = lure ? 170 : led ? 110 : 22;  // they hurry to a portal
         f.vx += (f.nx(t * 0.1 * f.sp) * 12 + U.clamp((tx - f.x) * pull, -lim, lim) - f.vx) * ease;
         f.vy += (f.ny(t * 0.1 * f.sp) * 12 + U.clamp((ty - f.y) * pull, -lim, lim) - f.vy) * ease;
         f.x = U.clamp(f.x + f.vx * dt, -10, ctx.w + 10); f.y = U.clamp(f.y + f.vy * dt, -10, ctx.h + 10);
         const fl = f.fl > 0 ? (f.fl = Math.max(0, f.fl - dt * 1.3)) : 0;
-        const pulse = Math.sin(t * 0.8 * f.sp + f.ph), s = f.s * (1 + 0.12 * pulse) * (1 + 0.7 * fl * Math.abs(Math.sin(t * 13 + f.ph)));
+        const pulse = Math.sin(t * 0.8 * f.sp + f.ph), s = f.s * (led ? 1.3 : 1) * (1 + 0.12 * pulse) * (1 + 0.7 * fl * Math.abs(Math.sin(t * 13 + f.ph)));
         g.globalAlpha = Math.min(1, 0.68 + 0.3 * pulse + fl); g.drawImage(st.dots[f.k], f.x - s / 2, f.y - s / 2, s, s);
         mx += f.x; my += f.y;
       }
       st.far = far / n; st.mx = mx / n; st.my = my / n;
       // a few of the lights stand for all of them to the other overlays; gathered at a portal, one is enough
       for (let i = 0, k = lure ? 1 : Math.min(4, n); i < k; i++) { const q = st.posts[i], f = st.lights[i]; q.x = f.x; q.y = f.y; q.h = f.s; ctx.scene.next.push(q); }
+    },
+  });
+
+  // ---------- UFO ----------
+  // At night a small saucer drifts in now and then, hovers over a creature that stands apart from the rest and takes it
+  // up in a beam of light. A while later it comes back and sets it down near the same spot. The creature's own overlay
+  // draws its going and its coming (the verb carry); the mark 'shorn' is for those with wool to lose. With nothing to
+  // take, it hovers a moment, dark, and leaves: the beam comes on only over the one it takes or sets down.
+  const UFO_TAGS = ['wonder', 'threat', 'light'];
+  // The saucer is painted once at double size (the body is 84 x 44 on screen, its middle at 42, 25; the belly is 9 below).
+  let ship = null;
+  function shipArt(g) {
+    const body = canvas(168, 88), d = body.getContext('2d');
+    d.lineWidth = 2; d.strokeStyle = '#232c36';
+    d.fillStyle = '#1b232c'; d.beginPath(); d.ellipse(84, 60, 28, 7, 0, 0, TAU); d.fill();  // the belly, which shows below the disc
+    d.fillStyle = '#dcfff2'; d.beginPath(); d.ellipse(84, 64, 13, 2.5, 0, 0, TAU); d.fill();
+    let gr = d.createLinearGradient(0, 33, 0, 63);
+    gr.addColorStop(0, '#e4edf2'); gr.addColorStop(0.5, '#8ea1af'); gr.addColorStop(1, '#3c4957');
+    d.fillStyle = gr; d.beginPath(); d.ellipse(84, 48, 76, 15, 0, 0, TAU); d.fill(); d.stroke();
+    d.fillStyle = 'rgba(255,255,255,.3)'; d.beginPath(); d.ellipse(84, 44, 50, 8, 0, 0, TAU); d.fill();
+    gr = d.createRadialGradient(74, 22, 2, 84, 34, 36);
+    gr.addColorStop(0, '#f2fffb'); gr.addColorStop(0.35, '#8fe6d6'); gr.addColorStop(1, '#1f6c80');
+    d.fillStyle = gr; d.beginPath(); d.ellipse(84, 42, 30, 30, 0, Math.PI, TAU); d.ellipse(84, 42, 30, 7, 0, 0, Math.PI); d.fill(); d.stroke();
+    // the beam's fade is made once too, for a beam 100 long: each frame only stretches it
+    const ray = g.createLinearGradient(0, 0, 0, 100);
+    ray.addColorStop(0, 'rgba(226,255,242,.62)'); ray.addColorStop(1, 'rgba(226,255,242,.1)');
+    return {body, ray, lamp: glow(24, [[0, 'rgba(255,255,255,1)'], [0.3, 'rgba(255,214,130,.9)'], [1, 'rgba(255,190,90,0)']]), under: glow(64, [[0, 'rgba(200,255,235,.75)'], [1, 'rgba(200,255,235,0)']])};
+  }
+  /** The creature that can be carried off and stands furthest from every other creature: the lone one. */
+  function lone(ctx) {
+    let best = null, bd = -1;
+    for (const a of ctx.scene.actors) {
+      if (a.hid || a.tags.indexOf('creature') < 0 || typeof a.carry !== 'function' || a.x < 40 || a.x > ctx.w - 40 || a.y < 0 || a.y > ctx.h) continue;  // not one still walking in from outside
+      let d = 400;  // beyond this they are all alone, and chance picks
+      for (const o of ctx.scene.actors) if (o !== a && !o.hid && o.tags.indexOf('creature') >= 0) d = Math.min(d, Math.hypot(o.x - a.x, o.y - a.y));
+      d += Math.random() * 40;
+      if (d > bd) { bd = d; best = a; }
+    }
+    return best;
+  }
+  HP.fx.add('ufo', {
+    label: 'UFO',
+    live: true, fps: 12, z: 2,
+    options: [{key: 'always', label: 'By day too', type: 'bool', default: false}],
+    create(ctx) {
+      // S: the saucer while there is one (also while it is away with its catch); wait: seconds to the next visit (many minutes; at once when testing)
+      return {S: null, wait: ctx.opts.now ? 2 : 240 + Math.random() * 600, post: {kind: 'ufo', tags: UFO_TAGS, view: 'free', x: 0, y: 0, h: 30}};
+    },
+    draw(g, st, ctx, t, dt) {
+      let S = st.S;
+      dt = Math.min(dt, 0.25);
+      if (!S) {  // a visit under way is finished even if day breaks; a new one starts only at night
+        if (!ctx.opts.always && !ctx.env.night) return;
+        if ((st.wait -= dt) > 0) return;
+        const a = lone(ctx), left = Math.random() < 0.5;
+        // step: 0 coming, 1 over it with the beam on, 2 it is going up, 3 leaving, 4 away, 5 nothing to take: sweeping, 6 coming back, 7 setting it down
+        S = st.S = {step: 0, tm: 0, x: left ? -60 : ctx.w + 60, y: 40 + Math.random() * 80, vx: 0, vy: 0, a, ax: a ? a.x : ctx.w * (0.25 + Math.random() * 0.5), ay: a ? a.y : ctx.h * (0.45 + Math.random() * 0.4), ah: a ? a.h || 30 : 30,
+          k: 0, on: false, bx: 0, went: false, left: 0, out: null, seen: 0};
+      }
+      S.tm += dt; if (S.went) S.left -= dt;
+      const next = n => { S.step = n; S.tm = 0; };
+      if (S.step < 2 && S.a) {  // it may walk on, or run: keep over it. The same one while it is about, else the nearest to where it was
+        const a = ctx.scene.actors.indexOf(S.a) >= 0 && !S.a.hid ? S.a : figure(ctx, S.ax, S.ay, 160, 'carry');
+        if (a) { S.a = a; S.ax = a.x; S.ay = a.y; S.ah = a.h || 30; }
+      }
+      const gone = S.step === 3, hx = S.step >= 6 ? S.out.x : S.ax, gy = S.step >= 6 ? S.out.y : S.ay;  // gy: the ground the beam falls on
+      let tx = U.clamp(hx, 46, ctx.w - 46), ty = Math.max(40, gy - S.ah - 110);  // all of it on the screen: the beam leans to one at the very edge
+      if (gone) { tx = S.x < ctx.w / 2 ? -200 : ctx.w + 200; ty = -90; }
+      const near = Math.abs(tx - S.x) < 16 && Math.abs(ty - S.y) < 16;
+      if (S.step === 0) { if (near || S.tm > 12) next(S.a ? 1 : 5); }
+      else if (S.step === 1) {
+        S.on = Math.abs(S.ax - S.x) < 28 && near;  // the beam comes on only once it is right over the one it wants
+        if (S.tm > 1.4 && (near || S.tm > 6)) {
+          const secs = 20 + Math.random() * 20, here = S.ax > 10 && S.ax < ctx.w - 10;  // one that ran off the screen got away
+          S.out = {x: U.clamp(S.ax, 40, ctx.w - 40), y: S.ay}; S.went = here && U.act(S.a, 'carry', {x: S.x, y: S.y + 9, secs, out: S.out, mark: 'shorn'}) === true; S.left = secs;
+          if (!S.went) S.ax = S.x;  // the beam straight down for its look round
+          next(S.went ? 2 : 5);
+        }
+      } else if (S.step === 2) { if (S.tm > 2) { S.on = false; next(3); } }
+      else if (S.step === 3) {  // off quickly; with a catch it stays out of sight until shortly before the time is up
+        if (S.x < -70 || S.x > ctx.w + 70 || S.y < -60) { if (S.went) next(4); else { st.S = null; st.wait = ctx.opts.now ? 8 : 300 + Math.random() * 900; return; } }
+      } else if (S.step === 4) { if (S.left < 5) next(6); return; }
+      else if (S.step === 5) { S.on = false; S.bx = 0; if (S.tm > 2.5) next(3); }  // nothing to take: it hangs there a moment, dark, and goes
+      else if (S.step === 6) { if (near || S.tm > 12) next(7); }
+      else {  // the beam on until it stands there again, or a few seconds past its time
+        S.on = near || S.k > 0;  // setting it down: on once it is over the spot, and it stays on until done
+        if (S.left < 1 && figure(ctx, S.out.x, S.out.y, 70)) S.seen += dt;
+        if (S.seen > 1.5 || S.left < -6) { S.on = false; S.went = false; next(3); }
+      }
+      S.k = U.clamp(S.k + (S.on ? dt / 0.5 : -dt / 0.3), 0, 1);
+      const sp = gone ? 760 : 250, e = Math.min(1, dt * 4), pull = gone ? 3 : 2.2, wait = gone && S.k > 0;  // it leaves once the beam is out
+      S.vx += ((wait ? 0 : U.clamp((tx - S.x) * pull, -sp, sp)) - S.vx) * e; S.vy += ((wait ? 0 : U.clamp((ty - S.y) * pull, -sp, sp)) - S.vy) * e;
+      S.x += S.vx * dt; S.y += S.vy * dt;
+      const A = ship || (ship = shipArt(g)), x = S.x, y = S.y + Math.sin(t * 2.2) * 2.5;
+      if (S.k > 0) {  // the beam: a pale cone from the belly to the ground, and the pool of light where it lands
+        const len = Math.max(20, gy - y - 9), half = Math.max(26, S.ah * 0.9), bx = hx - S.x + S.bx;
+        g.save(); g.translate(x, y + 9); g.scale(1, len / 100); g.globalAlpha = S.k; g.fillStyle = A.ray;
+        g.beginPath(); g.moveTo(-9, 0); g.lineTo(9, 0); g.lineTo(bx + half, 100); g.lineTo(bx - half, 100); g.closePath(); g.fill(); g.restore();
+        g.globalAlpha = S.k * 0.3; g.fillStyle = '#e2fff2'; g.beginPath(); g.ellipse(x + bx, y + 9 + len, half, half * 0.3, 0, 0, TAU); g.fill();
+      }
+      g.save(); g.translate(x, y); g.rotate(U.clamp(S.vx * 0.0007, -0.3, 0.3));
+      g.globalCompositeOperation = 'lighter'; g.globalAlpha = 0.45 + 0.15 * Math.sin(t * 3) + 0.4 * S.k; g.drawImage(A.under, -38, 2, 76, 26);
+      g.globalCompositeOperation = 'source-over'; g.globalAlpha = 1; g.drawImage(A.body, -42, -25, 84, 44);
+      // the ring of lamps goes round the rim (only the near side shows), a brighter one chasing through them
+      g.globalCompositeOperation = 'lighter';
+      for (let i = 0; i < 9; i++) {
+        const th = i / 9 * TAU + t * 1.7, s = Math.sin(th); if (s < -0.3) continue;
+        const sz = 7 + 4 * s; g.globalAlpha = 0.55 + 0.45 * Math.sin(t * 7 - i * 2.1); g.drawImage(A.lamp, Math.cos(th) * 33 - sz / 2, s * 5.5 - sz / 2, sz, sz);
+      }
+      g.restore(); g.globalAlpha = 1; g.globalCompositeOperation = 'source-over';
+      if (x > -40 && x < ctx.w + 40 && y > -20) { const q = st.post; q.x = x; q.y = y; ctx.scene.next.push(q); }
     },
   });
 })();

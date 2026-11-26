@@ -86,7 +86,9 @@ A verb is a function on an actor that another overlay may call. Offer only what 
 | `rescue(by)` | trapped | Someone pulled; `true` once it is free |
 | `paint(g)` | trap | It draws itself in front of what it holds |
 | `scare(by)` | creature | It is frightened off; `true` if it fled |
-| `carry(by)` | creature | It is taken out of sight toward `by` and returns after `by.secs` seconds |
+| `carry(by)` | creature | It is taken out of sight toward `by` and returns after `by.secs` seconds. `by.mark` names what happened to it while away (`'shorn'`); a creature that knows the mark shows it on return |
+| `lure(by)` | creature | It comes toward `by` for a few seconds, as far as it can; `true` if it came |
+| `stomp(by)` | prop, vehicle | Something very heavy came down on it. It is flattened and mends later; `true` if it was whole |
 | `board(rider)` | vehicle | `rider` gets on at a station; the vehicle later calls `rider.alight(x, y)` |
 
 ### Reading the scene
@@ -99,6 +101,12 @@ ctx.scene.over.push(g => { ... })       // draw in front of every overlay this f
 
 `HP.fx.scene` is the same object, for tests and tools.
 
+### Scale
+
+An overlay may set `scale` on its definition. `1` is the default: its creatures are about goose-sized. A small number
+means a whole world drawn small, such as `0.1` for an apartment building that fits on the screen. `ctx.scene.scale`
+is the smallest scale on the dashboard. An overlay that roams, such as the goose, sizes itself by it.
+
 ## What each overlay posts and reacts to
 
 | Overlay | Posts | Reacts to | Offers |
@@ -107,14 +115,14 @@ ctx.scene.over.push(g => { ... })       // draw in front of every overlay this f
 | Snow Crew | `creature`, `person`; `trapped` while held | `threat`, `wonder`, `trap`, `trapped`, `station`, `vehicle`, `light` | `scare`, `carry`, `rescue` |
 | Snow Crew snowman | `prop`, `food` | | `take` |
 | Kung Fu | `creature`, `person` | `threat`, creatures with `pet` | `scare`, `carry` |
-| Walkers | `creature`, `person` | `threat`, `person` | `scare`, `carry` |
-| Sheep | `creature`, `animal` | `food` | `pet`, `scare`, `carry` |
-| Sheep ram | `creature`, `animal`, `guard` | `threat` | `pet` |
-| Construction crew | `creature`, `person`; lifts `vehicle`; sign `prop`, `wonder` | `threat` | `scare`, `carry` |
+| Walkers | `creature`, `person` | `threat`, `person` | `scare`, `carry`, `lure` |
+| Sheep | `creature`, `animal` | `threat`, `food` | `pet`, `scare`, `carry`, `lure` |
+| Sheep ram | `creature`, `animal`, `guard` | `threat` | `pet`, `carry` |
+| Construction crew | workers and tenants `creature`, `person`; lifts `vehicle`; sign `prop`, `wonder`; a rave `light`, `wonder` | `threat` | `scare`, `carry` |
 | Train | `vehicle` | | `grab`, `drag`, `drop`, `board` |
 | Train station | `prop`, `station` | | |
 | Ants | `creature` | `food` | |
-| Koi pond | `creature`, `animal`; lily pads `prop` | `threat` | |
+| Koi pond | `creature`, `animal`; lily pads `prop` | `threat` | `carry`, `lure` |
 | String lights | `light` | | |
 | Vine (Flytraps) | `wonder`, `trap` | | `trap`, `free`, `paint` |
 | Vine (flowers) | `wonder` | | |
@@ -125,7 +133,8 @@ ctx.scene.over.push(g => { ... })       // draw in front of every overlay this f
 | Honeycomb | `food`; bees `creature` | | `take` |
 | Moss | `food` | | `take` |
 | Coral reef | fish `creature`, `animal` | | `scare` |
-| Fairy lights | `light`, `wonder`; portal `wonder`, `threat` | `person` with `carry` | |
+| Fairy lights | `light`, `wonder`; portal `wonder`, `threat` | creatures with `lure` or `carry` | |
+| UFO | `wonder`, `threat`, `light` | creatures with `carry` | |
 | Fireworks | `light`, `wonder` | | |
 | Aurora | `light`, `wonder` | | |
 | Fireflies | `creature`, `light`, `wonder` | `light`, `threat` | `take` |

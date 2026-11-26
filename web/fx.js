@@ -20,6 +20,9 @@
 //   days: 7,                  // default cycle length for a kind that grows
 //   live: false,              // true = animated (redrawn at fps); false = slow layer
 //   fps: 12,                  // for live kinds, at most 15
+//   scale: 1,                 // how big this kind's world is drawn. 1: its creatures are about goose-sized (the usual). A small
+//                             // number: a whole world drawn small (0.1 for an apartment block that fits on the screen). The
+//                             // smallest on the dashboard is ctx.scene.scale; a kind that roams (the goose) sizes itself by it.
 //   z: 0,                     // drawing order among live kinds: 0 scenery, 1 creatures, 2 the goose. Higher is drawn later, so in front,
 //                             // whatever the order of the dashboard's list. Kinds with the same z keep the list's order.
 //   options: [{key, label, type: 'range'|'select'|'bool', min, max, step, unit: 's'|'min' (shown after a range's value), choices: [[value, label]], default}],
@@ -70,6 +73,12 @@
 //            scare(by)        on a creature: it is frightened off from by = {x, y}; true if it fled
 //            carry(by)        on a creature: it is taken out of sight toward by = {x, y, secs, out: {x, y}} and comes back by
 //                             itself after secs seconds, at out if given; true if it went. The creature's own kind draws its going.
+//                             by.mark, if given, names what happened to it while away ('shorn'): a creature that knows
+//                             the mark shows it when it is back; any other ignores it.
+//            lure(by)         on a creature: it comes toward by = {x, y} for a few seconds, as far as it can get (one on a
+//                             tile top goes along it); true if it came. Called again and again, it follows.
+//            stomp(by)        on anything that stands on the ground: something very heavy came down on it at by = {x, y}.
+//                             It is flattened, and mends or is replaced by itself later; true if it was whole.
 //            board(rider)     on a vehicle standing at a station: rider = {alight(x, y)} gets on; true if there was room.
 //                             The vehicle calls rider.alight(x, y) at the station where the rider gets off.
 //   more fields, for the tags that need them:
@@ -144,7 +153,7 @@
   const KIND_VIEW = {train: 'top', koi: 'top', ants: 'top', sheep: 'top', ram: 'top', goose: 'free', fairylight: 'free', firefly: 'free', portal: 'free',
     firework: 'free', aurora: 'free', bee: 'free', lightstring: 'free', shell: 'free', blast: 'free'};
   const NONE = [];
-  const scene = {actors: [], next: [], over: [],
+  const scene = {actors: [], next: [], over: [], scale: 1,
     /** Everyone with this tag, out of what was posted in the frame before. */
     all(tag) { return scene.actors.filter(a => a.tags.indexOf(tag) >= 0 && !a.hid); },
     /** The nearest with this tag within r pixels (not `not`), or null. */
@@ -236,6 +245,7 @@
     });
     cur = {sig, rects};
     items.sort((a, b) => (a.def.z || 0) - (b.def.z || 0));
+    scene.scale = items.reduce((m, it) => Math.min(m, +it.def.scale || 1), 1);
     grow(); loop();  // grow() draws, and sets how often to draw again from the cycles now in use
   }
   function fail(kind, e) { console.error('overlay ' + kind + ': ' + e.message); if (HP.report && !fail[kind]) { fail[kind] = 1; HP.report('overlay ' + kind + ' failed: ' + e.message); } }
