@@ -111,14 +111,14 @@ is the smallest scale on the dashboard. An overlay that roams, such as the goose
 
 | Overlay | Posts | Reacts to | Offers |
 | --- | --- | --- | --- |
-| Goose | `creature`, `animal`, `threat` | `creature`, `guard`, `vehicle`, `food`, `trap` | `scare` |
-| Snow Crew | `creature`, `person`; `trapped` while held | `threat`, `wonder`, `trap`, `trapped`, `station`, `vehicle`, `light` | `scare`, `carry`, `rescue` |
+| Goose | `creature`, `animal`, `threat` | `creature`, `guard`, `vehicle`, `food`, `trap`; as a giant, anything with `stomp` | `scare`, `carry`, `lure` |
+| Snow Crew | `creature`, `person`; `trapped` while held | `threat`, `wonder`, `trap`, `trapped`, `station`, `vehicle`, `light` | `scare`, `carry`, `lure`, `rescue` |
 | Snow Crew snowman | `prop`, `food` | | `take` |
-| Kung Fu | `creature`, `person` | `threat`, creatures with `pet` | `scare`, `carry` |
+| Kung Fu | `creature`, `person` | `threat`, creatures with `pet` | `scare`, `carry`, `lure` |
 | Walkers | `creature`, `person` | `threat`, `person` | `scare`, `carry`, `lure` |
 | Sheep | `creature`, `animal` | `threat`, `food` | `pet`, `scare`, `carry`, `lure` |
 | Sheep ram | `creature`, `animal`, `guard` | `threat` | `pet`, `carry` |
-| Construction crew | workers and tenants `creature`, `person`; lifts `vehicle`; sign `prop`, `wonder`; a rave `light`, `wonder` | `threat` | `scare`, `carry` |
+| Construction crew | workers, tenants and shoppers `creature`, `person`; lifts `vehicle`; cars `vehicle`, `prop`; sign `prop`, `wonder`; a rave `light`, `wonder`; helicopter and turkeys `threat` | `threat` | `scare`, `carry`; cars and sign `stomp` |
 | Train | `vehicle` | | `grab`, `drag`, `drop`, `board` |
 | Train station | `prop`, `station` | | |
 | Ants | `creature` | `food` | |

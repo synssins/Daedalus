@@ -1014,34 +1014,41 @@
   facing(SHEEP_ART.frames, 'S', {b: [FB, 4, 3], h: [FACE, 6, 6], lx: 6, ly: 12, L: L2, g: [0, 2], e: EAR2});
   facing(SHEEP_ART.frames, 'NE', {b: [AB, 2, 4], h: [QB, 10, 1], t: [['W', 'W'], 1, 8], back: 1, lx: 4, ly: 12, L: L3, g: [1, 3], e: EARB});
   facing(SHEEP_ART.frames, 'N', {b: [FB, 4, 3], h: [POLL, 6, 1], t: [TAIL, 7, 7], back: 1, lx: 6, ly: 12, L: L2, g: [0, 3], e: EAR2});
-  // The ram: the same animal a size up, with curled horns, and a frame or two of its own in every facing for going
-  // at something head down.
-  const RWOOL = ['....wwwwwwww...', '..wwwwwwwwwwww.', '.wwwwWwwwwwwwww', 'wwwwwwwwwwWwwww', 'WwwwwwwwwwwwwWw', 'wwwwWwwwwwwwwww', '.wwwwwwwWwwwwww', '..wwwwwwwwwwww.', '....wWwwwwWww..'];
-  const rhead = (a, b, c) => ['..www...', '.yyypp..', 'yHHyppp.', a, b, c, '....pppp', '....ppp.'];
-  const RHEAD = rhead('yHlypepp', 'yHyypePp', '.yy.phpp'), RSHUT = rhead('yHlypppp', 'yHyyeePp', '.yy.phpp');
-  const RFACE = ['..wwww..', 'yyyppyyy', 'yHppppHy', 'yyeppeyy', '.yeppey.', '..hPPh..', '..pppp..', '...pp...'], RFSHUT = ['..wwww..', 'yyyppyyy', 'yHppppHy', 'yyppppyy', '.eeppee.', '..hPPh..', '..pppp..', '...pp...'];
-  const RFB = ['...wwwwwww...', '.wwwwWwwwwww.', 'wwwwwwwwwwWww', 'wwWwwwwwwwwww', 'wwwwwwwwWwwww', 'wwwwwwwwwwwww', 'wWwwwwwwwwwWw', '.wwwwwwwwwww.', '.wwwWwwwwwww.', '..wwwwwwwww..'];
-  const RAB = ['...wwwwwwww...', '.wwwwWwwwwwww.', 'wwwwwwwwwwwWww', 'wwWwwwwwwwwwww', 'wwwwwwwWwwwwww', 'wwwwwwwwwwwwww', 'wWwwwwwwwwWwww', '.wwwwwwwwwwwww', '..wwwWwwwwwww.', '....wwwwwwww..'];
-  const RQ = ['..wwww..', '.yyppyyy', 'yHHpppHy', 'yHypepey', '.yypepe.', '...phPp.', '...pppp.', '....pp..'];
-  const RPOLL = ['.yy.ww.yy.', 'yHHwwwwHHy', 'yHywwwwyHy', '.yywwwwyy.'], RQB = ['..wwyy..', '.wwwyHy.', 'lwwwyHyp', '.wwwwyyp', '..wwwpp.'];
-  const RL3 = [['P.P....P.P', 'P.P....P.P'], ['P.P....P.P', 'P......P..'], ['P.P....P.P', '..P......P']], RL2 = [['P.......P', 'P.......P'], ['P.......P', 'P........'], ['P.......P', '........P']];
-  const RTUCK = [['PP'], 15, 16];
-  const RAM_ART = {w: 23, h: 17, pal: Object.assign({H: '#a9762c'}, SHEEP_ART.pal),
+  // The ram: the same animal a size up, in a charcoal coat with a light face, and with big curled horns: a full curl
+  // beside the head from the side, one each side of the face from the front, the backs of both from behind. A frame or
+  // two of its own in every facing for going at something head down.
+  /** A few lighter tufts (g) on the upper half of a dark body, so that the wool still shows. */
+  const lit = rows => rows.map((r, y) => y && y < rows.length / 2 + 1 ? r.replace(/w/g, (c, i) => (i * 7 + y * 3) % 9 === 2 ? 'g' : c) : r);
+  const RWOOL = lit(['....wwwwwwww...', '..wwwwwwwwwwww.', '.wwwwWwwwwwwwww', 'wwwwwwwwwwWwwww', 'WwwwwwwwwwwwwWw', 'wwwwWwwwwwwwwww', '.wwwwwwwWwwwwww', '..wwwwwwwwwwww.', '....wWwwwwWww..']);
+  const rhead = (a, b) => ['.yyyy..ww..', 'yyHHyywppp.', 'yHyyHypppp.', 'yHlpHyp' + a, 'yHppHyp' + b, 'yyHHyypphpp', '.yyyy.ppppp', '.......ppp.'];  // the curl goes round the ear and the cheek
+  const RHEAD = rhead('pepp', 'pePp'), RSHUT = rhead('pppp', 'eePp');
+  const rface = (a, b) => ['.yyy..wwww..yyy.', 'yyHyyppppppyyHyy', 'yHpHyppppppyHpHy', 'yHpHy' + a + 'yHpHy', 'yyHyy' + b + 'yyHyy', '.yyy..hPPh..yyy.', '......pppp......', '.......pp.......'];
+  const RFACE = rface('peppep', 'peppep'), RFSHUT = rface('pppppp', 'peppep');
+  const RFB = lit(['...wwwwwww...', '.wwwwWwwwwww.', 'wwwwwwwwwwWww', 'wwWwwwwwwwwww', 'wwwwwwwwWwwww', 'wwwwwwwwwwwww', 'wWwwwwwwwwwWw', '.wwwwwwwwwww.', '.wwwWwwwwwww.', '..wwwwwwwww..']);
+  const RAB = lit(['...wwwwwwww...', '.wwwwWwwwwwww.', 'wwwwwwwwwwwWww', 'wwWwwwwwwwwwww', 'wwwwwwwWwwwwww', 'wwwwwwwwwwwwww', 'wWwwwwwwwwWwww', '.wwwwwwwwwwwww', '..wwwWwwwwwww.', '....wwwwwwww..']);
+  const RQ = ['.yyyy.www..', 'yyHHyypppyy', 'yHyyHyppyHy', 'yHlpHypepey', 'yHppHypepe.', 'yyHHyyphPp.', '.yyyy.pppp.', '.......pp..'];
+  const RPOLL = ['.yyy........yyy.', 'yyHyy..ww..yyHyy', 'yHyHywwwwwwyHyHy', 'yHyHywwwwwwyHyHy', 'yyHyywwwwwwyyHyy', '.yyy..wwww..yyy.'];
+  const RQB = ['..ww.yyyy.', 'yywwyyHHyy', 'yHwwyHyyHy', '.ywwyHyyHy', '..wwyyHHyy', '...ww.yyyy'];
+  // its legs are dark
+  const RL4 = L4.map(f => f.map(r => r.replace(/P/g, 'k')));
+  const RL3 = [['k.k....k.k', 'k.k....k.k'], ['k.k....k.k', 'k......k..'], ['k.k....k.k', '..k......k']], RL2 = [['k.......k', 'k.......k'], ['k.......k', 'k........'], ['k.......k', '........k']];
+  const RTUCK = [['kk'], 15, 16];
+  const RAM_ART = {w: 23, h: 17, pal: Object.assign({}, SHEEP_ART.pal, {y: '#ecc878', H: '#8a5a22', w: '#575763', W: '#3b3b46', g: '#7a7a88', p: '#f3ece0', P: '#cdbfa6', k: '#2f2f38'}),
     frames: {
-      lieE: [[RWOOL, 1, 8], [RHEAD, 14, 6], RTUCK],
-      sleep0E: [[RWOOL, 1, 8], [RSHUT, 14, 9]],
-      sleep1E: [[['....wwwwwwww...'], 1, 7], [RWOOL, 1, 8], [RSHUT, 14, 9]],
-      pet0E: [[RWOOL, 1, 8], [RSHUT, 14, 6], RTUCK],
-      pet1E: [[RWOOL, 1, 7], [RSHUT, 14, 6], RTUCK],
-      lieS: [[RFB, 5, 7], [RFACE, 7, 9]],
-      sleep0S: [[RFB, 5, 7], [RFSHUT, 7, 9]],
-      sleep1S: [[['...wwwwwww...'], 5, 6], [RFB, 5, 7], [RFSHUT, 7, 9]],
+      lieE: [[RWOOL, 1, 8], [RHEAD, 11, 6], RTUCK],
+      sleep0E: [[RWOOL, 1, 8], [RSHUT, 11, 9]],
+      sleep1E: [[['....wwwwwwww...'], 1, 7], [RWOOL, 1, 8], [RSHUT, 11, 9]],
+      pet0E: [[RWOOL, 1, 8], [RSHUT, 11, 6], RTUCK],
+      pet1E: [[RWOOL, 1, 7], [RSHUT, 11, 6], RTUCK],
+      lieS: [[RFB, 5, 7], [RFACE, 3, 9]],
+      sleep0S: [[RFB, 5, 7], [RFSHUT, 3, 9]],
+      sleep1S: [[['...wwwwwww...'], 5, 6], [RFB, 5, 7], [RFSHUT, 3, 9]],
     }};
-  facing(RAM_ART.frames, 'E', {b: [RWOOL, 1, 6], h: [RHEAD, 14, 4], lx: 6, ly: 15, L: L4, g: [1, 5], c: [1, 3]});
-  facing(RAM_ART.frames, 'SE', {b: [RAB, 2, 5], h: [RQ, 13, 7], lx: 5, ly: 15, L: RL3, g: [1, 2], c: [1, 2]});
-  facing(RAM_ART.frames, 'S', {b: [RFB, 5, 5], h: [RFACE, 7, 7], lx: 7, ly: 15, L: RL2, g: [0, 2], c: [0, 2]});
-  facing(RAM_ART.frames, 'NE', {b: [RAB, 2, 5], h: [RQB, 13, 2], t: [['W', 'W'], 1, 10], back: 1, lx: 5, ly: 15, L: RL3, g: [1, 4], c: [1, 3]});
-  facing(RAM_ART.frames, 'N', {b: [RFB, 5, 5], h: [RPOLL, 6, 2], t: [TAIL, 9, 10], back: 1, lx: 7, ly: 15, L: RL2, g: [0, 4], c: [0, 2]});
+  facing(RAM_ART.frames, 'E', {b: [RWOOL, 1, 6], h: [RHEAD, 11, 4], lx: 6, ly: 15, L: RL4, g: [1, 5], c: [1, 3]});
+  facing(RAM_ART.frames, 'SE', {b: [RAB, 2, 5], h: [RQ, 10, 7], lx: 5, ly: 15, L: RL3, g: [1, 2], c: [1, 2]});
+  facing(RAM_ART.frames, 'S', {b: [RFB, 5, 5], h: [RFACE, 3, 7], lx: 7, ly: 15, L: RL2, g: [0, 2], c: [0, 2]});
+  facing(RAM_ART.frames, 'NE', {b: [RAB, 2, 5], h: [RQB, 12, 1], t: [['W', 'W'], 1, 10], back: 1, lx: 5, ly: 15, L: RL3, g: [1, 4], c: [1, 3]});
+  facing(RAM_ART.frames, 'N', {b: [RFB, 5, 5], h: [RPOLL, 3, 1], t: [TAIL, 9, 10], back: 1, lx: 7, ly: 15, L: RL2, g: [0, 4], c: [0, 2]});
   const POSES = ['stand', 'walk0', 'walk1', 'graze0', 'graze1', 'charge0', 'charge1', 'lie', 'sleep0', 'sleep1', 'pet0', 'pet1', 'hang', 'perk', 'perk0', 'perk1'];
   // ---------- shorn, and growing back ----------
   // A sheep that comes back from a carry marked 'shorn' has lost its wool: a thin pink body on long legs, under the
@@ -1062,7 +1069,7 @@
   // d: for the bare coat (1) and the fuzzy one (2), the body's width and height from the side, at an angle and from the front, and the legs' length
   const SHEEP_KIT = {art: SHEEP_ART, hE: [HEAD, 11, 3], sE: SHUT, hQ: [Q, 10, 6], hS: [FACE, 6, 6], sS: FSHUT, hQB: [QB, 10], hN: [POLL, 6], L: [L4, L3, L2], lx: [4, 4, 6], r: 12, mid: 17, tuck: TUCK,
     g: [[1, 5], [1, 2], [0, 2], [1, 3], [0, 3]], c: [], e: [EAR1, EAR1, EAR2, EARB, EAR2], d: [null, {E: [10, 4], A: [9, 5], F: [8, 6], leg: 3}, {E: [11, 5], A: [10, 6], F: [10, 7], leg: 2}]};
-  const RAM_KIT = {art: RAM_ART, hE: [RHEAD, 14, 4], sE: RSHUT, hQ: [RQ, 13, 7], hS: [RFACE, 7, 7], sS: RFSHUT, hQB: [RQB, 13], hN: [RPOLL, 6], L: [L4, RL3, RL2], lx: [6, 5, 7], r: 15, mid: 22, tuck: RTUCK,
+  const RAM_KIT = {art: RAM_ART, hE: [RHEAD, 11, 4], sE: RSHUT, hQ: [RQ, 10, 7], hS: [RFACE, 3, 7], sS: RFSHUT, hQB: [RQB, 12], hN: [RPOLL, 3], L: [RL4, RL3, RL2], pal: [null, null, {f: '#8d8d99', s: '#c9b4bb'}], lx: [6, 5, 7], r: 15, mid: 22, tuck: RTUCK,
     g: [[1, 5], [1, 2], [0, 2], [1, 4], [0, 4]], c: [[1, 3], [1, 2], [0, 2], [1, 3], [0, 2]], e: [], d: [null, {E: [13, 5], A: [11, 6], F: [11, 6], leg: 3}, {E: [14, 7], A: [13, 8], F: [13, 8], leg: 2}]};
   /** The art of a flock animal in coat n (1 bare, 2 fuzzy): every frame the woolly one has. */
   function coated(K, n) {
@@ -1074,13 +1081,13 @@
     facing(o, 'SE', {b: [A, ax, ay], h: K.hQ, lx: K.lx[1], ly: top, L: legs(K.L[1]), g: K.g[1], c: K.c[1], e: K.e[1]});
     facing(o, 'S', {b: [F, fx, fy], h: hS, lx: K.lx[2], ly: top, L: legs(K.L[2]), g: K.g[2], c: K.c[2], e: K.e[2]});
     // from behind the head is beyond the body: it comes down to where the lower back now is
-    facing(o, 'NE', {b: [A, ax, ay], h: [K.hQB[0], K.hQB[1], ay - 3], t: [[b, b], ax - 1, ay + 2], back: 1, lx: K.lx[1], ly: top, L: legs(K.L[1]), g: K.g[3], c: K.c[3], e: K.e[3]});
+    facing(o, 'NE', {b: [A, ax, ay], h: [K.hQB[0], K.hQB[1], ay - K.hQB[0].length + 2], t: [[b, b], ax - 1, ay + 2], back: 1, lx: K.lx[1], ly: top, L: legs(K.L[1]), g: K.g[3], c: K.c[3], e: K.e[3]});
     facing(o, 'N', {b: [F, fx, fy], h: [K.hN[0], K.hN[1], fy - K.hN[0].length + 1], t: [[b + b, b + b], fx + (d.F[0] >> 1) - 1, fy + 2], back: 1, lx: K.lx[2], ly: top, L: legs(K.L[2]), g: K.g[4], c: K.c[4], e: K.e[4]});
     const le = [E, ex, ey + lg], lf = [F, fx, fy + lg], hl = [hE[0], hE[1], hE[2] + lg], sl = [K.sE, hE[1], hE[2] + 5], pl = [K.sE, hE[1], hE[2] + lg], fs = [K.sS, hS[1], hS[2] + 2];
     o.lieE = [le, hl, K.tuck]; o.sleep0E = [le, sl]; o.sleep1E = [[[E[0]], ex, ey + lg - 1], le, sl];
     o.pet0E = [le, pl, K.tuck]; o.pet1E = [[E, ex, ey + lg - 1], pl, K.tuck];
     o.lieS = [lf, [hS[0], hS[1], hS[2] + 2]]; o.sleep0S = [lf, fs]; o.sleep1S = [[[F[0]], fx, fy + lg - 1], lf, fs];
-    return {w: K.art.w, h: H, pal: Object.assign({s: '#ffc4c9', S: '#e8939f', f: '#f3d9cc'}, K.art.pal), frames: o};
+    return {w: K.art.w, h: H, pal: Object.assign({s: '#ffc4c9', S: '#e8939f', f: '#f3d9cc'}, K.art.pal, K.pal && K.pal[n]), frames: o};  // the ram's fuzz is grey
   }
   /** Put coat n on an animal: 0 its wool, 1 bare, 2 fuzzy. The two extra sheets are made the first time one is needed. */
   function coat(c, W, n) {
