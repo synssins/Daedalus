@@ -320,12 +320,19 @@
       return false; });
     // its goose was frightened off: out after it by the same side, and it waits out there until the goose comes back
     if (!led && e.out) { tx = e.out < 0 ? -70 : ctx.w + 70; run = true; }
+    // left on its own: it potters about near where it was left and pecks at the ground. It does not stand and scream.
+    const alone = !led && !e.out;
+    if (alone) {
+      if (e.hx0 == null) { e.hx0 = q.ax; e.hy0 = q.ay; }
+      if (!(e.wn > t)) { e.wn = t + 4 + Math.random() * 6; e.wx = U.clamp(e.hx0 + (Math.random() - 0.5) * 320, 24, ctx.w - 24); e.wy = U.clamp(e.hy0 + (Math.random() - 0.5) * 60, 70, ctx.h - 6); e.pk = Math.random() < 0.6; }
+      tx = e.wx; ty = e.wy;
+    } else e.hx0 = null;
     if (!e.out) tx = U.clamp(tx, 24, ctx.w - 24);
     const dx = tx - q.ax, dy = ty - q.ay, dist = Math.hypot(dx, dy), go = dist > 12, foe = run ? null : threat(q, ctx, q.ax, q.ay, dt);
-    if (go) { const st = Math.min(dist, (run ? 250 : 130) * dt); q.ax += dx / dist * st; q.ay += dy / dist * st; if (Math.abs(dx) > 4) e.f = dx > 0 ? 1 : -1; }
+    if (go) { const st = Math.min(dist, (run ? 250 : alone ? 55 : 130) * dt); q.ax += dx / dist * st; q.ay += dy / dist * st; if (Math.abs(dx) > 4) e.f = dx > 0 ? 1 : -1; }
     else if (foe && Math.abs(foe.x - q.ax) > 6) e.f = foe.x > q.ax ? 1 : -1;
-    const cross = !run && (!!foe || t % 3 < 0.7);
-    goose(g, e.A, q.ax, q.ay, e.f || 1, run ? 'charge' : cross ? 'hiss' : 'glare', t, dt, go ? (run ? 2.6 : 1.7) : 0, {sc, chick: 1 - age, hiss: cross});
+    const cross = !run && (!!foe || (alone ? t % 31 < 0.5 : t % 3 < 0.7));  // on its own: a peep now and then, no more
+    goose(g, e.A, q.ax, q.ay, e.f || 1, run ? 'charge' : cross ? 'hiss' : alone && !go && e.pk && t % 0.7 < 0.35 ? 'peck' : 'glare', t, dt, go ? (run ? 2.6 : alone ? 1.1 : 1.7) : 0, {sc, chick: 1 - age, hiss: cross});
     if (q.ax > -30 && q.ax < ctx.w + 30) post(q, ctx, q.ax, q.ay, sc, prey && {x: prey.x, y: prey.y});
   }
 

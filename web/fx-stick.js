@@ -1221,7 +1221,7 @@
     for (const w of sc.all('wonder')) for (const P of st.plats) {
       // where a head reaches it: a trap by its middle; anything else if any of it, from its foot to its top, is at head height
       const lo = P.y - w.y, hi = w.tags.indexOf('trap') >= 0 ? lo : lo + (w.h || 0);
-      if (!P.ok || P.away || hi < 12 || lo > 46 || w.x < P.x1 - 18 || w.x > P.x2 + 18) continue;
+      if (w.view === 'top' || !P.ok || P.away || hi < 12 || lo > 46 || w.x < P.x1 - 18 || w.x > P.x2 + 18) continue;  // (out in a field seen from above: no way there)
       const f = nearTo(fr, w.x, P.y), d = Math.abs(f.x - w.x) + Math.abs(f.y - P.y) * 1.5;
       if (d < bd) { bd = d; best = {w, P, a: f}; }
     }

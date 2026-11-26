@@ -40,6 +40,16 @@ An actor is one thing on the dashboard:
 
 `x`, `y` is where it stands. `h` is its height. `hid: true` means it is out of sight and others leave it alone.
 
+`view` says how it lives on the screen:
+
+| View | Meaning | Examples |
+| --- | --- | --- |
+| `side` | Seen from the side, with gravity. Stands on tile tops and the ground. The default. | Snow Crew, Walkers |
+| `top` | The whole screen is its ground, seen from above. Goes anywhere, over tiles too. | Sheep, Train, Ants |
+| `free` | Flies or floats. Reaches both. | Goose, Fairy lights |
+
+A `side` creature does not walk to a `top` one.
+
 - A live overlay posts while drawing: `ctx.scene.next.push(actor)`.
 - A still overlay returns its list from an `actors(state, ctx)` method.
 

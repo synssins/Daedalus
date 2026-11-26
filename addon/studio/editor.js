@@ -494,8 +494,14 @@ function overlayFields(d) {
       else if (o.type === 'select') out.push(row(o.label, h('select', {'aria-label': o.label, onchange: ev => set(o.key, ev.target.value, true)}, ...o.choices.map(ch => h('option', {value: ch[0], selected: val === ch[0]}, ch[1])))));
       else if (o.type === 'bool') out.push(row(o.label, h('input', {type: 'checkbox', checked: !!val, 'aria-label': o.label, onchange: ev => set(o.key, ev.target.checked, true)})));
     }
+    // a cycle is kept in days, as a fraction for the short ones: 30 minutes is 30 / 1440 of a day
+    const days = +c.days || def.days || 7, per = days >= 1 && days % 1 === 0 ? 1 : (days * 24) % 1 < 1e-6 ? 1 / 24 : 1 / 1440, len = Math.round(days / per);
+    const cycle = (n, u) => set('days', Math.max(1 / 1440, Math.min(730, Math.max(1, Math.round(+n || 1)) * u)), true);
     if (def.grows) out.push(
-      row('Cycle', h('input', {type: 'number', min: 1, max: 730, value: c.days || def.days || 7, 'aria-label': 'Cycle length in days', onchange: ev => set('days', Math.max(1, Math.min(730, Math.round(+ev.target.value || 7))), true)}), h('span', {class: 'note'}, 'days')),
+      row('Growth', h('select', {'aria-label': 'Growth', onchange: ev => set('grown', ev.target.value === '1' || null, true)}, h('option', {value: '', selected: !c.grown}, 'Over time'), h('option', {value: '1', selected: !!c.grown}, 'Fully grown'))));
+    if (def.grows && !c.grown) out.push(
+      row('Cycle', h('input', {type: 'number', min: 1, max: 730, value: len, 'aria-label': 'Cycle length', onchange: ev => cycle(ev.target.value, per)}),
+        h('select', {'aria-label': 'Cycle unit', onchange: ev => cycle(len, +ev.target.value)}, ...[[1 / 1440, 'minutes'], [1 / 24, 'hours'], [1, 'days']].map(u => h('option', {value: u[0], selected: u[0] === per}, u[1])))),
       row('At the end', h('select', {'aria-label': 'At the end', onchange: ev => set('loop', ev.target.value || null, true)}, h('option', {value: '', selected: c.loop !== 'stay'}, 'Start over'), h('option', {value: 'stay', selected: c.loop === 'stay'}, 'Stay'))),
       row('Started', h('input', {type: 'date', value: (c.start || '').slice(0, 10), 'aria-label': 'Start date', onchange: ev => set('start', ev.target.value || null, true)}), btn('Today', null, () => set('start', today(), true), 'mini text')));
     out.push(

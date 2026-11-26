@@ -55,6 +55,10 @@
 //            guard     it drives threats away          station  a place where a vehicle stops and creatures wait
 //          An actor without tags gets them from its kind (the table KIND_TAGS below), so older kinds still fit in.
 //   hid    true while it is out of sight (behind a tile, hanging off an edge): others leave it alone
+//   view   how it lives on the screen. 'side': seen from the side, with gravity; it stands on tile tops and the ground.
+//          'top': the whole screen is its ground, seen from above; it goes anywhere, over tiles too (sheep, trains, ants).
+//          'free': it flies or floats and can reach both (the goose, lights). Without one it is 'side', or what its kind
+//          says in KIND_VIEW below. A 'side' creature does not walk to a 'top' one: it cannot get there.
 //   verbs  functions others may call. Offer only what the thing can really do; callers must cope with a missing one.
 //            pet(by)          someone strokes it                    by = {x, y}
 //            take(by)         something is taken from it (a carrot); true if it was there to take
@@ -137,6 +141,8 @@
   // what an actor is taken for when it does not say: the kinds that were here before there were tags
   const KIND_TAGS = {goose: ['creature', 'animal', 'threat'], stick: ['creature', 'person'], walker: ['creature', 'person'], sheep: ['creature', 'animal'],
     train: ['vehicle'], snowman: ['prop', 'food']};
+  const KIND_VIEW = {train: 'top', koi: 'top', ants: 'top', sheep: 'top', ram: 'top', goose: 'free', fairylight: 'free', firefly: 'free', portal: 'free',
+    firework: 'free', aurora: 'free', bee: 'free', lightstring: 'free', shell: 'free', blast: 'free'};
   const NONE = [];
   const scene = {actors: [], next: [], over: [],
     /** Everyone with this tag, out of what was posted in the frame before. */
@@ -195,6 +201,7 @@
   /** How far a growing kind is through its cycle, from the clock. */
   function progressOf(def, opts) {
     if (preview != null) return preview;
+    if (opts.grown) return 1;  // shown fully grown, whatever the date
     const days = +opts.days || def.days || 7, start = opts.start ? Date.parse(opts.start) : Date.UTC(2026, 0, 5);  // no start date given: cycles are counted from a fixed Monday
     let p = (Date.now() - start) / (days * 864e5);
     if (p < 0) p = 0;
@@ -214,7 +221,7 @@
       items.push({def, ctx, st, kind: c.kind});
     });
     items.sort((a, b) => (a.def.z || 0) - (b.def.z || 0));
-    redraw(); loop();
+    grow(); loop();  // grow() draws, and sets how often to draw again from the cycles now in use
   }
   function fail(kind, e) { console.error('overlay ' + kind + ': ' + e.message); if (HP.report && !fail[kind]) { fail[kind] = 1; HP.report('overlay ' + kind + ' failed: ' + e.message); } }
   function drawSlow() {
@@ -242,7 +249,7 @@
       const g = size(live, 1), t = (ts - t0) / 1000;
       scene.actors = scene.next; scene.next = [];
       for (const it of items) if (it.def.actors) { try { for (const a of it.def.actors(it.st, it.ctx) || NONE) scene.actors.push(a); } catch (e) { fail(it.kind, e); } }
-      for (const a of scene.actors) if (!a.tags) a.tags = KIND_TAGS[a.kind] || NONE;
+      for (const a of scene.actors) { if (!a.tags) a.tags = KIND_TAGS[a.kind] || NONE; if (!a.view) a.view = KIND_VIEW[a.kind] || 'side'; }
       for (const it of items) if (it.def.live) {
         if (it.def.grows) it.ctx.progress = progressOf(it.def, it.ctx.opts);
         g.save(); try { it.def.draw(g, it.st, it.ctx, t, dt); } catch (e) { fail(it.kind, e); } g.restore();
@@ -252,7 +259,11 @@
     };
     raf = requestAnimationFrame(frame);
   }
-  setInterval(redraw, 180000);  // growth is slow: a fresh drawing every three minutes is plenty
+  // Growth is slow: a fresh drawing every three minutes is plenty. A cycle of minutes or hours is drawn more often,
+  // about 300 times over its length, but never more than once a second.
+  let growT = 0;
+  function grow() { clearTimeout(growT); let gap = 180000; for (const it of items) if (it.def.grows && !it.ctx.opts.grown) gap = Math.min(gap, it.ctx.days * 864e5 / 300); redraw(); growT = setTimeout(grow, Math.max(1000, gap)); }
+  grow();
 
   HP.fx = {
     kinds, util: U,
