@@ -1334,7 +1334,7 @@
       if (d < bd) { bd = d; best = {w, P, a: f}; }
     }
     if (!best) return;
-    const {w, P, a} = best, ax = U.clamp(w.x - (w.x > (P.x1 + P.x2) / 2 ? 10 : -10), P.x1 + 2, P.x2 - 2), dir = w.x >= ax ? 1 : -1, trap = w.tags.indexOf('trap') >= 0;
+    const {w, P, a} = best, ax = U.clamp(w.x - (w.x > (P.x1 + P.x2) / 2 ? 10 : -10), P.x1 + 2, P.x2 - 2), dir = w.x >= ax ? 1 : -1, trap = w.tags.indexOf('trap') >= 0 && (!sc.fits || sc.fits(w, 1));
     const b0 = nearTo(fr, ax, P.y, a), b = trap && b0 && Math.random() > 0.3 && Math.abs(b0.x - ax) + Math.abs(b0.y - P.y) * 1.5 < 420 ? b0 : null;
     const A = actStart(st, 'peek', {max: 60, need: 1, a, b, stuck: 0, free: 0, fail: 0, idle: idleRest, step: A => A.fail || (A.free && quiet(a) && (!b || quiet(b)))});
     claim(A, a); if (b) claim(A, b);
@@ -1358,7 +1358,7 @@
   // its own: the game that got that one caught sends its own help, or none.
   function rescueStart(st, sc) {
     for (const A of st.acts) if (A.n === 'rescue') return;
-    const all = sc.all('trapped'); if (!all.length) return;
+    const all = sc.all('trapped').filter(a => a.view !== 'top' && (!sc.fits || sc.fits(a, 1))); if (!all.length) return;  // only one it can get to, and of a size to pull
     const fr = freeCrew(st); if (!fr.length) return;
     let best = null, bd = 420;
     for (const w of all) {
@@ -1392,7 +1392,7 @@
   // it pulls out runs after it to the end of the platform, and stands there with its head down.
   function stationStart(st, sc) {
     st.stnNext = st.clock + 5;
-    const fr = freeCrew(st), all = sc.all('station'); if (!fr.length || !all.length) return;
+    const fr = freeCrew(st), all = sc.all('station').filter(a => !sc.fits || sc.fits(a, 1)); if (!fr.length || !all.length) return;  // not a toy railway's platform: the crew would not fit on its train
     const S = pickOf(all); if (!num(S.x1) || !num(S.x2) || !num(S.y) || S.x2 - S.x1 < 20) return;
     // the way on: a tile top (or the ground) level with it, or one near enough to step across from
     let P = null, bd = 1e9;

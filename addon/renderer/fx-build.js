@@ -656,7 +656,7 @@
         let b = null, air = 0; for (const o of E.birds) { if (!o.on) b = o; else if (!o.land) air = 1; }
         if (!E.left) { if (!air) { E.ph = 'out'; E.tx = E.side > 0 ? c.w + 90 : -90; E.say = 1; E.sayT = 0; men[0].mt = 1; SEEN.quote++; } }   // the last one is down: the reporter finds words
         else if (b) {
-          b.on = 1; b.land = 0; b.t = 0; b.x = E.x; b.y = E.y + 12; b.vy = 20; b.rot = 0; b.sp = Math.random() < 0.5 ? -1 : 1; E.left--; E.gap = 2.5 + Math.random() * 1.5; E.tx = spot(E, c, ex + d * 60); SEEN.turkeys++;
+          b.on = 1; b.land = 0; b.t = 0; b.x = E.x; b.y = E.y + 12; b.vy = 20; b.rot = 0; b.sp = Math.random() < 0.5 ? -1 : 1; E.left--; E.gap = 2.5 + Math.random() * 1.5; E.tx = spot(E, c, ex + d * 60); { const pk = st.cars.filter(k => k.st === 'parked' && Math.abs(k.x - E.men[0].hx) > 90); if (pk.length && Math.random() < 0.4) E.tx = pk[Math.floor(Math.random() * pk.length)].x; }  /* now and then it hovers right over a parked car */ SEEN.turkeys++;
           men[0].mt = Math.max(men[0].mt, 1);
           for (const q of st.ten) {   // tenants out of doors run for the door, or off the screen if that is nearer; those at windows duck in
             if ((q.mode === 'out' || q.mode === 'come') && (!st.door || Math.abs(q.x - st.door.x) > Math.min(q.x, c.w - q.x) + 24)) { q.mode = 'run'; q.off = 1; q.tx = q.x < c.w / 2 ? -24 : c.w + 24; q.wv = 0; q.al = 1; SEEN.flees++; }
@@ -683,6 +683,7 @@
         b.vy = Math.min(360, b.vy + 300 * dt); b.y += b.vy * dt; b.rot += dt * 5 * b.sp;
         if (b.y < gy - 4) { fb = b; fowl(g, b, t); const A = b.A; A.x = b.x; A.y = b.y; c.scene.next.push(A); continue; }
         b.land = 1; b.t = 0; b.y = gy; E.last = 0; E.sx = b.x; SEEN.splats++; SEEN.x = b.x; SEEN.y = gy;
+        for (const k of st.cars) if (Math.abs(k.x - b.x) < 30 && squash(st, k)) break;  // one that comes down on a parked car flattens it
         for (let k = 0; k < 28; k += 4) { b.f[k] = b.x + (Math.random() - 0.5) * 8; b.f[k + 1] = gy - 3; b.f[k + 2] = (Math.random() - 0.5) * 90; b.f[k + 3] = -30 - Math.random() * 60; }
         men[0].mt = 2; men[2].mt = 2;
       }

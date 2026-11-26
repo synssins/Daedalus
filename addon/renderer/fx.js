@@ -58,6 +58,11 @@
 //            guard     it drives threats away          station  a place where a vehicle stops and creatures wait
 //          An actor without tags gets them from its kind (the table KIND_TAGS below), so older kinds still fit in.
 //   hid    true while it is out of sight (behind a tile, hanging off an edge): others leave it alone
+//   scale  how big its world is drawn (see `scale` above). The engine fills it in from the kind that posted it.
+//          Before anything bodily (boarding, a trap, a rescue) ask ctx.scene.fits(actor, myScale): a full-size figure
+//          does not get on a toy train.
+//   air    true while it is off the ground (a saucer, a helicopter, a light): nothing that walks can get at it, so a
+//          guard does not charge it and nobody tries to climb to it. They may still look up at it or run from it.
 //   view   how it lives on the screen. 'side': seen from the side, with gravity; it stands on tile tops and the ground.
 //          'top': the whole screen is its ground, seen from above; it goes anywhere, over tiles too (sheep, trains, ants).
 //          'free': it flies or floats and can reach both (the goose, lights). Without one it is 'side', or what its kind
@@ -152,8 +157,13 @@
     train: ['vehicle'], snowman: ['prop', 'food']};
   const KIND_VIEW = {train: 'top', koi: 'top', ants: 'top', sheep: 'top', ram: 'top', goose: 'free', fairylight: 'free', firefly: 'free', portal: 'free',
     firework: 'free', aurora: 'free', bee: 'free', lightstring: 'free', shell: 'free', blast: 'free'};
+  // off the ground, where nothing that walks can get at it
+  const KIND_AIR = {ufo: 1, helicopter: 1, turkey: 1, fairylight: 1, firefly: 1, firework: 1, aurora: 1, bee: 1, shell: 1, portal: 1};
   const NONE = [];
   const scene = {actors: [], next: [], over: [], scale: 1,
+    /** Can something of my size have to do with this one bodily: get on it, put its head in it, pull it out, sit at it?
+     *  Not if one is more than about twice the other's size. Looking, pointing, running away and following need no fit. */
+    fits(a, mine) { const s = (a && +a.scale) || 1, m = +mine || 1; return s / m < 2.5 && m / s < 2.5; },
     /** Everyone with this tag, out of what was posted in the frame before. */
     all(tag) { return scene.actors.filter(a => a.tags.indexOf(tag) >= 0 && !a.hid); },
     /** The nearest with this tag within r pixels (not `not`), or null. */
@@ -273,11 +283,13 @@
       const dt = Math.min(0.25, (ts - last) / 1000) || 0; last = ts;
       const g = size(live, 1), t = (ts - t0) / 1000;
       scene.actors = scene.next; scene.next = [];
-      for (const it of items) if (it.def.actors) { try { for (const a of it.def.actors(it.st, it.ctx) || NONE) scene.actors.push(a); } catch (e) { fail(it.kind, e); } }
-      for (const a of scene.actors) { if (!a.tags) a.tags = KIND_TAGS[a.kind] || NONE; if (!a.view) a.view = KIND_VIEW[a.kind] || 'side'; }
+      for (const it of items) if (it.def.actors) { try { for (const a of it.def.actors(it.st, it.ctx) || NONE) { if (a.scale == null) a.scale = +it.def.scale || 1; scene.actors.push(a); } } catch (e) { fail(it.kind, e); } }
+      for (const a of scene.actors) { if (!a.tags) a.tags = KIND_TAGS[a.kind] || NONE; if (!a.view) a.view = KIND_VIEW[a.kind] || 'side'; if (a.air == null) a.air = !!KIND_AIR[a.kind]; }
       for (const it of items) if (it.def.live) {
         if (it.def.grows) it.ctx.progress = progressOf(it.def, it.ctx.opts);
+        const n0 = scene.next.length;
         g.save(); try { it.def.draw(g, it.st, it.ctx, t, dt); } catch (e) { fail(it.kind, e); } g.restore();
+        for (let i = n0; i < scene.next.length; i++) if (scene.next[i].scale == null) scene.next[i].scale = +it.def.scale || 1;  // what it posted is as big as its world
       }
       for (const f of scene.over) { g.save(); try { f(g); } catch (e) {} g.restore(); }
       scene.over.length = 0;

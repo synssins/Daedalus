@@ -1430,7 +1430,7 @@
       if (ram && sc && (W.scan -= dt) <= 0) {
         W.scan = .3;
         if (calm(ram) && !duty(ram) && W.t >= ram.wary) for (const c of L) {
-          const f = calm(c) ? sc.near('threat', c.x, c.y, 260) : null;
+          let f = null, fd = 260; if (calm(c)) for (const a of sc.actors) if (!a.hid && !a.air && a.tags.indexOf('threat') >= 0) { const d = Math.hypot(a.x - c.x, a.y - c.y); if (d < fd) { fd = d; f = a; } }  // not one in the air: it cannot butt what it cannot reach
           // it has to notice first: a few seconds of trouble among the flock before it goes, so the goose gets its fun
           if (f) { if (!ram.seen) ram.seen = W.t + span(4, 8); else if (W.t >= ram.seen) { ram.seen = 0; ram.wary = W.t + 3; release(ram); ram.foe = f; mood(ram, 'charge'); FLOCK.charges++; } ram.near = W.t; break; }
         }
@@ -1451,6 +1451,14 @@
         if (am) { a.x -= dx * push; a.y -= dy * push; } if (bm) { b.x += dx * push; b.y += dy * push; }
       }
       for (const c of L) if (calm(c)) { c.x = U.clamp(c.x, W.x1, W.x2); c.y = U.clamp(c.y, W.y1, W.y2); }
+      // It faces the way it really goes. Where it means to go and where it ends up differ: the others shoulder it
+      // aside, the edge of the field turns a run into a slide along it. So the facing is taken from the ground it
+      // covered, smoothed over a few frames, and not from its intention.
+      for (const c of L) {
+        const mx = c.px == null ? 0 : c.x - c.px, my = c.py == null ? 0 : c.y - c.py; c.px = c.x; c.py = c.y;
+        c.mvx = (c.mvx || 0) * .55 + mx * .45; c.mvy = (c.mvy || 0) * .55 + my * .45;
+        if ((c.mode === 'flee' || c.mode === 'walk' || c.mode === 'frolic') && c.mvx * c.mvx + c.mvy * c.mvy > 1.5 * k * k) turn(c, c.mvx * 4, c.mvy * 4);
+      }
       // one lower on the screen is nearer: drawn later, so in front. (Nearly sorted from the frame before: a few swaps.)
       for (let i = 1; i < L.length; i++) { const c = L[i]; const d = stood(c); let j = i - 1; while (j >= 0 && stood(L[j]) > d) { L[j + 1] = L[j]; j--; } L[j + 1] = c; }
       g.imageSmoothingEnabled = false;

@@ -832,14 +832,163 @@
     });
     if (done) { T.off = 0; T.v = T.wait = 0; T.toot = 2; }
   }
+  // ----- passengers -----
+  // The railway's own people, at its own size and seen from above like the trains: a head and shoulders a few pixels
+  // across. They come along the tile's edge to a platform, wait, get on the nearest car and get off a stop or two later.
+  // p.st says what one is doing: 'in' coming, 'wait', 'board' walking to a car, 'step' getting on, 'on' aboard,
+  // 'off' getting down, 'out' leaving, 'flee' scattered by a threat, 'run' after a train that is pulling out,
+  // 'slump' at the platform's end, having missed it.
+  const COAT = ['#c2493f', '#4a7fc9', '#4a9e6a', '#e0ac48', '#8a66bd', '#8d96a6', '#d6d0c2', '#c9703a'], HAIR = ['#2a2019', '#5a3a22', '#8a6a3a', '#c9c9cc', '#17171a'];
+  const SKIN = ['#f1d2b0', '#dcae80', '#a8754f', '#74503a'], LID = ['#444854', '#c8372d', '#e9dfc4'], pick = a => a[Math.floor(Math.random() * a.length)];
+  const PT = HP.fx.trainTest = {waits: 0, boards: 0, alights: 0, missed: 0};  // counted for the checks
+  /** A new one for platform P, standing at x, y. Nobody sees it until it has somewhere to go. */
+  function folk(st, P, x, y) {
+    // wp, wi: the way it is walking, as x, y pairs, and how far along; sx: its place on the platform; hold: seconds before it sets off
+    const p = {x, y, a: -Math.PI / 2, S: P, st: 'in', wp: [], wi: 0, sx: x, hold: 0, t: 0, ph: 0, al: 0, mv: false, fear: 0, fx: 0, idle: 0, it: 1 + Math.random() * 3, tr: null, cx: 0, cy: 0, late: false,
+      coat: pick(COAT), hair: pick(HAIR), skin: pick(SKIN), lid: Math.random() < 0.3 ? pick(LID) : null, bag: Math.random() < 0.45 ? 1 + Math.floor(Math.random() * 2) : 0};
+    // what the train sees of it (it says its size, so a train of another size would not take it), and what the other kinds see
+    p.rider = {scale: 0.3, stay: 0, alight: (ax, ay) => setdown(st, p, ax, ay)};
+    p.post = {kind: 'passenger', tags: ['creature', 'person'], view: 'top', x, y, h: 5, scare: by => { if (p.st !== 'wait' && p.st !== 'in') return false; p.fear = 3; p.fx = by && by.x != null ? by.x : p.x; return true; }};
+    st.ps.push(p); return p;
+  }
+  /** A place to stand on the platform, not on top of somebody who has one there already. */
+  function slot(st, P) {
+    let x = 0;
+    for (let k = 0; k < 6; k++) { x = U.lerp(P.S.x1 + 5, P.S.x2 - 5, Math.random()); if (!st.ps.some(q => q.S === P && q.st !== 'on' && q.st !== 'out' && Math.abs(q.sx - x) < 5)) break; }
+    return x;
+  }
+  /** Is the screen's edge on that side near enough to walk from, along the tile's top edge, with no tile's face in the way? */
+  function open(st, P, side, x) {
+    const edge = side < 0 ? -5 : st.W + 5; if (Math.abs(edge - P.S.x) > 320) return false;
+    for (const b of st.tiles) if (P.y > b.y + 3 && P.y < b.y + b.h - 3 && b.x < Math.max(edge, x) && b.x + b.w > Math.min(edge, x)) return false;
+    return true;
+  }
+  /** Somebody comes to platform P from that side (-1 left, 1 right): in from the screen's edge if that is near, else
+   *  from round the corner of the tile. near: round the corner in any case. */
+  function arrive(st, P, side, hold, near) {
+    const b = P.b, cx = side < 0 ? b.x - 2 : b.x + b.w + 2, sx = slot(st, P), far = !near && Math.random() < 0.4 && open(st, P, side, sx);
+    const p = folk(st, P, far ? (side < 0 ? -5 : st.W + 5) : cx, far ? P.y : P.y + 12);
+    p.sx = sx; p.hold = hold; if (!far) p.wp.push(cx, P.y); p.wp.push(sx, P.y); return p;
+  }
+  /** Off along the tile's edge and out of sight: the way they come, the other way round. */
+  function leave(st, p) {
+    const P = p.S, b = P.b, side = (p.x < P.S.x) === (Math.random() < 0.75) ? -1 : 1, cx = side < 0 ? b.x - 2 : b.x + b.w + 2;
+    p.st = 'out'; p.wi = 0; p.wp.length = 0;
+    if (Math.random() < 0.4 && open(st, P, side, p.x)) p.wp.push(side < 0 ? -5 : st.W + 5, P.y); else p.wp.push(cx, P.y, cx, P.y + 12);
+  }
+  /** One way to go: straight to x, y. */
+  function head(p, x, y) { p.wi = 0; p.wp.length = 0; p.wp.push(x, y); }
+  /** The train puts a passenger down at x, y. On a platform it has arrived, and goes its way. Anywhere else the train
+   *  has left the rails (or the railway was built anew): it walks to the nearest station and waits there again. */
+  function setdown(st, p, x, y) {
+    let P = null, bd = 1e9;
+    for (const Q of st.plats) { const d = Math.hypot(U.clamp(x, Q.S.x1, Q.S.x2) - x, Q.S.y - y); if (d < bd) { bd = d; P = Q; } }
+    if (!P) { const i = st.ps.indexOf(p); if (i >= 0) st.ps.splice(i, 1); return; }
+    p.S = P; p.al = 0; p.tr = null; p.fear = 0; p.late = false;
+    if (bd < 3) { p.x = x; p.y = P.y - 4.5; p.st = 'off'; p.t = 0.2 + Math.random() * 0.8; head(p, x, P.y); PT.alights++; }
+    else { p.x = x + (Math.random() - 0.5) * 18; p.y = y + (Math.random() - 0.5) * 8; p.st = 'in'; p.hold = Math.random() * 1.5; p.sx = slot(st, P); head(p, p.sx, P.y); }
+  }
+  /** A step along its way at v pixels a second; true once it stands at the end of it. */
+  function stride(p, v, dt) {
+    const w = p.wp; if (p.wi >= w.length) return true;
+    const dx = w[p.wi] - p.x, dy = w[p.wi + 1] - p.y, d = Math.hypot(dx, dy), s = v * dt;
+    if (d <= s) { p.x = w[p.wi]; p.y = w[p.wi + 1]; p.wi += 2; } else { p.x += dx / d * s; p.y += dy / d * s; p.a = Math.atan2(dy, dx); }
+    p.ph += s * 1.3; p.mv = true; return p.wi >= w.length;
+  }
+  /** One of them, from above, facing along p.a: shadow, feet when walking, a bag in one hand, shoulders in a coat, the
+   *  head (hair with a bit of face in front, or a hat). One who has missed the train: shoulders in, head hung, bag put down. */
+  function person(g, p) {
+    const low = p.st === 'slump', sw = p.mv ? Math.sin(p.ph) * 1.4 : 0, hx = low ? 1.3 : 0.25;
+    g.globalAlpha = p.al * 0.32; g.fillStyle = '#000'; g.beginPath(); g.ellipse(p.x + 0.9, p.y + 1.2, 3.3, 2.2, 0, 0, TAU); g.fill();
+    g.globalAlpha = p.al; g.save(); g.translate(p.x, p.y); g.rotate(p.a); g.scale(1.2, 1.2);  // heads the size of the ones that show on the cars
+    if (p.mv) { g.fillStyle = '#1d1e24'; g.fillRect(sw - 0.3, -1.5, 1.6, 1.1); g.fillRect(-sw - 0.3, 0.4, 1.6, 1.1); }  // feet, one forward and one back
+    if (p.bag) { g.fillStyle = p.bag > 1 ? '#3f5687' : '#8a5c34'; if (low) g.fillRect(-1.4, 3.4, 2.3, 1.7); else g.fillRect(-0.7 - sw * 0.4, 2.2, p.bag > 1 ? 2.4 : 1.8, 1.6); }
+    g.fillStyle = p.coat; g.beginPath(); g.ellipse(low ? -0.2 : 0, 0, low ? 1.75 : 1.45, low ? 2.2 : 2.9, 0, 0, TAU); g.fill(); g.strokeStyle = 'rgba(20,20,30,.65)'; g.lineWidth = 0.55; g.stroke();
+    if (p.idle === 2 && p.st === 'wait') { g.fillStyle = p.skin; g.fillRect(0.9, -1.9, 1.7, 1); g.fillStyle = '#f4f4f8'; g.fillRect(1.5, -1.9, 0.6, 1); }  // a wrist held up in front: what time is it
+    if (p.lid) { g.fillStyle = p.lid; g.beginPath(); g.arc(hx, 0, 1.75, 0, TAU); g.fill(); g.fillStyle = 'rgba(255,255,255,.3)'; g.beginPath(); g.arc(hx, 0, 0.95, 0, TAU); g.fill(); }
+    else { g.fillStyle = p.hair; g.beginPath(); g.arc(hx, 0, 1.45, 0, TAU); g.fill(); g.fillStyle = p.skin; g.beginPath(); g.arc(hx + 0.6, 0, 0.85, 0, TAU); g.fill(); }
+    g.restore();
+  }
+  /** One frame of everybody: who comes, who gets on, who runs; then each is moved, shown to the other kinds and drawn. */
+  function people(g, st, ctx, dt) {
+    const sc = ctx.scene, ps = st.ps, late = ctx.opts.late != null ? +ctx.opts.late : 0.12;  // late: how often a train that pulls out leaves somebody running (not offered as an option; for trying it out)
+    for (const P of st.plats) {
+      const S = P.S, th = sc ? sc.near('threat', S.x, S.y, 80 + (S.x2 - S.x1) / 2) : null;
+      if (th) { P.fear = 2; P.fx = th.x; } else if (P.fear > 0) P.fear -= dt;  // a threat by the platform: those waiting keep away until it has been gone a moment
+      let T = null; for (const V of st.trains) if (V.at === S) T = V;
+      if (P.T && !T && !P.T.off && P.T.left === S && Math.random() < late) {  // it pulls out: now and then somebody is just too late
+        let p = null; for (const q of ps) if (q.S === P && q.st === 'in' && q.hold <= 0) p = q;  // one who was on the way in, or a new one round the corner behind the train
+        if (!p && ps.length < 12) p = arrive(st, P, -P.dir, 0, true);
+        if (p) { p.st = 'run'; p.bag = p.bag || 1; p.wp[p.wp.length - 2] = P.dir > 0 ? S.x2 - 2 : S.x1 + 2; }
+      }
+      P.T = T;
+      // a few at a time, up to four at a station and a dozen in all (those aboard too)
+      if ((P.tm -= dt) <= 0 && P.fear <= 0) {
+        P.tm = 9 + Math.random() * 14;
+        for (let k = 0, n = 1 + Math.floor(Math.random() * 3), side = Math.random() < 0.5 ? -1 : 1; k < n && P.n + k < 4 && ps.length < 12; k++) arrive(st, P, side, k * (0.9 + Math.random()));
+      }
+      P.n = P.shown = 0;
+    }
+    for (let i = ps.length - 1; i >= 0; i--) {
+      const p = ps[i], P = p.S, S = P.S, b = P.b; p.mv = false;
+      if (p.st === 'on') continue;
+      if (p.st !== 'off' && p.st !== 'out') P.n++;
+      if (p.hold > 0) { p.hold -= dt; continue; }
+      if ((p.st === 'wait' || p.st === 'flee') && P.fear > 0 && p.fear < P.fear) { p.fear = P.fear; p.fx = P.fx; }
+      if (p.fear > 0 && (p.st === 'wait' || p.st === 'in')) {  // scattered: away from it along the tile's edge
+        const to = p.x + (p.x >= p.fx ? 1 : -1) * (34 + Math.random() * 30); p.st = 'flee'; head(p, U.clamp(to, Math.min(b.x + 3, p.x), Math.max(b.x + b.w - 3, p.x)), P.y);
+      }
+      if (p.st === 'in') { if (stride(p, p.late ? 7 : 12, dt)) { p.st = 'wait'; p.late = false; p.idle = 0; PT.waits++; } }
+      else if (p.st === 'wait') {
+        const T = P.T;
+        if (!T) p.tr = null;
+        else if (p.tr !== T) { p.tr = T; p.t = 0.3 + Math.random() * 1.3; }  // a train has come in: a moment, then to the nearest car, if there is room aboard
+        else if (p.t > 0 && (p.t -= dt) <= 0 && T.riders.length < 2 * (T.cars.length - 1)) {
+          let c = null, bd = 1e9; for (let k = 1; k < T.cars.length; k++) { const q = T.cars[k], d = Math.abs(q.x - p.x); if (!q.tender && d < bd) { bd = d; c = q; } }
+          if (c) { p.st = 'board'; p.cx = c.x; p.cy = c.y; head(p, U.clamp(c.x, b.x + 3, b.x + b.w - 3), P.y); }
+        }
+        if (p.st === 'wait') {
+          // waiting: standing, shifting a little along the platform, a look at the watch, a look down the track to where the train will come from
+          if ((p.it -= dt) <= 0) { p.idle = Math.floor(Math.random() * 4); p.it = 1.2 + Math.random() * 2.6 + (p.idle ? 0 : 2); if (p.idle === 1) p.sx = U.clamp(p.sx + (Math.random() - 0.5) * 9, S.x1 + 4, S.x2 - 4); }
+          const dx = p.sx - p.x; if (Math.abs(dx) > 0.4) { const s = Math.min(Math.abs(dx), 5 * dt); p.x += dx > 0 ? s : -s; p.ph += s * 1.3; p.mv = true; }
+          let da = -Math.PI / 2 - (p.idle === 3 ? P.dir : 0) - p.a; da -= Math.round(da / TAU) * TAU; p.a += da * Math.min(1, dt * 7);
+        }
+      }
+      else if (p.st === 'board') {
+        if (P.T !== p.tr) { if (p.tr.off) { p.st = 'in'; head(p, p.sx, P.y); } else { p.st = 'run'; head(p, P.dir > 0 ? S.x2 - 2 : S.x1 + 2, P.y); } }  // it went without them
+        else if (stride(p, 14, dt)) { p.st = 'step'; p.t = 0; }
+      }
+      else if (p.st === 'step') {  // up into the car; if there was no room after all, back to where it stood
+        p.t = Math.min(1, p.t + dt * 2.6); p.x += (p.cx - p.x) * p.t; p.y = U.lerp(P.y, p.cy, p.t); p.a = -Math.PI / 2; p.al = 1 - p.t * 0.7; p.mv = true; p.ph += 0.9;
+        if (p.t >= 1) {
+          if (P.T === p.tr && U.act(P.T.post, 'board', p.rider)) { const k = Math.random(); p.rider.stay = k < 0.6 ? 0 : k < 0.9 ? 1 : 2; p.st = 'on'; p.al = 0; PT.boards++; continue; }
+          p.st = 'in'; head(p, p.sx, P.y);
+        }
+      }
+      else if (p.st === 'off') { if (stride(p, 9, dt) && (p.t -= dt) <= 0) leave(st, p); }
+      else if (p.st === 'out') {
+        const done = stride(p, 12, dt), w = p.wp;
+        if (p.wi >= w.length - 2) p.al = Math.min(p.al, Math.hypot(w[w.length - 2] - p.x, w[w.length - 1] - p.y) / 10);
+        if (done) { ps.splice(i, 1); continue; }
+      }
+      else if (p.st === 'flee') { if (stride(p, 30, dt) && (p.fear -= dt) <= 0) { p.fear = 0; p.st = 'in'; head(p, p.sx, P.y); } }
+      else if (p.st === 'run') { if (stride(p, 30, dt)) { p.st = 'slump'; p.t = 3.2; p.a = P.dir > 0 ? 0 : Math.PI; PT.missed++; } }
+      else if (p.st === 'slump') { if ((p.t -= dt) <= 0) { p.st = 'in'; p.late = true; head(p, p.sx, P.y); } }  // a still moment, then slowly back to wait for the next
+      if (p.st !== 'out' && p.st !== 'step' && p.al < 1) p.al = Math.min(1, p.al + dt * 2);
+      if (sc && P.shown < 2 && p.al > 0.5 && p.st !== 'step') { P.shown++; p.post.x = p.x; p.post.y = p.y; sc.next.push(p.post); }  // a couple per station are enough for the other kinds
+      person(g, p);
+    }
+    g.globalAlpha = 1;
+  }
   HP.fx.add('train', {
-    label: 'Train', live: true, fps: 12,
+    label: 'Train', live: true, fps: 12, scale: 0.3,
     options: [{key: 'trains', label: 'Trains', type: 'range', min: 1, max: 4, step: 1, default: 2},
       {key: 'cars', label: 'Cars', type: 'range', min: 1, max: 8, step: 1, default: 4},
       {key: 'speed', label: 'Speed', type: 'range', min: 0.4, max: 2, step: 0.1, default: 1},
       {key: 'track', label: 'Track', type: 'select', choices: [['network', 'Network'], ['loop', 'Loop']], default: 'network'},
       {key: 'engine', label: 'Engine', type: 'select', choices: [['diesel', 'Diesel'], ['steam', 'Steam']], default: 'diesel'},
-      {key: 'livery', label: 'Livery', type: 'select', choices: [['standard', 'Standard'], ['xmas', 'Christmas']], default: 'standard'}],
+      {key: 'livery', label: 'Livery', type: 'select', choices: [['standard', 'Standard'], ['xmas', 'Christmas']], default: 'standard'},
+      {key: 'people', label: 'Passengers', type: 'bool', default: true}],
     create(ctx) {
       const net = network(ctx), r = ctx.rand, N = net.nodes, still = sheet(ctx), g = still.getContext('2d'), R = 12, o = 2.6, q = {x: 0, y: 0, a: 0};
       const path = circuit(net, ctx); let L = 0; path.forEach((n, i) => { const m = N[path[(i + 1) % path.length]]; L += Math.hypot(N[n].x - m.x, N[n].y - m.y); });
@@ -847,9 +996,9 @@
       const steam = ctx.opts.engine === 'steam', xmas = ctx.opts.livery === 'xmas';  // a steam engine's tender is one more car
       const nc = Math.min(U.clamp(Math.round(ctx.opts.cars), 1, 8) + (steam ? 1 : 0), Math.max(1, Math.floor((L / 2 - 84) / 20))), len = 24 + 20 * nc;
       const rw = (ctx.opts.track !== 'loop' && railway(net, ctx, path, len, false)) || railway(net, ctx, path, len, true);
-      const st = {still, N, R, steam, xmas, trains: [], stops: [], sig: [], pts: {}, puffs: [], tick: 0, o1: {x: 0, y: 0, a: 0}, o2: {x: 0, y: 0, a: 0}};
+      const st = {still, N, R, steam, xmas, trains: [], stops: [], sig: [], pts: {}, puffs: [], tick: 0, o1: {x: 0, y: 0, a: 0}, o2: {x: 0, y: 0, a: 0}, ps: [], plats: [], W: ctx.w};  // ps: the passengers; plats: what they know of each station
       if (yard) for (const T of yard.trains) setDown(T);
-      yard = st;
+      yard = st; PT.st = st;
       if (!rw) return st;  // a screen too small for any train
       const segs = rw.segs, lamp = rgb => dot(20, [[0, 'rgba(' + rgb + ',1)'], [0.3, 'rgba(' + rgb + ',.55)'], [1, 'rgba(' + rgb + ',0)']]);
       // sleepers first, rails on top, both along the very curve the cars follow; a line's rails stop short of its
@@ -897,7 +1046,8 @@
         // what the other kinds see of it (ctx.scene), and what they may do to it
         T.post = {kind: 'train', tags: ['vehicle'], x: 0, y: 0, h: 14, dir: 0, stopped: false, vx: 0, grab: () => derail(st, T), drag: (x, y) => haul(st, T, x, y), drop: () => dump(st, T),
           // standing at a station it takes riders, two to a car; they get off at the next station it stops at
-          board: rd => !!(T.at && !T.off && rd && T.riders.length < 2 * (cars.length - 1) && T.riders.indexOf(rd) < 0 && T.riders.push(rd))};
+          // (a rider that says its size is turned away if that is not the railway's: a full-size figure does not get on a toy train)
+          board: rd => !!(T.at && !T.off && rd && !(rd.scale != null && ctx.scene && !ctx.scene.fits({scale: rd.scale}, 0.3)) && T.riders.length < 2 * (cars.length - 1) && T.riders.indexOf(rd) < 0 && T.riders.push(rd))};
         st.trains.push(T);
       }
       // Headlight. The cone is painted once, lamp at (4, 64) pointing right, fading with distance and towards its sides.
@@ -918,13 +1068,16 @@
       const cand = [];
       for (const X of segs) for (let i = 1; i < X.p.length; i++) {
         const A = X.p[i - 1], B = X.p[i]; if (Math.abs(A.y - B.y) > 1) continue;
-        for (const b of net.solid) { const x1 = Math.max(Math.min(A.x, B.x) + R, b.x + 8), x2 = Math.min(Math.max(A.x, B.x) - R, b.x + b.w - 8); if (b.y > A.y && b.y - A.y < 26 && x2 - x1 >= 44 && !cand.some(c => c.b === b || c.B === B)) cand.push({b, B, x: (x1 + x2) / 2, w: Math.min(x2 - x1, 64), o: r() + (X.k ? 0 : 2)}); }
+        for (const b of net.solid) { const x1 = Math.max(Math.min(A.x, B.x) + R, b.x + 8), x2 = Math.min(Math.max(A.x, B.x) - R, b.x + b.w - 8); if (b.y > A.y && b.y - A.y < 26 && x2 - x1 >= 44 && !cand.some(c => c.b === b || c.B === B)) cand.push({b, B, dir: B.x > A.x ? 1 : -1, x: (x1 + x2) / 2, w: Math.min(x2 - x1, 64), o: r() + (X.k ? 0 : 2)}); }
       }
       cand.sort((p, q) => p.o - q.o);
       for (let pass = 0, want = Math.min(cand.length, Math.max(2, Math.round(cand.length / 4))); pass < 2; pass++) for (const c of cand) {
         if (st.stops.length >= want || c.B.stn || (!pass && st.stops.some(S => Math.hypot(S.x - c.x, S.y - c.b.y) < 200))) continue;
         const S = {kind: 'station', tags: ['prop', 'station'], x: c.x, y: c.b.y, x1: c.x - c.w / 2, x2: c.x + c.w / 2, h: 14, train: null};
         c.B.stn = {S, back: Math.abs(c.B.x - c.x)}; st.stops.push(S);
+        // for the passengers: b the tile it stands on, dir the way trains run past it, y where feet stand (just behind the yellow line),
+        // tm seconds until more people come, T the train standing there, fear and fx: a threat near by and where, n how many are there
+        st.plats.push({S, b: c.b, dir: c.dir, y: c.b.y - 0.4, tm: 1 + Math.random() * 5, T: null, fear: 0, fx: 0, n: 0, shown: 0});
       }
       return Object.assign(st, {segs, S: rw.S, at0: rw.at0, own: rw.own, go: rw.go, red: lamp('255,72,56'), green: lamp('80,235,120'), spark: lamp('255,214,110'),
         steam: dot(32, [[0, 'rgba(255,255,255,.9)'], [0.5, 'rgba(245,247,252,.45)'], [1, 'rgba(240,244,250,0)']]), smoke});
@@ -962,7 +1115,7 @@
           const s = p[k].stn; if (!s || s.S.train || (s.S === T.left && T.gone < 60)) continue;
           const d = w.c[k] - s.back + T.len / 2 - T.d; if (d < -2 || d >= halt) continue;
           halt = Math.max(0, d);
-          if (d < 0.5) { const S = s.S; T.at = S; S.train = T.post; T.dwell = 4 + Math.random() * 2; for (const rd of T.riders) U.act(rd, 'alight', U.lerp(S.x1, S.x2, 0.15 + Math.random() * 0.7), S.y); T.riders = []; }
+          if (d < 0.5) { const S = s.S; T.at = S; S.train = T.post; T.dwell = 4 + Math.random() * 2; let keep = 0; for (const rd of T.riders) { if (rd.stay > 0) { rd.stay--; T.riders[keep++] = rd; } else U.act(rd, 'alight', U.lerp(S.x1, S.x2, 0.15 + Math.random() * 0.7), S.y); } T.riders.length = keep; }  // (one of the railway's own passengers may stay on for another stop or two)
         }
         T.v = Math.min(T.v, Math.sqrt(Math.max(0, 68 * halt)));  // never faster than it can stop in the room it has
         const step = Math.min(T.v * dt, Math.max(0, halt)); T.d += step; T.gone += step; T.rod += step * 0.45;
@@ -1081,6 +1234,7 @@
       }
       // stations stand in front of the trains, and say where they are
       for (const S of st.stops) { depot(g, S); if (ctx.scene) ctx.scene.next.push(S); }
+      if (ctx.opts.people && st.plats) people(g, st, ctx, dt);
       for (let i = st.puffs.length - 1; i >= 0; i--) {
         const p = st.puffs[i]; p.t += dt; if (p.t > (p.life || 1.8)) { st.puffs.splice(i, 1); continue; }
         p.x += p.vx * dt; p.y += p.vy * dt;

@@ -50,6 +50,9 @@ An actor is one thing on the dashboard:
 
 A `side` creature does not walk to a `top` one.
 
+`air: true` means it is off the ground, such as a saucer, a helicopter or a light. Nothing that walks can reach it.
+A guard does not charge it. Others may still look up at it or run from it.
+
 - A live overlay posts while drawing: `ctx.scene.next.push(actor)`.
 - A still overlay returns its list from an `actors(state, ctx)` method.
 
@@ -107,6 +110,10 @@ An overlay may set `scale` on its definition. `1` is the default: its creatures 
 means a whole world drawn small, such as `0.1` for an apartment building that fits on the screen. `ctx.scene.scale`
 is the smallest scale on the dashboard. An overlay that roams, such as the goose, sizes itself by it.
 
+The engine stamps each actor with the scale of the overlay that posted it. Before anything bodily (boarding,
+a trap, a rescue) call `ctx.scene.fits(actor, myScale)`. It is `false` when one is more than about twice the size
+of the other. Looking, fleeing and following need no fit.
+
 ## What each overlay posts and reacts to
 
 | Overlay | Posts | Reacts to | Offers |
@@ -121,6 +128,7 @@ is the smallest scale on the dashboard. An overlay that roams, such as the goose
 | Construction crew | workers, tenants and shoppers `creature`, `person`; lifts `vehicle`; cars `vehicle`, `prop`; sign `prop`, `wonder`; a rave `light`, `wonder`; helicopter and turkeys `threat` | `threat` | `scare`, `carry`; cars and sign `stomp` |
 | Train | `vehicle` | | `grab`, `drag`, `drop`, `board` |
 | Train station | `prop`, `station` | | |
+| Train passengers | `creature`, `person` | `threat`, `station`, `vehicle` | `scare` |
 | Ants | `creature` | `food` | |
 | Koi pond | `creature`, `animal`; lily pads `prop` | `threat` | `carry`, `lure` |
 | String lights | `light` | | |
