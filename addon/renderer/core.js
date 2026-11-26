@@ -537,7 +537,9 @@ async function serverMode(server, cfg) {
   let ws = null;
   (function listen() {  // the server says when this tablet's design changed
     const w = ws = new WebSocket(server.replace(/^http/, 'ws') + '/api/events?key=' + encodeURIComponent(HP.key));
-    w.onopen = w.onmessage = () => pull().catch(() => {});  // on connect too: catches changes made while the server was away
+    w.onopen = () => pull().catch(() => {});  // on connect too: catches changes made while the server was away
+    // a message is "your design changed", or an overlay event set off by hand in Daedalus Workshop
+    w.onmessage = ev => { let m = null; try { m = JSON.parse(ev.data); } catch (e) {} if (m && m.type === 'fx') HP.fx.fire(m.kind, m.event); else pull().catch(() => {}); };
     w.addEventListener('open', () => HP_ENGINE.check(server));  // the add-on restarts when it is updated: that is when a new engine appears
     w.onclose = () => { if (ws === w) { ws = null; setTimeout(listen, 5000); } };
   })();

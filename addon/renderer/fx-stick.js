@@ -2023,8 +2023,13 @@
 
   const S_BRAWL = 0.5, S_REST = 0.22, S_BALL = 0.14;  // the chance a row becomes a fight; of a breather after digging; of a snowball instead
 
+  // set off by hand: the game or gag is asked for by name for a while (st.force), and starts as soon as the crew is free
+  const CREW_EVENTS = {};
+  for (const [id, label] of [['tongue', 'Tongue on ladder'], ['fight', 'Snowball fight'], ['sled', 'Sledding'], ['snowman', 'Snowman'], ['tableau', 'Snow sculpture'], ['angel', 'Snow angel'], ['cocoa', 'Cocoa break'],
+    ['scare', 'Scare'], ['shove', 'Shove'], ['icicle', 'Icicle'], ['fort', 'Snow fort'], ['peek', 'Peek'], ['bunny', 'Bunny suit'], ['yeti', 'Yeti'], ['santa', 'Santa'], ['camper', 'Motorhome'], ['brawl', 'Brawl']])
+    CREW_EVENTS[id] = {label, run: st => { st.force = id; st.forceT = st.clock + 40; st.playNext = st.gagNext = st.rowNext = 0; }};
   HP.fx.add('snowcrew', {
-    label: 'Snow crew',
+    label: 'Snow crew', events: CREW_EVENTS,
     live: true, z: 1, fps: 12,
     options: [{key: 'crew', label: 'Crew', type: 'range', min: 1, max: 6, step: 1, default: 3},
       {key: 'always', label: 'Whatever the weather', type: 'bool', default: false},
@@ -2139,6 +2144,7 @@
       st.snowing = snowing;
       if (!st.on) return;
       st.clock += dt;
+      if (st.forceT && st.clock > st.forceT) { st.forceT = 0; st.force = ctx.opts.force || null; }  // an event asked for by hand has had its time
       if ((st.chk -= dt) < 0) {
         st.chk = 0.2; let ch = false;
         for (const P of plats) if (P.i) { const a = awayEl(P); if (a !== P.away) { P.away = a; ch = true; if (a) tileGone(st, P); else P.dirty = true; } }

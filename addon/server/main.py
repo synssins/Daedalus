@@ -331,6 +331,19 @@ async def admin_tablet(request: web.Request):
     return web.json_response(state(request.app))
 
 
+async def admin_fx(request: web.Request):
+    """Set off an overlay event on one device: passed down the socket the device already holds open."""
+    tid = request.match_info["id"]
+    if tid not in request.app["store"].tablets:
+        raise web.HTTPNotFound()
+    body = await request.json()
+    msg = {"type": "fx", "kind": str(body.get("kind", ""))[:40], "event": str(body.get("event", ""))[:40]}
+    socks = list(request.app["tablet_sockets"].get(tid, ()))
+    for ws in socks:
+        await ws.send_json(msg)
+    return web.json_response({"sent": len(socks)})
+
+
 async def admin_design(request: web.Request):
     s: Store = request.app["store"]
     did = request.match_info.get("id")
@@ -590,6 +603,7 @@ def build_app() -> web.Application:
     r.add_get("/admin/api/live", admin_live)
     r.add_get("/admin/api/entities", admin_entities)
     r.add_post("/admin/api/tablets/{id}/approve", admin_tablet)
+    r.add_post("/admin/api/tablets/{id}/fx", admin_fx)
     r.add_route("PATCH", "/admin/api/tablets/{id}", admin_tablet)
     r.add_delete("/admin/api/tablets/{id}", admin_tablet)
     r.add_post("/admin/api/designs", admin_design)

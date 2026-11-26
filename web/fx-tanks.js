@@ -814,6 +814,7 @@
 
   const wake = st => { if (!st.game) st.at = Date.now() + idleMs(st); };  // any finger puts the battle off again
   HP.fx.add('tanks', {
+    events: {battle: {label: 'Battle', run: st => { if (!st.game) st.at = Date.now() + 500; }}},
     label: 'Tank battle',
     live: true, z: 1, fps: 15,
     options: [{key: 'idle', label: 'Starts after', type: 'select', choices: [[1, '1 minute'], [5, '5 minutes'], [15, '15 minutes'], [30, '30 minutes']], default: 5},

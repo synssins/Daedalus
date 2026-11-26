@@ -337,6 +337,12 @@
     forget() { parked.clear(); items.forEach(it => { if (it.def.restore) { try { it.def.restore(it.st, it.ctx); } catch (e) { fail(it.kind, e); } } }); items = []; cur = null; },
     /** Everything on the dashboard right now: the same object every kind gets as ctx.scene. For tests and tools. */
     get scene() { return scene; },
+    /** Set off one of a kind's events by hand (def.events: {id: {label, run(state, ctx)}}), on every one of that
+     *  kind now in use. Daedalus Workshop sends these to a device. */
+    fire(kind, id) {
+      for (const it of items) { const e = it.kind === kind && it.def.events && it.def.events[id]; if (e) { try { e.run(it.st, it.ctx); } catch (err) { fail(kind, err); } } }
+      loop();
+    },
   };
   /** Sunlight under water, for the coral reef: slanted beams from the surface and wavering
    *  patches of light on the seabed. Both kinds call it; it draws once a frame. */

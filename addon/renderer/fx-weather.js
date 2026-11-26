@@ -653,6 +653,7 @@
     }
   }
   HP.fx.add('fairylights', {
+    events: {portal: {label: 'Portal', run: st => { st.wait = 0; }}, lead: {label: 'Lead light', run: st => { st.lwait = 0; }}},
     label: 'Fairy lights',
     live: true, fps: 12,
     options: [{key: 'count', label: 'How many', type: 'range', min: 6, max: 40, step: 1, default: 16},
@@ -754,7 +755,7 @@
     return best;
   }
   HP.fx.add('ufo', {
-    label: 'UFO',
+    label: 'UFO', events: {visit: {label: 'Visit', run: st => { st.wait = 0; st.fire = 1; }}},
     live: true, fps: 12, z: 2,
     options: [{key: 'always', label: 'By day too', type: 'bool', default: false}],
     create(ctx) {
@@ -765,8 +766,9 @@
       let S = st.S;
       dt = Math.min(dt, 0.25);
       if (!S) {  // a visit under way is finished even if day breaks; a new one starts only at night
-        if (!ctx.opts.always && !ctx.env.night) return;
+        if (!ctx.opts.always && !ctx.env.night && !st.fire) return;  // (fire: sent for by hand, day or night)
         if ((st.wait -= dt) > 0) return;
+        st.fire = 0;
         const a = lone(ctx), left = Math.random() < 0.5;
         // step: 0 coming, 1 over it with the beam on, 2 it is going up, 3 leaving, 4 away, 5 nothing to take: sweeping, 6 coming back, 7 setting it down
         S = st.S = {step: 0, tm: 0, x: left ? -60 : ctx.w + 60, y: 40 + Math.random() * 80, vx: 0, vy: 0, a, ax: a ? a.x : ctx.w * (0.25 + Math.random() * 0.5), ay: a ? a.y : ctx.h * (0.45 + Math.random() * 0.4), ah: a ? a.h || 30 : 30,

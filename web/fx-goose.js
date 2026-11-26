@@ -773,6 +773,7 @@
   };
 
   HP.fx.add('goose', {
+    events: {visit: {label: 'Visit', run: () => HP.fx.gooseNow()}},
     label: 'Goose',
     live: true, z: 2, fps: 12,
     options: [{key: 'visit', label: 'Visit interval', type: 'range', min: 0.5, max: 60, step: 0.5, unit: 'min', default: 3},

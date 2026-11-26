@@ -106,7 +106,7 @@ const themes = () => A.state.library.themes || [];
 const themeBy = id => themes().find(t => t.id === id) || null;
 const usedBy = id => A.state.tablets.filter(t => (t.panels || []).includes(id)).map(t => t.name);
 const setPanels = (t, ids) => send('PATCH', 'tablets/' + t.id, {panels: ids}).then(setState, fail);
-const VIEWS = {gallery: viewGallery, devices: viewDevices, panel: viewPanel, backgrounds: viewTheme, buttons: viewTheme, settings: viewSettings};
+const VIEWS = {gallery: viewGallery, devices: viewDevices, events: viewEvents, panel: viewPanel, backgrounds: viewTheme, buttons: viewTheme, settings: viewSettings};
 function redraw() { rail(); if (A.view !== 'editor' && VIEWS[A.view]) VIEWS[A.view](); }
 const setState = s => { A.state = s; redraw(); };
 function unsaved() {
@@ -120,6 +120,7 @@ function go(view, arg) {
   if (view !== 'backgrounds' && view !== 'buttons') A.th = null;
   A.view = view;
   if (view === 'panel') A.panel = arg;
+  if (view === 'events') { A.evDev = arg; A.evKinds = null; }
   history.replaceState(null, '', '#' + (view === 'panel' ? 'panel=' + arg : view === 'gallery' ? 'editor' : view));
   redraw();
 }
@@ -209,7 +210,7 @@ function viewDevices() {
       h('td', null, panel),
       h('td', null, t.design ? h('button', {type: 'button', class: 'bare', title: 'Open this panel', onclick: () => go('panel', t.design)}, thumb(t.design, t.width || 1024, t.height || 768, 132)) : h('span', {class: 'sub'}, 'No panel')),
       h('td', {class: 'act'},
-        pending ? btn('Approve', null, () => send('POST', 'tablets/' + t.id + '/approve').then(setState, fail), 'go') : null,
+        pending ? btn('Approve', null, () => send('POST', 'tablets/' + t.id + '/approve').then(setState, fail), 'go') : btn('Events', null, () => go('events', t.id)),
         btn('Remove', 'trash', () => { if (confirm('Remove "' + t.name + '"? It will have to be approved again.')) api('tablets/' + t.id, {method: 'DELETE'}).then(setState, fail); }, 'stop')));
   });
   $('#main').replaceChildren(
@@ -217,6 +218,29 @@ function viewDevices() {
     h('div', {class: 'body'}, ts.length
       ? h('div', {class: 'card fit'}, h('table', null, h('thead', null, h('tr', null, ...['Name', 'Model', 'Status', 'Panels', 'Preview', ''].map(x => h('th', null, x)))), h('tbody', null, ...rows)))
       : h('div', {class: 'empty', html: '<b>No devices</b>Open the Daedalus Panel app on a tablet on this network.'})));
+}
+
+// ---------- Events: set off an overlay's events on one device ----------
+function viewEvents() {
+  const t = A.state.tablets.find(x => x.id === A.evDev), kinds = (window.HP && HP.fx && HP.fx.kinds) || {};
+  if (!t) return go('devices');
+  // the overlays on the device's panels (each panel's own, and its overlay list); until they are read, none
+  if (!A.evKinds) {
+    A.evKinds = [];
+    Promise.all((t.panels || []).map(id => api('designs/' + id).catch(() => null))).then(recs => {
+      const lists = (A.state.library && A.state.library.playlists) || [], seen = [];
+      for (const r of recs) { const d = r && (r.design || r); if (!d) continue; const pl = lists.find(p => p.id === d.fxList);
+        for (const c of [...(d.fx || []), ...((pl && (pl.fx || pl.items)) || [])]) if (c && c.kind && !seen.includes(c.kind)) seen.push(c.kind); }
+      A.evKinds = seen.filter(k => kinds[k] && kinds[k].events); if (A.view === 'events') viewEvents();
+    });
+  }
+  const fire = (kind, id) => send('POST', 'tablets/' + t.id + '/fx', {kind, event: id}).then(r => { if (!r.sent) toast('Not connected'); }, fail);
+  $('#main').replaceChildren(
+    h('div', {class: 'head'}, h('h1', null, 'Events: ' + t.name), btn('Devices', null, () => go('devices'))),
+    h('div', {class: 'body'}, A.evKinds.length
+      ? h('div', null, ...A.evKinds.map(k => h('div', {class: 'card'}, h('h2', null, kinds[k].label || k),
+          h('div', {style: 'display:flex;flex-wrap:wrap;gap:8px'}, ...Object.keys(kinds[k].events).map(id => btn(kinds[k].events[id].label, null, () => fire(k, id)))))))
+      : h('div', {class: 'empty', html: '<b>No events</b>'})));
 }
 
 // ---------- Panels: one finished panel, live, at any device's size ----------

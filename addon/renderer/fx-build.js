@@ -750,6 +750,7 @@
   const BUB = {x: 0, y: 0, w: 0, h: 24, r: 6};
 
   HP.fx.add('build', {
+    events: {turkeys: {label: 'Turkey drop', run: st => { if (st.tk) { st.tk.wait = 1; st.tk.sure = true; } }}, rave: {label: 'Rave', run: st => { if (st.rave) { st.rave.wait = 1; st.rave.sure = true; } }}},
     label: 'Construction crew', grows: true, days: 7, live: true, fps: 12, z: 1, scale: 0.1, covers: true,
     options: [{key: 'crew', label: 'Crew', type: 'range', min: 3, max: 6, step: 1, default: 4}, {key: 'holidays', label: 'Holidays', type: 'bool', default: true}],
     create(c) {
