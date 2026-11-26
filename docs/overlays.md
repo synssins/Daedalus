@@ -19,7 +19,7 @@ HP.fx.add('name', {
 });
 ```
 
-3. Add a `<script>` line for a new file in `web/engine.html` and `web/fx-demo.html`.
+3. Add a `<script>` line for a new file in `web/engine.html`, `web/fx-demo.html` and `addon/studio/index.html`.
 4. Test it on `web/fx-demo.html?kind=name`.
 
 `ctx` gives the tile rectangles (`rects`), the gaps between them (`gaps`), the house state (`env`), the overlay's
