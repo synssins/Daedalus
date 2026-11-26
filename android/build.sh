@@ -18,11 +18,13 @@ rm -f "$OUT/assets/web/design.js" "$OUT/assets/web/fx-demo.html" "$OUT/assets/we
 sed -i "s/<!--BUILD-->/$(git rev-parse --short HEAD 2>/dev/null || echo local)/" "$OUT/assets/web/engine.html"
 
 "$BT/aapt2" compile --dir android/res -o "$OUT/res.zip"
-"$BT/aapt2" link -o "$OUT/unsigned.apk" -I "$JAR" --manifest android/AndroidManifest.xml -A "$OUT/assets" --java "$OUT/gen" \
+"$BT/aapt2" link -o "$OUT/unsigned.apk" -I "$JAR" --manifest android/AndroidManifest.xml --java "$OUT/gen" \
     --min-sdk-version 24 --target-sdk-version 34 --version-code "$CODE" --version-name "$NAME" "$OUT/res.zip"
 javac -nowarn -Xlint:-options --release 11 -cp "$JAR" -d "$OUT/obj" $(find "$OUT/gen" android/src -name '*.java')
 "$BT/d8.bat" --lib "$JAR" --min-api 24 --output "$OUT" $(find "$OUT/obj" -name '*.class')
-(cd "$OUT" && jar uf unsigned.apk classes.dex)
+# The web folder goes in with jar, not with aapt2 -A: on Windows aapt2 stores its paths with backslashes, and the
+# device then finds no assets/web/index.html.
+(cd "$OUT" && jar uf unsigned.apk classes.dex assets)
 "$BT/zipalign" -f 4 "$OUT/unsigned.apk" "$OUT/aligned.apk"
 
 # Signed with a key made here on first use and kept out of the repository. An update only installs over a copy

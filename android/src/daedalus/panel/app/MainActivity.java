@@ -22,6 +22,7 @@ import android.webkit.PermissionRequest;
 import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
+import android.webkit.WebViewClient;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -58,6 +59,7 @@ public class MainActivity extends Activity {
         s.setMediaPlaybackRequiresUserGesture(false);
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
         web.addJavascriptInterface(new Bridge(), "DaedalusNative");
+        web.setWebViewClient(new WebViewClient());  // the page moves between its own files; without this each move is handed to the system and refused
         web.setWebChromeClient(new WebChromeClient() {
             // Console output goes to the device log, to be read with adb logcat -s Daedalus.
             @Override
