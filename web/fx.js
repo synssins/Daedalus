@@ -37,10 +37,45 @@
 //       rand() (seeded), util, redraw(), page, pages}
 // rects[i].el is the tile's own element and rects[i].tile its settings: for the rare kind that moves a real tile.
 // ctx.page names the dashboard on screen and ctx.pages every dashboard this device has, for kinds that roam.
-// Kinds can meet each other. ctx.scene is shared by every kind on the dashboard. A kind with creatures tells the others
-// where they are, every frame: ctx.scene.next.push({kind: 'sheep', x, y, h, pet(by) {...}}) with x, y = where it stands
-// (feet), h its height, and optional functions others may call (pet: someone strokes it; by = {x, y}).
-// ctx.scene.actors is what everyone posted in the frame before: read that to find someone to visit.
+//   actors(state, ctx)        // optional; things this kind has on the dashboard, as a list of actors (see below). For kinds that
+//                             // are not live, or whose things stand still. The engine asks every frame, so keep the list ready.
+//
+// ---------- how kinds meet each other ----------
+// ctx.scene is shared by every kind on the dashboard. Each frame, every kind says what it has there; one frame later
+// every other kind can read it. Nobody needs to know which kinds exist: they go by tags and by verbs.
+//
+// An actor: {kind: 'sheep', tags: ['creature', 'animal'], x, y, h, dir, ...verbs}
+//   x, y   where it stands (its feet, or its middle for something that hangs); h its height; dir -1 or 1 if it faces a way
+//   tags   what it is to others. Use these words, several at once if they fit:
+//            creature  it moves about by itself        person   a figure on two legs       animal  on four, or a bird
+//            threat    others run from it              wonder   others stop and look at it
+//            trap      it can take hold of a creature  trapped  it is held and wants help
+//            food      it can be eaten or stolen       vehicle  it travels a track, may be ridden
+//            prop      it stands where it was put      light    it glows
+//            guard     it drives threats away          station  a place where a vehicle stops and creatures wait
+//          An actor without tags gets them from its kind (the table KIND_TAGS below), so older kinds still fit in.
+//   hid    true while it is out of sight (behind a tile, hanging off an edge): others leave it alone
+//   verbs  functions others may call. Offer only what the thing can really do; callers must cope with a missing one.
+//            pet(by)          someone strokes it                    by = {x, y}
+//            take(by)         something is taken from it (a carrot); true if it was there to take
+//            grab(by), drag(x, y), drop()    it is seized, hauled about, and let go (the goose and a train)
+//            trap(by)         it takes hold of the creature at by = {x, y}; true if it did
+//            free()           whatever it holds is let go
+//            rescue(by)       on a "trapped" actor: someone has come and pulled; true once it is free
+//            paint(g)         draw yourself now: called by the one you hold, so that you are in front of it
+//            scare(by)        on a creature: it is frightened off from by = {x, y}; true if it fled
+//            carry(by)        on a creature: it is taken out of sight toward by = {x, y, secs, out: {x, y}} and comes back by
+//                             itself after secs seconds, at out if given; true if it went. The creature's own kind draws its going.
+//            board(rider)     on a vehicle standing at a station: rider = {alight(x, y)} gets on; true if there was room.
+//                             The vehicle calls rider.alight(x, y) at the station where the rider gets off.
+//   more fields, for the tags that need them:
+//            station   x1, x2 the ends of the platform, y its level (where feet stand); train: the vehicle standing there, or null
+//            vehicle   stopped: true while it stands at a station; vx its speed along the screen, signed
+//            trapped   rescue (the verb above)
+// To say what you have: ctx.scene.next.push(actor) while drawing (live kinds), or return the list from actors().
+// To read: ctx.scene.all('wonder'), ctx.scene.near('trap', x, y, 300), or ctx.scene.actors for the whole list.
+// To call a verb safely: ctx.util.act(actor, 'pet', {x, y}). It returns undefined when the verb is not offered.
+// To draw in front of every kind this frame (the jaws over the head they hold): ctx.scene.over.push(g => {...}).
 // ctx.env: {night, elevation (sun, degrees), weather ('rainy', 'snowy', 'clear-night', ...), temp (outdoor, in the
 //           house's own unit), cold (true at or below freezing), month (1-12), date: Date}
 (() => {
@@ -53,6 +88,8 @@
     rng(seed) { let a = seed >>> 0; return () => { a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; },
     hash(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; },
     clamp: (v, a, b) => v < a ? a : v > b ? b : v,
+    /** Call a verb on another kind's actor. Undefined if it does not offer that verb, or if the verb fails. */
+    act(o, verb, a, b) { try { if (o && typeof o[verb] === 'function') return o[verb](a, b); } catch (e) {} },
     lerp: (a, b, t) => a + (b - a) * t,
     /** 0 before a, 1 after b, smooth between: for "this part appears between 30% and 60% of the cycle". */
     span: (p, a, b) => { const x = p <= a ? 0 : p >= b ? 1 : (p - a) / (b - a); return x * x * (3 - 2 * x); },
@@ -97,7 +134,15 @@
 
   // ---------- the engine ----------
   let host = null, slow = null, live = null, items = [], rects = [], gaps = [], env = {date: new Date(), month: new Date().getMonth() + 1}, preview = null;
-  const scene = {actors: [], next: []};
+  // what an actor is taken for when it does not say: the kinds that were here before there were tags
+  const KIND_TAGS = {goose: ['creature', 'animal', 'threat'], stick: ['creature', 'person'], walker: ['creature', 'person'], sheep: ['creature', 'animal'],
+    train: ['vehicle'], snowman: ['prop', 'food']};
+  const NONE = [];
+  const scene = {actors: [], next: [], over: [],
+    /** Everyone with this tag, out of what was posted in the frame before. */
+    all(tag) { return scene.actors.filter(a => a.tags.indexOf(tag) >= 0 && !a.hid); },
+    /** The nearest with this tag within r pixels (not `not`), or null. */
+    near(tag, x, y, r, not) { let best = null, bd = r == null ? 1e9 : r; for (const a of scene.actors) if (a !== not && !a.hid && a.tags.indexOf(tag) >= 0) { const d = Math.hypot(a.x - x, a.y - y); if (d < bd) { bd = d; best = a; } } return best; }};
   let W = 0, H = 0, raf = 0, last = 0, t0 = performance.now(), slowTimer = 0, config = [], key = '', pages = [];
 
   // Weather as people say it, each covering several of Home Assistant's states.
@@ -157,7 +202,7 @@
   }
   function build() {
     items.forEach(it => { if (it.def.restore) { try { it.def.restore(it.st, it.ctx); } catch (e) { fail(it.kind, e); } } });  // a kind that goes gives back the tiles it took, hid or cut
-    items = []; scene.actors = []; scene.next = [];
+    items = []; scene.actors = []; scene.next = []; scene.over.length = 0;
     if (!W) return;
     config.forEach((c, n) => {
       const def = kinds[c.kind]; if (!def) return;
@@ -196,10 +241,14 @@
       const dt = Math.min(0.25, (ts - last) / 1000) || 0; last = ts;
       const g = size(live, 1), t = (ts - t0) / 1000;
       scene.actors = scene.next; scene.next = [];
+      for (const it of items) if (it.def.actors) { try { for (const a of it.def.actors(it.st, it.ctx) || NONE) scene.actors.push(a); } catch (e) { fail(it.kind, e); } }
+      for (const a of scene.actors) if (!a.tags) a.tags = KIND_TAGS[a.kind] || NONE;
       for (const it of items) if (it.def.live) {
         if (it.def.grows) it.ctx.progress = progressOf(it.def, it.ctx.opts);
         g.save(); try { it.def.draw(g, it.st, it.ctx, t, dt); } catch (e) { fail(it.kind, e); } g.restore();
       }
+      for (const f of scene.over) { g.save(); try { f(g); } catch (e) {} g.restore(); }
+      scene.over.length = 0;
     };
     raf = requestAnimationFrame(frame);
   }
@@ -236,6 +285,8 @@
     /** The Studio's preview: show a growing overlay at this point of its cycle (0 to 1), or null for the real clock. */
     preview(p) { preview = p; items.forEach(it => { if (it.def.grows) it.ctx.progress = progressOf(it.def, it.ctx.opts); }); redraw(); },
     get count() { return items.length; },
+    /** Everything on the dashboard right now: the same object every kind gets as ctx.scene. For tests and tools. */
+    get scene() { return scene; },
   };
   /** Sunlight under water, for the koi pond and the coral reef: slanted beams from the surface and wavering
    *  patches of light on the seabed. Both kinds call it; it draws once a frame. */

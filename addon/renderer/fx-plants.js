@@ -3,7 +3,10 @@
 // the bottom that grow taller and glow at night. Both are slow kinds: drawn rarely, nothing sways.
 (() => {
   const U = HP.fx.util, PI = Math.PI, TAU = PI * 2, STEP = 9;
+  const TRAP_OPEN = ['wonder', 'trap'], TRAP_BUSY = ['trap'], WONDER = ['wonder'], FOOD = ['food'], FOOD_LIT = ['food', 'light', 'wonder'];
   const shut = {};  // closed flowers outlive a layout rebuild: seed -> {flower number: when it was closed}
+  const picked = {};  // so do taken pumpkins: seed -> {flower number: the day it was taken}
+  const dayOf = e => (e && e.date || new Date()).toDateString();
   const dots = {};
 
   /** One soft round glow, drawn once and stamped wherever light is needed. */
@@ -168,6 +171,13 @@
       ['#c3a8f2', '#9f82e0', '#8f88a6', '#6a4fb8'].forEach((col, i) => { g.fillStyle = col; g.beginPath(); for (const q of cls[i]) { g.moveTo(q[0] + q[2], q[1]); g.arc(q[0], q[1], q[2], 0, TAU); } g.fill(); });
     },
   };
+  /** A flytrap with something in its jaws: it has reached out on its stalk, half as big again, shut round the head at f.held. */
+  function trapHold(g, f) {
+    const by = f.held; let a = f.a, hx = f.x, hy = f.y;
+    if (by && by.x != null) { const dx = by.x - f.x, dy = by.y - f.y, d = Math.hypot(dx, dy) || 1, out = U.clamp(d - f.r * 0.9, 0, 26); a = Math.atan2(dy, dx); hx += dx / d * out; hy += dy / d * out; }
+    g.strokeStyle = '#86b84e'; g.lineWidth = 2.4; g.lineCap = 'round'; g.beginPath(); g.moveTo(f.x, f.y); g.lineTo(hx, hy); g.stroke();
+    g.translate(hx, hy); g.rotate(a - f.a); g.scale(1.5, 1.5); FLOWER.flytrap(g, f, 1, 0.12);
+  }
 
   // ---------- kelp ----------
   // Kelp does not climb round the tiles like the other plants. Each frond is one long ribbon: it rises through the
@@ -301,7 +311,7 @@
     create(ctx) {
       const r = ctx.rand, o = ctx.opts, plant = SPEC[o.plant] ? o.plant : 'flowers', sp = SPEC[plant], kelp = plant === 'kelp';
       const dens = U.clamp(+o.density || 0.7, 0.3, 1), W = ctx.w, H = ctx.h, btn = ctx.rects.filter(b => !b.hidden && !b.flat);
-      const st = {plant, sp, stems: [], leaves: [], flowers: [], curls: [], max: 1, closed: shut[ctx.seed] || (shut[ctx.seed] = {}), glow: softDot('235,240,255'), petals: [], shake: null};
+      const st = {plant, sp, stems: [], leaves: [], flowers: [], curls: [], max: 1, closed: shut[ctx.seed] || (shut[ctx.seed] = {}), gone: picked[ctx.seed] || (picked[ctx.seed] = {}), glow: softDot('235,240,255'), petals: [], shake: null};
       if (!btn.length) return st;
 
       // Stems run down the middle of the gaps: half the narrowest gap away from every button's edge.
@@ -453,6 +463,34 @@
       return st;
     },
 
+    // What the others on the dashboard may meet: every open flytrap is something to look at, and a trap. One that
+    // has hold of somebody stays shut until it is told to let go (or for half a minute, if nobody ever does).
+    // The other plants: the few largest open flowers, well apart, are something to look at; ripe pumpkins are food,
+    // and one that is taken is gone until the next day. Chosen again only after a drawing.
+    actors(st, ctx) {
+      if (st.plant !== 'flytrap') {
+        if (!st.dirty) return st.posts || null;
+        const out = st.posts || (st.posts = []), pk = st.plant === 'pumpkin'; out.length = 0; st.dirty = false;
+        for (const f of st.flowers.filter(f => pk ? f.ripe : f.open).sort((a, b) => (b.L || b.r) - (a.L || a.r))) {
+          if (out.length >= 6) break;
+          if (f.cx < 8 || f.cy < 8 || f.cx > ctx.w - 8 || f.cy > ctx.h - 8 || out.some(q => Math.abs(q.x - f.cx) + Math.abs(q.y - f.cy) < 150)) continue;  // on the screen, and sparsely
+          out.push(f.post || (f.post = pk ? {kind: 'pumpkin', tags: FOOD, x: f.cx, y: f.cy, h: f.r * 1.6,
+            take(by) { if (!f.ripe) return false; f.ripe = false; st.gone[f.id] = dayOf(ctx.env); st.dirty = true; ctx.redraw(); return true; }} : {kind: 'flower', tags: WONDER, x: f.cx, y: f.cy, h: f.L || f.r * 2}));
+        }
+        return out;
+      }
+      const out = st.posts || (st.posts = []), now = Date.now(); out.length = 0;
+      for (const f of st.flowers) {
+        if (f.held && now - f.heldAt > 30000) { f.held = null; ctx.redraw(); }
+        if (!f.open && !f.held) continue;
+        const q = f.post || (f.post = {kind: 'flytrap', x: f.cx, y: f.cy, h: f.r * 2,
+          trap(by) { if (!f.open || f.held) return false; f.held = by || true; f.heldAt = Date.now(); f.open = false; st.closed[f.id] = f.heldAt; ctx.redraw(); return true; },
+          free() { if (!f.held) return; f.held = null; f.freed = Date.now(); st.closed[f.id] = f.freed - 54000; run(st, ctx, 900); setTimeout(ctx.redraw, 6500); },  // shut a few seconds more, sulking
+          paint(g) { if (f.held) trapHold(g, f); else { g.translate(f.x, f.y); FLOWER.flytrap(g, f, 1, 0); } }});
+        q.tags = f.held ? TRAP_BUSY : TRAP_OPEN; out.push(q);
+      }
+      return out;
+    },
     tap(st, x, y, ctx) {
       for (const f of st.flowers) {
         if (!f.open || Math.hypot(x - f.cx, y - f.cy) > Math.max(16, f.r + 4) || middle(ctx.rects, f.cx, f.cy)) continue;
@@ -467,7 +505,8 @@
     drag(st, x, y, ctx) { if (!middle(ctx.rects, x, y)) rustle(st, x, y, ctx, true); },
 
     draw(g, st, ctx) {
-      const p = ctx.progress, e = ctx.env, sp = st.sp, plant = st.plant, now = Date.now();
+      const p = ctx.progress, e = ctx.env, sp = st.sp, plant = st.plant, now = Date.now(), today = dayOf(e);
+      st.dirty = true;  // what is open or ripe may have changed: actors() looks again
       const sh = st.shake && now - st.shake.at < 1000 ? st.shake : null, se = sh ? (now - sh.at) / 1000 : 0;
       const shaken = (x, y) => sh && Math.abs(x - sh.x) < 60 && Math.abs(y - sh.y) < 60;
       if (st.fronds) {
@@ -570,7 +609,12 @@
         const P = f.s.pts[f.i];
         g.strokeStyle = sp.stem[0]; g.lineWidth = plant === 'flytrap' ? 2.4 : 1.4; g.beginPath(); g.moveTo(P.x, P.y); g.lineTo(f.x, f.y); g.stroke();
         if (plant === 'moonflower' && open > 0.5) { g.globalCompositeOperation = 'lighter'; g.globalAlpha = 0.4; g.drawImage(st.glow, f.x - f.r * 2.4, f.y - f.r * 2.4, f.r * 4.8, f.r * 4.8); g.globalAlpha = 1; g.globalCompositeOperation = 'source-over'; }
-        g.save(); g.translate(f.x, f.y); if (shaken(f.cx, f.cy)) g.rotate(Math.sin(se * 20 + f.id) * 0.3 * (1 - se)); fn(g, f, b, open, p); g.restore();
+        if (plant === 'pumpkin') { f.ripe = false; if (st.gone[f.id] === today) { disc(g, f.x, f.y, 2, '#6b7a2e'); continue; } f.ripe = U.span(p, tb + 0.08, 1) > 0.5; }  // taken: only the cut stalk is left
+        if (f.held) { g.save(); trapHold(g, f); g.restore(); continue; }
+        const fe = f.freed ? (now - f.freed) / 900 : 9;  // a trap that has just let go: a shake, and back to its own size
+        g.save(); g.translate(f.x, f.y); if (shaken(f.cx, f.cy)) g.rotate(Math.sin(se * 20 + f.id) * 0.3 * (1 - se));
+        if (fe < 1) { g.rotate(Math.sin(fe * 26) * 0.4 * (1 - fe)); g.scale(1.5 - 0.5 * fe, 1.5 - 0.5 * fe); }
+        fn(g, f, b, open, p); g.restore();
       }
       // petals a finger knocked off: they flutter down for a second
       if (st.petals.length) {
@@ -586,7 +630,8 @@
 
   // Mushrooms: clusters along the bottom of the screen and on top of the lowest buttons. They come up as small
   // closed buttons and open into caps over the cycle; after dark the caps glow.
-  const CAPS = ['#cf3a2c', '#a9743f', '#e3c690', '#8d7fc0'];
+  // Woodland, not reef: earthy caps with gills and spots, moss and fallen leaves at the foot, fairy rings on the wide tile tops.
+  const CAPS = ['#cf3a2c', '#a9743f', '#e3c690', '#6e4630'], BITE = 600000;  // a bite out of a cap has grown back after ten minutes
   HP.fx.add('mushrooms', {
     label: 'Mushrooms',
     grows: true, days: 5, covers: true,
@@ -598,16 +643,50 @@
         for (let i = 0, n = 3 + Math.floor(r() * 4); i < n; i++) { const h = tall * (0.4 + r() * 0.6); list.push({dx: (r() - 0.5) * wide, h, cw: U.clamp(h * (0.3 + r() * 0.22), 5, 13), lean: (r() - 0.5) * 0.5, kind: r() < 0.85 ? kind : Math.floor(r() * CAPS.length), t0: 0.02 + r() * 0.45}); }
         list.sort((a, b) => b.h - a.h);  // tall ones behind
         const grass = []; for (let i = 0; i < 5; i++) grass.push([(r() - 0.5) * wide * 1.2, 5 + r() * 7, (r() - 0.5) * 6]);
-        groups.push({x, y, list, grass});
+        const moss = [], litter = [];
+        for (let i = 0; i < 4; i++) moss.push([(r() - 0.5) * wide * 1.1, 7 + r() * 8, 3 + r() * 3]);
+        for (let i = 0, n = 2 + Math.floor(r() * 2); i < n; i++) litter.push([(r() - 0.5) * wide * 1.5, (r() - 0.5) * 1.2 + (r() < 0.5 ? PI : 0), Math.floor(r() * 4), 7 + r() * 4]);
+        groups.push({x, y, list, grass, moss, litter});
+      };
+      // A fairy ring: small mushrooms in a circle seen from the side, the far half behind the tile's edge, the near half on its rim.
+      const fairy = (x, y, rx) => {
+        const kind = Math.floor(r() * CAPS.length), list = [];
+        for (let i = 0, n = Math.round(rx / 5); i < n; i++) { const a = (i + r() * 0.5) / n * TAU, h = (7 + r() * 4) * (0.92 + 0.18 * Math.sin(a)); list.push({dx: Math.cos(a) * rx, dy: Math.sin(a) * 6, h, cw: U.clamp(h * 0.45, 4, 6.5), lean: (r() - 0.5) * 0.3, kind, t0: 0.05 + r() * 0.4}); }
+        list.sort((a, b) => a.dy - b.dy);  // far ones behind
+        groups.push({x, y, list, grass: [], moss: [], litter: [], ring: rx});
       };
       // how tall they may get: the free strip above the ground they stand on, plus the rim of the button above
       const room = (x, y) => { let v = 40; for (const b of btn) if (x > b.x && x < b.x + b.w && b.y + b.h <= y + 1) v = Math.min(v, y - b.y - b.h + Math.min(b.w, b.h) * 0.15); return Math.max(12, v); };
       for (let i = 0, n = Math.max(2, Math.round(ctx.w / 150 * (0.4 + amt))); i < n; i++) { const x = ctx.w * (i + 0.2 + r() * 0.6) / n; group(x, ctx.h + 1, room(x, ctx.h), 46); }
+      let rings = 0;
       for (const b of btn) {
-        if (btn.some(c => c !== b && c.y >= b.y + b.h - 1 && c.x < b.x + b.w && c.x + c.w > b.x) || r() > amt) continue;
+        const low =!btn.some(c => c !== b && c.y >= b.y + b.h - 1 && c.x < b.x + b.w && c.x + c.w > b.x);
+        if (b.w >= 140 && r() < (low ? 0.22 : 0.12) * (0.4 + amt) && rings++ < 4) { fairy(b.x + b.w * (0.35 + r() * 0.3), b.y + 2, Math.min(62, b.w * 0.28)); continue; }
+        if (!low || r() > amt) continue;
         const x = b.x + b.w * (0.2 + r() * 0.6); group(x, b.y + 2, room(x, b.y), Math.min(40, b.w * 0.3));
       }
       return {groups, glow: softDot('120,255,205')};
+    },
+    // What the others on the dashboard may meet: the biggest grown mushroom of each cluster, eight at most, is food;
+    // a bite out of its cap grows back. After dark they glow: a light, and something to look at. A creature that
+    // comes close gets a puff of spores, as a finger does. Chosen again only after a drawing.
+    actors(st, ctx) {
+      const out = st.posts || (st.posts = []), now = Date.now();
+      if (st.dirty) {
+        const big = []; st.dirty = false; out.length = 0;
+        for (const gr of st.groups) { let best = null; for (const m of gr.list) if (m.grown && (!best || m.r > best.r)) best = m; if (best) big.push(best); }
+        big.sort((a, b) => b.r - a.r);
+        for (let i = 0; i < big.length && i < 8; i++) {
+          const m = big[i], q = m.post || (m.post = {kind: 'mushroom', m,
+            take(by) { if (!m.grown || m.bit && Date.now() - m.bit < BITE / 2) return false; m.bit = Date.now(); m.side = by && by.x < m.tx ? -1 : 1; ctx.redraw(); return true; }});
+          q.x = m.fx; q.y = m.fy; q.h = m.ht; q.tags = ctx.env.night ? FOOD_LIT : FOOD; out.push(q);
+        }
+      }
+      if (now - (st.sniff || 0) > 250 && ctx.scene) {  // not every frame, and one mushroom not more than three times a minute
+        st.sniff = now;
+        for (const q of out) if (now - (q.m.hit || 0) > 20000 && ctx.scene.near('creature', q.x, q.y, 20)) { q.m.hit = now; run(st, ctx, 1000); }
+      }
+      return out;
     },
     // a tap on a cap: it squashes, springs back and lets go a puff of spores
     tap(st, x, y, ctx) {
@@ -623,26 +702,38 @@
     },
     draw(g, st, ctx) {
       const p = ctx.progress, night = ctx.env.night, now = Date.now();
+      st.dirty = true;  // what is grown may have changed: actors() looks again
       g.lineCap = 'round';
       for (const gr of st.groups) {
         const up = U.span(p, 0.02, 0.3);
+        if (up > 0.05) {  // the woodland floor: a ring of darker grass under a fairy ring, a cushion of moss under a cluster
+          if (gr.ring) { g.strokeStyle = 'rgba(52,104,40,' + (0.6 * up).toFixed(2) + ')'; g.lineWidth = 3; g.beginPath(); g.ellipse(gr.x, gr.y, gr.ring, 6, 0, 0, TAU); g.stroke(); }
+          g.fillStyle = '#3f6e30'; g.beginPath(); for (const b of gr.moss) { g.moveTo(gr.x + b[0] + b[1], gr.y); g.ellipse(gr.x + b[0], gr.y, b[1], b[2] * up, 0, 0, TAU); } g.fill();
+          g.fillStyle = '#6a9a3e'; g.beginPath(); for (const b of gr.moss) { g.moveTo(gr.x + b[0] + b[1] * 0.3, gr.y - b[2] * up * 0.5); g.ellipse(gr.x + b[0] - b[1] * 0.2, gr.y - b[2] * up * 0.5, b[1] * 0.5, b[2] * up * 0.35, 0, 0, TAU); } g.fill();
+        }
         if (up > 0.05) { g.strokeStyle = '#4f8f3a'; g.lineWidth = 1.3; g.beginPath(); for (const b of gr.grass) { g.moveTo(gr.x + b[0], gr.y); g.quadraticCurveTo(gr.x + b[0], gr.y - b[1] * up * 0.6, gr.x + b[0] + b[2], gr.y - b[1] * up); } g.stroke(); }
         for (const m of gr.list) {
           const k = U.span(p, m.t0, m.t0 + 0.5); if (k <= 0.02) continue;
           // squash and spring: hard after a tap, slightly when its cluster was startled
           const he = m.hit ? (now - m.hit) / 1000 : 9, je = gr.jog ? (now - gr.jog) / 1000 : 9;
           const sq = he < 0.8 ? Math.sin(he * 20) * 0.24 * (1 - he / 0.8) : je < 0.45 ? Math.sin(je * 24) * 0.08 * (1 - je / 0.45) : 0;
-          const h = m.h * (0.15 + 0.85 * k) * (1 - sq), cw = m.cw * (0.5 + 0.5 * k) * (1 + sq * 0.6), ch = m.cw * (0.95 - 0.35 * k), x0 = gr.x + m.dx, tx = x0 + m.lean * h, ty = gr.y - h, sw = Math.max(2.5, cw * 0.5);
-          g.strokeStyle = 'rgba(30,20,10,.35)'; g.lineWidth = sw + 1.6; g.beginPath(); g.moveTo(x0, gr.y); g.quadraticCurveTo(x0, gr.y - h * 0.5, tx, ty); g.stroke();
+          const h = m.h * (0.15 + 0.85 * k) * (1 - sq), cw = m.cw * (0.5 + 0.5 * k) * (1 + sq * 0.6), ch = m.cw * (0.95 - 0.35 * k), x0 = gr.x + m.dx, gy = gr.y + (m.dy || 0), tx = x0 + m.lean * h, ty = gy - h, sw = Math.max(2.5, cw * 0.5);
+          g.strokeStyle = 'rgba(30,20,10,.35)'; g.lineWidth = sw + 1.6; g.beginPath(); g.moveTo(x0, gy); g.quadraticCurveTo(x0, gy - h * 0.5, tx, ty); g.stroke();
           g.strokeStyle = '#efe6cf'; g.lineWidth = sw; g.stroke();
+          if (m.kind === 0 && h > 16) { g.fillStyle = '#fff6ea'; g.strokeStyle = 'rgba(30,20,10,.3)'; g.lineWidth = 0.6; g.beginPath(); g.ellipse(x0 + (tx - x0) * 0.6, ty + h * 0.34, sw * 0.95, sw * 0.4, 0, 0, TAU); g.fill(); g.stroke(); }  // the ring round a red one's stalk
           g.save(); g.translate(tx, ty); g.rotate(m.lean * 0.6);
-          g.fillStyle = '#6a4a34'; g.beginPath(); g.ellipse(0, 0, cw * 0.95, ch * 0.3, 0, 0, TAU); g.fill();  // the gills, seen from just below
-          g.beginPath(); g.moveTo(-cw, 0); g.bezierCurveTo(-cw, -ch * 1.3, cw, -ch * 1.3, cw, 0); g.quadraticCurveTo(0, ch * 0.12, -cw, 0);
+          const bite = m.bit ? 1 - (now - m.bit) / BITE : 0;  // a bite out of the cap's edge, smaller as it grows back
+          if (bite > 0) { g.beginPath(); g.rect(-cw * 2, -ch * 2.5, cw * 4, ch * 3.5); g.moveTo(m.side * cw * 0.85 + cw * 0.6 * bite, -ch * 0.5); g.arc(m.side * cw * 0.85, -ch * 0.5, cw * 0.6 * bite, 0, TAU); g.clip('evenodd'); }
+          g.fillStyle = '#6a4a34'; g.beginPath(); g.ellipse(0, 0, cw * 0.95, ch * 0.36, 0, 0, TAU); g.fill();  // the gills, seen from just below
+          g.strokeStyle = 'rgba(240,222,186,.75)'; g.lineWidth = 0.6; g.beginPath(); for (let i = -3; i <= 3; i++) { g.moveTo(i * cw * 0.05, 0); g.lineTo(i * cw * 0.29, ch * 0.34 * Math.sqrt(1 - i * i / 10.5)); } g.stroke();
+          const peak = m.kind === 2 ? 1.9 : 1.3, in2 = m.kind === 2 ? 0.45 : 1;  // the pale ones are pointed bells, the others domes
+          g.beginPath(); g.moveTo(-cw, 0); g.bezierCurveTo(-cw * in2, -ch * peak, cw * in2, -ch * peak, cw, 0); g.quadraticCurveTo(0, ch * 0.12, -cw, 0);
           g.fillStyle = CAPS[m.kind]; g.fill(); g.strokeStyle = 'rgba(30,15,10,.4)'; g.lineWidth = 0.7; g.stroke();
           g.fillStyle = 'rgba(255,255,255,.28)'; g.beginPath(); g.ellipse(-cw * 0.35, -ch * 0.62, cw * 0.3, ch * 0.16, -0.5, 0, TAU); g.fill();
-          if (m.kind === 0) { g.fillStyle = '#fff6ea'; g.beginPath(); for (const q of [[-0.5, -0.38, 0.13], [0.08, -0.7, 0.16], [0.52, -0.33, 0.12]]) { g.moveTo(q[0] * cw + q[2] * cw, q[1] * ch); g.arc(q[0] * cw, q[1] * ch, q[2] * cw, 0, TAU); } g.fill(); }
+          if (m.kind === 0 || m.kind === 3) { g.fillStyle = m.kind ? '#dcc096' : '#fff6ea'; g.beginPath(); for (const q of [[-0.5, -0.38, 0.13], [0.08, -0.7, 0.16], [0.52, -0.33, 0.12]]) { g.moveTo(q[0] * cw + q[2] * cw, q[1] * ch); g.arc(q[0] * cw, q[1] * ch, q[2] * cw, 0, TAU); } g.fill(); }
           g.restore();
           m.tx = tx; m.ty = ty; m.r = cw; m.up = k > 0.3;  // where a finger finds it
+          m.fx = x0; m.fy = gy; m.ht = h + ch; m.grown = k > 0.6;  // where it stands, for actors()
           if (he < 1) {  // the spores: a few specks spreading upward
             g.fillStyle = (night ? 'rgba(170,255,222,' : 'rgba(252,242,205,') + (0.9 * (1 - he)).toFixed(3) + ')'; g.beginPath();
             for (let i = 0; i < 7; i++) { const a = i * 0.9 + m.dx, x = tx + Math.cos(a) * (4 + 20 * he), y = ty - ch - 4 - 26 * he + Math.sin(a * 2) * 5 * he; g.moveTo(x + 1.9, y); g.arc(x, y, 1.9, 0, TAU); }
@@ -650,6 +741,8 @@
           }
           if (night) { const s = cw * 4.6; g.globalCompositeOperation = 'lighter'; g.globalAlpha = 0.4 * k; g.drawImage(st.glow, tx - s / 2, ty - ch * 0.5 - s / 2, s, s); g.globalAlpha = 1; g.globalCompositeOperation = 'source-over'; }
         }
+        // fallen leaves lying at the foot, in front
+        if (up > 0.5) for (const l of gr.litter) { g.save(); g.translate(gr.x + l[0], gr.y - 1.5); g.rotate(l[1]); leafPath(g, 'oval', l[3]); g.fillStyle = AUTUMN[l[2]]; g.fill(); g.strokeStyle = 'rgba(90,30,10,.6)'; g.lineWidth = 0.6; g.beginPath(); g.moveTo(1, 0); g.lineTo(l[3] * 0.85, 0); g.stroke(); g.restore(); }
       }
     },
   });

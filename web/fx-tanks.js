@@ -792,6 +792,26 @@
     }
   }
 
+  // ---------- what the others on the dashboard may meet (ctx.scene) ----------
+  // Tanks, shells in flight and blasts, in screen pixels. Each keeps its one actor for as long as it lives, so nothing is built per frame.
+  const TANK_TAGS = ['vehicle', 'threat'], SHOT_TAGS = ['threat'];
+  function post(G, ctx) {
+    const sc = ctx.scene, S = G.S; if (!sc || !sc.next) return;
+    for (const k of G.tanks) if (!k.dead) {
+      const q = k.post || (k.post = {kind: 'tank', tags: TANK_TAGS, x: 0, y: 0, h: 5 * S, dir: 1});
+      q.x = (k.x + 0.5) * S; q.y = (k.y + 1) * S; q.dir = Math.cos(k.a) < 0 ? -1 : 1; sc.next.push(q);
+    }
+    for (const p of G.shells) { const q = p.post || (p.post = {kind: 'shell', tags: SHOT_TAGS, x: 0, y: 0, h: 2 * S, hid: false}); q.x = p.x * S; q.y = p.y * S; q.hid = p.y < 0; sc.next.push(q); }  // above the screen: out of sight
+    for (const b of G.blasts) {
+      if (!b.post) {
+        // it has just gone off: every creature inside it is frightened, once
+        const q = b.post = {kind: 'blast', tags: SHOT_TAGS, x: b.x * S, y: b.y * S, h: 2 * b.R * S};
+        for (const a of sc.actors || []) if (!a.hid && a.tags && a.tags.indexOf('creature') >= 0 && Math.hypot(a.x - q.x, a.y - q.y) < b.R * S) ctx.util.act(a, 'scare', q);
+      }
+      sc.next.push(b.post);
+    }
+  }
+
   const wake = st => { if (!st.game) st.at = Date.now() + idleMs(st); };  // any finger puts the battle off again
   HP.fx.add('tanks', {
     label: 'Tank battle',
@@ -812,6 +832,7 @@
         if (Date.now() > st.end) { end(st); return; }
         update(st.game, dt);
         paint(g, st.game, ctx, t);
+        post(st.game, ctx);
       } catch (e) {
         end(st); try { g.clearRect(0, 0, ctx.w, ctx.h); } catch (e2) { /* the canvas itself is what failed */ }
         console.error('tanks: ' + (e && e.message));

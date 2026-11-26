@@ -54,6 +54,22 @@
     st.until = Date.now() + ms; c.redraw();
     if (!st.timer) st.timer = setInterval(() => { c.redraw(); if (Date.now() > st.until) { clearInterval(st.timer); st.timer = 0; } }, every || 130);
   }
+  /** Something was taken and grows back over a minute: a slow kind is drawn every two seconds until it has. */
+  function mend(st, c, ms) {
+    st.mendTo = Date.now() + ms;
+    if (!st.mender) st.mender = setInterval(() => { c.redraw(); if (Date.now() > st.mendTo) { clearInterval(st.mender); st.mender = 0; } }, 2000);
+  }
+  /** Up to "max" of these, none within "gap" pixels of one already chosen: what a kind posts sparsely. Fills "out". */
+  function sparse(list, ok, gap, max, out) {
+    out.length = 0;
+    for (const k of list) {
+      if (out.length >= max) break;
+      if (!ok(k)) continue;
+      let clear = true; for (const o of out) if (Math.hypot(o.x - k.x, o.y - k.y) < gap) { clear = false; break; }
+      if (clear) out.push(k);
+    }
+    return out;
+  }
 
   // ---------------------------------------------------------------------------------------------------------------
   // Tendrils: wet black strands that start at one or two buttons, reach across the gaps, stick, thicken, and end up
@@ -194,19 +210,42 @@
     g.strokeStyle = 'rgba(225,228,240,.32)'; g.lineWidth = 0.8; g.beginPath(); g.ellipse(x, y + 4.5, 4.6, 5.6, 0, Math.PI * 0.9, Math.PI * 1.6); g.stroke();
     g.fillStyle = 'rgba(190,28,28,.95)'; g.beginPath(); g.arc(x, y + 5.5, 1.3, 0, TAU); g.fill();
   }
+  // What others may meet: a web is something to look at, and it sticks. One that holds somebody is only a trap.
+  const WEB_OPEN = ['wonder', 'trap'], WEB_BUSY = ['trap'], STUCK = [0, 0, -6, 11, 7, 19, -4, 27];
+  /** Sticky threads over whatever the web holds at hx, hy (a head, with the body below it): from the hub and the
+   *  ends of three spokes across to the far side of it, and three turns round it. */
+  function sticky(g, w) {
+    const x = w.hx, y = w.hy, n = w.rad.length;
+    g.lineCap = 'round'; g.strokeStyle = 'rgba(240,243,252,.8)'; g.lineWidth = 0.9; g.beginPath();
+    for (let i = 0; i < 4; i++) {
+      const d = w.rad[i === 1 ? 0 : i === 2 ? n >> 1 : n - 1], ax = i ? w.x + Math.cos(d.a) * d.len : w.x, ay = i ? w.y + Math.sin(d.a) * d.len : w.y;
+      const tx = x + STUCK[i * 2] + (x - ax > 0 ? 6 : -6), ty = y + STUCK[i * 2 + 1];
+      g.moveTo(ax, ay); g.quadraticCurveTo((ax + tx) / 2, (ay + ty) / 2 + 5, tx, ty);
+    }
+    for (let i = 0; i < 3; i++) { const yy = y + 5 + i * 9; g.moveTo(x - 8, yy - 2); g.quadraticCurveTo(x, yy + 4, x + 8, yy - 1); }
+    g.stroke();
+  }
+  function webPost(st, w) {
+    const post = {kind: 'cobweb', tags: WEB_OPEN, x: w.mx, y: w.my, h: w.R,
+      trap(by) { if (w.held) return false; w.held = true; w.hx = by && by.x != null ? by.x : w.mx; w.hy = by && by.y != null ? by.y : w.my; w.heldAt = st.now; post.tags = WEB_BUSY; st.shake = st.now; return true; },
+      free() { if (!w.held) return; w.held = false; w.let = st.now; post.tags = WEB_OPEN; st.shake = st.now; },
+      paint(g) { if (w.held) sticky(g, w); }};
+    return post;
+  }
   HP.fx.add('cobwebs', {
     label: 'Cobwebs', grows: true, days: 14, live: true, fps: 12, covers: true,
     options: [amount(), {key: 'spider', label: 'Spider', type: 'bool', default: true}],
     create(c) {
       const r = c.rand, amt = c.opts.amount, webs = [];
       const web = (x, y, a0, R, at, big) => {
-        const n = big ? 7 + Math.floor(r() * 3) : 4 + Math.floor(r() * 2), nk = big ? 8 + Math.floor(r() * 4) : 3 + Math.floor(r() * 2), rad = [], rings = [], miss = [], loose = [];
+        const mid = big === 2, n = mid ? 6 : big ? 7 + Math.floor(r() * 3) : 4 + Math.floor(r() * 2), nk = mid ? 5 + Math.floor(r() * 2) : big ? 8 + Math.floor(r() * 4) : 3 + Math.floor(r() * 2), rad = [], rings = [], miss = [], loose = [];
         // the two outer spokes run along the edges; the ones between are uneven, as a spider leaves them
         for (let i = 0; i < n; i++) { const edge = !i || i === n - 1; rad.push({a: a0 + Math.PI / 2 * (i + (edge ? 0 : (r() - 0.5) * 0.5)) / (n - 1), len: R * (edge ? 1.05 : 0.72 + r() * 0.4)}); }
         for (let k = 0; k < nk; k++) rings.push((k + 1 + (r() - 0.5) * 0.3) / (nk + 0.4));
         for (let m = 0, M = nk * (n - 1); m < M; m++) miss.push(r() < (m > M * 0.6 ? 0.2 : 0.06));
-        if (big) for (let k = 0; k < 3; k++) loose.push({i: 1 + Math.floor(r() * (n - 2)), f: 0.5 + r() * 0.5, len: 14 + r() * 30, dx: (r() - 0.5) * 10});
-        webs.push({x, y, rad, rings, miss, loose, at, dur: big ? 0.4 : 0.3});
+        if (big === true) for (let k = 0; k < 3; k++) loose.push({i: 1 + Math.floor(r() * (n - 2)), f: 0.5 + r() * 0.5, len: 14 + r() * 30, dx: (r() - 0.5) * 10});
+        // its middle (where a caught head would be) and its top (where the spider's thread hangs from)
+        webs.push({x, y, rad, rings, miss, loose, at, dur: big === true ? 0.4 : 0.3, R, mx: x + Math.cos(a0 + Math.PI / 4) * R * 0.45, my: y + Math.sin(a0 + Math.PI / 4) * R * 0.45, top: Math.min(y, y + Math.sin(a0 + Math.PI / 4) * R * 1.4)});
       };
       const k0 = Math.floor(r() * 4), big = (i, x, y) => web(x, y, i * Math.PI / 2, (i < 2 ? 170 + r() * 110 : 120 + r() * 80) * (0.55 + 0.45 * amt), [0, 0.05, 0.12, 0.2][(i + k0) % 4], true);
       big(0, 0, 0); big(1, c.w, 0); big(2, c.w, c.h); big(3, 0, c.h);
@@ -216,7 +255,19 @@
       const drapes = []; for (let i = 0, n = Math.round(5 * amt); i < n; i++) drapes.push({x: r() * c.w * 0.85, span: 80 + r() * 220, sag: 16 + r() * 34, at: 0.3 + r() * 0.5});
       // the spider comes down a gap that starts near the top, so it hangs between buttons and not over one
       const lanes = c.gaps.filter(q => Math.abs(q.x1 - q.x2) < 1 && Math.min(q.y1, q.y2) < c.h * 0.35).map(q => ({x: q.x1, len: U.clamp((q.y1 + q.y2) / 2, 60, c.h * 0.45)}));
-      return {webs, drapes, lanes, sp: {on: false}, run: null, shake: -9, now: 0};
+      // A larger web in a lower corner of some tiles that have a tile below: whoever stands on that one has its head in
+      // the web. Made last, so the webs above stay as the seed had them before.
+      const bs = c.rects.filter(solid);
+      for (const b of bs) {
+        const i = r() < 0.5 ? 2 : 3, x = i === 2 ? b.x + b.w : b.x, y = b.y + b.h, R = Math.min(0.5 * Math.min(b.w, b.h), 44 + r() * 16), at = 0.1 + r() * 0.4, mx = x + (i === 2 ? -1 : 1) * R * 0.32;
+        if (r() < 0.25 + 0.3 * amt && bs.some(o => o.y > y && o.y - y < 26 && mx > o.x && mx < o.x + o.w) && !webs.some(w => w.x === x && w.y === y)) web(x, y, i * Math.PI / 2, R, at, 2);
+      }
+      return {webs, drapes, lanes, sp: {on: false}, run: null, shake: -9, now: 0, posts: [], pp: -1};
+    },
+    // The larger grown webs are there for others to look at and to get caught in.
+    actors(st, c) {
+      if (st.pp !== c.progress) { st.pp = c.progress; st.posts.length = 0; for (const w of st.webs) if (w.R >= 38 && c.progress - w.at >= w.dur * 0.9) st.posts.push(w.post || (w.post = webPost(st, w))); }
+      return st.posts;
     },
     // A finger on a web: every thread trembles, and a spider runs out from the web's corner to see what it caught,
     // waits, and walks home again.
@@ -252,6 +303,18 @@
         else { r.x = tx; r.y = ty; if (r.home) st.run = null; else if ((r.wait -= dt) <= 0) r.home = true; }
         if (st.run) spider(g, r.x, r.y, d > v ? t * (r.home ? 9 : 22) : t * 0.9);
       }
+      // a web that holds somebody: a small spider comes down its thread for a look, and goes back up when the web
+      // lets go. Nobody came to free it in half a minute: the web lets go by itself.
+      for (const w of st.webs) {
+        if (w.heldAt == null) continue;
+        if (w.held && t - w.heldAt > 30) w.post.free();
+        const k = w.held ? U.span(t - w.heldAt, 0.5, 2.4) : Math.min(U.span(w.let - w.heldAt, 0.5, 2.4), 1 - U.span(t - w.let, 0, 1.8));
+        if (!w.held && k <= 0) { w.heldAt = null; continue; }
+        if (!c.opts.spider) continue;
+        const x = w.hx + 11, y1 = w.hy - 9, y0 = Math.min(w.top, y1 - 26), y = y0 + (y1 - y0) * k;
+        g.strokeStyle = 'rgba(236,240,250,.6)'; g.lineWidth = 0.7; g.beginPath(); g.moveTo(x, y0); g.lineTo(x, y - 3); g.stroke();
+        g.save(); g.translate(x, y); g.scale(0.7, 0.7); spider(g, 0, 0, k > 0 && k < 1 ? t * 7 : t * 0.9); g.restore();
+      }
       if (!c.opts.spider || c.progress < 0.06) return;
       const s = st.sp;
       if (st.next == null) st.next = t + 1.2;
@@ -284,6 +347,7 @@
   }
   const GEMS = {amethyst: [[50, 20, 104], [110, 58, 188], [174, 128, 236], [232, 212, 255]], ice: [[36, 84, 128], [92, 156, 204], [168, 218, 244], [238, 250, 255]],
     emerald: [[8, 70, 50], [22, 136, 92], [84, 206, 148], [212, 255, 230]], rose: [[118, 30, 70], [204, 84, 128], [246, 162, 188], [255, 228, 234]]};
+  const GEM_TAGS = ['wonder', 'light'], FOOD = ['food'], BEE_TAGS = ['creature'], FISH_TAGS = ['creature', 'animal'];
   HP.fx.add('crystals', {
     label: 'Crystals', grows: true, days: 10, covers: true,
     options: [{key: 'colour', label: 'Colour', type: 'select', choices: [['amethyst', 'Amethyst'], ['ice', 'Ice'], ['emerald', 'Emerald'], ['rose', 'Rose']], default: 'amethyst'}, amount()],
@@ -317,19 +381,35 @@
         for (let i = 0, n = Math.round(5 + 14 * amt); i < n; i++) add((side > 0 ? 4 : c.w - 4) + side * r() * 14, c.h - 2, -Math.PI / 2 + side * (-0.2 + r() * 1.7), 50 + r() * 140, 12 + r() * 16, at + r() * 0.35);
       }
       list.sort((a, b) => b.L - a.L);   // tall ones behind, short ones in front
-      return {list, ring: null};
+      return {list, ring: null, big: [], posts: [], pp: -1, shard: null};
+    },
+    // The largest few grown crystals, well apart, are there to be looked at, and a shard can be broken off one: it
+    // rings, stands shorter for half a minute and grows back. Posted at the middle of the shaft, where a head reaches.
+    actors(st, c) {
+      if (st.pp !== c.progress) {
+        st.pp = c.progress; st.posts.length = 0;
+        for (const k of sparse(st.list, k => U.span(c.progress, k.at, k.at + 0.35) > 0.9, 140, 6, st.big)) st.posts.push(k.post || (k.post = {kind: 'crystal', tags: GEM_TAGS, x: k.x + Math.cos(k.a) * k.L / 2, y: k.y + Math.sin(k.a) * k.L / 2, h: k.L,
+          take(by) {
+            const now = Date.now(); if (k.cut) return false;
+            const tx = k.x + Math.cos(k.a) * k.L, ty = k.y + Math.sin(k.a) * k.L;
+            k.cut = now; st.ring = {k, at: now}; st.shard = {x: tx, y: ty, vx: by && by.x != null && by.x < tx ? 34 : -34, col: k.col[2], at: now};
+            run(st, c, 1100, 110); mend(st, c, 62000); return true;
+          }}));
+      }
+      return st.posts;
     },
     // A finger on or near a crystal rings it: its tip flashes and the flash runs out across its neighbours.
     // The tap is kept only when the finger is right on a crystal, so the tile beside it is not pressed by mistake.
     touch(st, x, y, c) { const k = crystalAt(st, c, x, y, 24); if (k) { st.ring = {k, at: Date.now()}; run(st, c, 1000, 110); } },
     tap(st, x, y, c) { const k = crystalAt(st, c, x, y, 4); if (!k || buried(c.rects, x, y)) return; st.ring = {k, at: Date.now()}; run(st, c, 1000, 110); return true; },
     draw(g, st, c) {
-      const p = c.progress, ring = st.ring, re = ring ? (Date.now() - ring.at) / 1000 : 9;
+      const now = Date.now(), p = c.progress, ring = st.ring, re = ring ? (now - ring.at) / 1000 : 9;
       const star = (x, y, s) => { const i = s * 0.2; g.fillStyle = 'rgba(255,255,255,.9)'; g.beginPath(); g.moveTo(x - s, y); g.lineTo(x - i, y - i); g.lineTo(x, y - s); g.lineTo(x + i, y - i); g.lineTo(x + s, y); g.lineTo(x + i, y + i); g.lineTo(x, y + s); g.lineTo(x - i, y + i); g.fill(); };
       g.lineJoin = g.lineCap = 'round'; g.lineWidth = 0.8;
       for (const k of st.list) {
         const q = U.span(p, k.at, k.at + 0.35); if (q < 0.03) continue;
-        const L = k.L * q, w = k.w * (0.4 + 0.6 * q), S = L - Math.min(L * 0.5, k.tip * w), ca = Math.cos(k.a), sa = Math.sin(k.a);
+        let cut = 1; if (k.cut) { const e = (now - k.cut) / 1000; if (e > 60) k.cut = 0; else cut = 0.6 + 0.4 * U.span(e, 30, 60); }   // a shard was taken: shorter, then back
+        const L = k.L * q * cut, w = k.w * (0.4 + 0.6 * q), S = L - Math.min(L * 0.5, k.tip * w), ca = Math.cos(k.a), sa = Math.sin(k.a);
         const X = (u, v) => k.x + ca * u - sa * v, Y = (u, v) => k.y + sa * u + ca * v, lit = ca - sa > 0;   // which long side faces the light (upper left)
         const e = [-w / 2, -w * 0.17, w * 0.23, w / 2], ax = X(L, k.skew * w), ay = Y(L, k.skew * w), body = lit ? [1, 2, 0] : [0, 2, 1], tips = lit ? [2, 3, 1] : [1, 3, 2];
         for (let i = 0; i < 3; i++) {
@@ -343,6 +423,12 @@
           const d = Math.hypot(k.x - ring.k.x, k.y - ring.k.y), e = re - d / 320;
           if (d < 230 && e > 0 && e < 0.4) star(ax, ay, (k === ring.k ? 12 : 7.5) * Math.sin(e / 0.4 * Math.PI) * (1 - d / 300));
         }
+      }
+      const s = st.shard, se = s ? (now - s.at) / 1000 : 9;
+      if (se < 1) {   // the piece that broke off: it tumbles away and falls
+        g.save(); g.translate(s.x + s.vx * se, s.y - 50 * se + 190 * se * se); g.rotate(se * 9); g.globalAlpha = 1 - se * se;
+        g.fillStyle = s.col; g.strokeStyle = 'rgba(255,255,255,.8)'; g.beginPath(); g.moveTo(-5, 2); g.lineTo(0, -6); g.lineTo(4, 3); g.closePath(); g.fill(); g.stroke();
+        g.restore();
       }
     },
   });
@@ -433,7 +519,20 @@
       stamps.sort((a, b) => a.tone - b.tone);   // dark underneath, light on top
       const sr = U.rng(c.seed + 77), dots = [];
       MOSS.forEach((q, i) => { for (let v = 0, n = i < 6 ? 3 : 2; v < n; v++) dots.push(tuft(q, i < 2 ? 0 : i < 4 ? 1 : i < 6 ? 2 : 3, sr)); });
-      return {stamps, sprouts, dots, puff: null};
+      return {stamps, sprouts, dots, puff: null, bites: [], posts: [], pp: -1};
+    },
+    // A few thick cushions, well apart, are there to be eaten: a bite leaves the patch thin, and it grows back in a minute.
+    actors(st, c) {
+      if (st.pp !== c.progress) {
+        st.pp = c.progress; st.posts.length = 0;
+        for (const s of sparse(st.stamps, s => s.tone < 2 && s.r > 6 && c.progress > s.at + 0.1, 180, 8, st.bites)) st.posts.push(s.post || (s.post = {kind: 'moss', tags: FOOD, x: s.x, y: s.y, h: s.r * 2,
+          take() {
+            const now = Date.now(); if (s.bit) return false;
+            for (const o of st.stamps) if (Math.abs(o.x - s.x) < 15 && Math.abs(o.y - s.y) < 15) o.bit = now;
+            st.puff = {x: s.x, y: s.y, at: now, bug: 0}; run(st, c, 1500, 140); mend(st, c, 62000); return true;
+          }}));
+      }
+      return st.posts;
     },
     // Pressed, a cushion of moss lets go a few spores that drift up; sometimes a small beetle that was under it runs off.
     touch(st, x, y, c) {
@@ -443,9 +542,10 @@
       }
     },
     draw(g, st, c) {
-      const p = c.progress, f = st.puff, e = f ? (Date.now() - f.at) / 1000 : 9;
+      const now = Date.now(), p = c.progress, f = st.puff, e = f ? (now - f.at) / 1000 : 9;
       for (const s of st.stamps) {
-        const k = U.span(p, s.at, s.at + 0.1); if (k < 0.05) continue;
+        let k = U.span(p, s.at, s.at + 0.1); if (k < 0.05) continue;
+        if (s.bit) { const b = (now - s.bit) / 1000; if (b > 60) s.bit = 0; else k *= 0.25 + 0.75 * U.span(b, 15, 60); }   // nibbled: small, then back
         const R = s.r * (0.35 + 0.65 * k) * 1.5; g.drawImage(st.dots[s.sp], s.x - R, s.y - R * s.sq, 2 * R, 2 * R * s.sq);
       }
       // spore stalks: a hair-thin stem with a small capsule nodding at the top
@@ -478,19 +578,24 @@
   const HX = [], HY = []; for (let i = 0; i < 6; i++) { HX.push(Math.cos(i * TAU / 6)); HY.push(Math.sin(i * TAU / 6)); }
   function paintComb(g, st, p) {
     const hex = (x, y, R) => { g.moveTo(x + R, y); for (let i = 1; i < 6; i++) g.lineTo(x + HX[i] * R, y + HY[i] * R); g.closePath(); };
-    const grown = st.grown = st.cells.filter(k => k.at <= p);
+    const grown = st.grown = st.cells.filter(k => k.at <= p), now = Date.now();
+    // a cell whose honey was taken: empty for a few seconds, then it fills again (0 empty to 1 full)
+    const left = k => { if (!k.took) return 1; const e = (now - k.took) / 1000; if (e > 45) { k.took = 0; return 1; } return U.span(e, 8, 45); };
     const fill = (col, test, R) => { g.fillStyle = col; g.beginPath(); for (const k of grown) if (test(k)) hex(k.x, k.y, R(k)); g.fill(); };
-    const level = k => 7.9 * (0.45 + 0.55 * U.span(p, k.honey, k.honey + 0.04));   // a cell fills from its middle outward
+    const level = k => 7.9 * (0.45 + 0.55 * U.span(p, k.honey, k.honey + 0.04)) * left(k);   // a cell fills from its middle outward
     fill('rgba(78,40,8,.62)', () => true, () => 9);                                 // the dark inside of an empty cell
     fill('#d9820c', k => k.honey <= p && k.tone < 0.5, level);
     fill('#f0a31c', k => k.honey <= p && k.tone >= 0.5, level);
-    fill('#f2d58c', k => k.cap && k.honey + 0.2 <= p, () => 7.9);
+    fill('#f2d58c', k => k.cap && k.honey + 0.2 <= p && !k.took, () => 7.9);
     g.lineJoin = 'round';
     g.strokeStyle = '#8f560e'; g.lineWidth = 3.2; g.beginPath(); for (const k of grown) hex(k.x, k.y, 9); g.stroke();   // walls: a dark base
     g.strokeStyle = '#f2c050'; g.lineWidth = 1.4; g.beginPath(); for (const k of grown) hex(k.x, k.y, 9); g.stroke();   // and a bright wax top
     g.fillStyle = 'rgba(255,247,210,.78)'; g.beginPath();
-    for (const k of grown) if (k.honey + 0.03 <= p && !(k.cap && k.honey + 0.2 <= p)) { g.moveTo(k.x - 1.1, k.y - 2.8); g.arc(k.x - 2.6, k.y - 2.8, 1.5, 0, TAU); }
+    for (const k of grown) if (k.honey + 0.03 <= p && !k.took && !(k.cap && k.honey + 0.2 <= p)) { g.moveTo(k.x - 1.1, k.y - 2.8); g.arc(k.x - 2.6, k.y - 2.8, 1.5, 0, TAU); }
     g.fill();
+    // a few full cells, well apart, are there to be robbed
+    st.posts.length = 0;
+    for (const k of sparse(grown, k => k.honey + 0.05 <= p && !k.took, 170, 8, st.full)) st.posts.push(k.post || (k.post = {kind: 'honey', tags: FOOD, x: k.x, y: k.y, h: 16, take: by => st.rob(k, by)}));
   }
   function bee(g, x, y, a, fly, t) {
     g.save(); g.translate(x, y); g.rotate(a);
@@ -506,7 +611,7 @@
     options: [amount(), {key: 'bees', label: 'Bees', type: 'bool', default: true}],
     create(c) {
       const r = c.rand, amt = c.opts.amount, R = 9, dx = R * 1.5, dy = R * Math.sqrt(3), band = 7 + 11 * amt, cells = [], bees = [], gaps = c.gaps, org = [];
-      if (!gaps.length) return {cells, bees, grown: []};
+      if (!gaps.length) return {cells, bees, grown: [], posts: [], full: []};
       for (let i = 0; i < 3; i++) { const q = pick(r, gaps), f = r(); org.push([U.lerp(q.x1, q.x2, f), U.lerp(q.y1, q.y2, f)]); }   // where the colony starts building
       const off = (q, x, y) => { const vx = q.x2 - q.x1, vy = q.y2 - q.y1, t = U.clamp(((x - q.x1) * vx + (y - q.y1) * vy) / (vx * vx + vy * vy || 1), 0, 1); return Math.hypot(x - q.x1 - vx * t, y - q.y1 - vy * t); };
       let far = 1;
@@ -519,27 +624,40 @@
         far = Math.max(far, od); cells.push({x, y, od, j: r(), h: r(), tone: r()});
       }
       for (const k of cells) { k.at = 0.01 + 0.72 * Math.pow(k.od / far, 0.85) + k.j * 0.05; k.honey = k.h < 0.55 ? k.at + 0.1 + k.h * 0.45 : 9; k.cap = k.h < 0.12; }
-      for (let i = 0, n = Math.round(2 + 4 * amt); i < n; i++) bees.push({x: null, y: 0, tx: 0, ty: 0, a: 0, wait: 0, ph: r() * TAU});
-      return {cells, bees, grown: [], px: 0, py: 0};
+      for (let i = 0, n = Math.round(2 + 4 * amt); i < n; i++) bees.push({x: null, y: 0, tx: 0, ty: 0, a: 0, wait: 0, ph: r() * TAU, post: {kind: 'bee', tags: BEE_TAGS, x: 0, y: 0, h: 8}});
+      const st = {cells, bees, grown: [], px: 0, py: 0, posts: [], full: [], foe: null, stung: false, dry: 0, rp: 0};
+      // Honey is taken from a cell: it is empty at once. The bees go for the thief for a few seconds; the first to
+      // reach it frightens it off, if it can be frightened.
+      st.rob = (k, by) => {
+        if (k.took) return false;
+        k.took = Date.now(); st.dry = k.took + 46000; st.cp = -1;
+        if (by && by.x != null) { st.foe = by; st.stung = false; for (const b of bees) if (b.x != null) b.nosy = 4 + Math.random() * 2; }
+        return true;
+      };
+      return st;
     },
+    actors(st) { return st.posts; },
     // the bees within reach come to see what touched the comb: they circle the spot for a few seconds and go back to work
     touch(st, x, y) {
-      st.px = x; st.py = y;
+      st.px = x; st.py = y; st.foe = null;
       for (const b of st.bees) if (b.x != null && Math.hypot(b.x - x, b.y - y) < 420) b.nosy = 3 + Math.random() * 1.5;
     },
     draw(g, st, c, t, dt) {
+      if (st.dry && t - st.rp > 1.5) { st.rp = t; st.cp = -1; if (Date.now() > st.dry) st.dry = 0; }   // a robbed cell is filling: paint the comb again now and then
       g.drawImage(still(st, c, gg => paintComb(gg, st, c.progress)), 0, 0);
-      const cells = st.grown;
+      const cells = st.grown, foe = st.foe;
       if (!c.opts.bees || !cells.length) return;
+      if (foe) { st.px = foe.x; st.py = foe.y - (foe.h || 0) / 2; }   // the thief may walk off: they follow
       // a bee prefers a cell not too far off, so it works its way along the comb instead of crossing the whole screen
       const next = b => { let best = null, bd = 1e9; for (let i = 0; i < 4; i++) { const k = cells[Math.floor(Math.random() * cells.length)], d = Math.hypot(k.x - b.x, k.y - b.y); if (d > 25 && d < bd) { bd = d; best = k; } } return best || cells[0]; };
       for (let i = 0, n = Math.min(st.bees.length, Math.ceil(cells.length / 10)); i < n; i++) {
         const b = st.bees[i]; let fly = 0;
         if (b.x == null) { const k = cells[Math.floor(Math.random() * cells.length)]; b.x = b.tx = k.x; b.y = b.ty = k.y; b.wait = Math.random() * 1.5; }
         if (b.nosy > 0) {
-          const a = t * 3.2 + b.ph, dx = st.px + Math.cos(a) * 24 - b.x, dy = st.py + Math.sin(a) * 24 - b.y, d = Math.hypot(dx, dy) || 1, v = Math.min(d, 130 * dt);
+          const a = t * 3.2 + b.ph, dx = st.px + Math.cos(a) * 24 - b.x, dy = st.py + Math.sin(a) * 24 - b.y, d = Math.hypot(dx, dy) || 1, v = Math.min(d, (foe ? 190 : 130) * dt);
           b.x += dx / d * v; b.y += dy / d * v; b.a = Math.atan2(dy, dx); fly = 1;
-          if ((b.nosy -= dt) <= 0) b.wait = 0.01;   // then on to a cell near by, as usual
+          if (foe && !st.stung && d < 30) { st.stung = true; U.act(foe, 'scare', b.post); }
+          if ((b.nosy -= dt) <= 0) { b.wait = 0.01; st.foe = null; }   // then on to a cell near by, as usual
         }
         else if (b.wait > 0) { b.wait -= dt; if (b.wait <= 0) { const k = next(b); b.tx = k.x; b.ty = k.y; } }
         else {
@@ -547,6 +665,7 @@
           if (d < 3) b.wait = 1 + Math.random() * 3;
           else { const v = Math.min(d, 60 * dt); b.x += dx / d * v; b.y += dy / d * v; b.a = Math.atan2(dy, dx); fly = Math.min(1, d / 20); }
         }
+        b.post.x = b.x; b.post.y = b.y; c.scene.next.push(b.post);
         const wob = Math.sin(t * 6 + b.ph) * 5 * fly;
         bee(g, b.x - Math.sin(b.a) * wob, b.y + Math.cos(b.a) * wob, b.a + Math.cos(t * 6 + b.ph) * 0.3 * fly, fly, t);
       }
@@ -558,24 +677,25 @@
   // screen, each only as tall as the room above it allows. Small fish swim along the gaps and dart from a finger.
   const REEF = [['#f0607c', '#b23a58', '#ffc4cc'], ['#ff9448', '#c9601e', '#ffdcae'], ['#9c70e8', '#6744b4', '#dcc8ff']];   // coral pink, orange, violet: main, shade, light
   const FISH = ['#ffd43a', '#3db8ff', '#ff7b2c', '#ff62ae', '#34e2c6'];
-  function paintReef(g, st, p) {
+  const WEED = ['#1f8f6c', '#3fb27a', '#167a80'];   // sea grass: two greens and a teal
+  function paintReef(g, st, p, c) {
     g.lineCap = g.lineJoin = 'round';
+    // the sea bed: a low bank of pale sand with a rippled top, along the bottom of the screen
+    const sand = 13 * U.span(p, 0, 0.25);
+    if (sand > 1) {
+      g.fillStyle = 'rgba(232,212,164,.9)'; g.beginPath(); g.moveTo(0, c.h);
+      for (let x = 0; x <= c.w + 16; x += 16) g.lineTo(x, c.h - sand * (0.55 + 0.45 * Math.sin(x * 0.021 + st.ph) * Math.sin(x * 0.0057 + 1)));
+      g.lineTo(c.w, c.h); g.fill();
+      g.fillStyle = 'rgba(176,150,104,.7)'; g.beginPath(); for (const d of st.grit) { g.moveTo(d[0] + 1, c.h - d[1]); g.arc(d[0], c.h - d[1], 0.8, 0, TAU); } g.fill();
+    }
     for (const k of st.corals) {
+      if (k.ribs) continue;   // the fans sway: they are drawn every frame
       const q = U.span(p, k.at, k.at + 0.35); if (q < 0.04) continue;
       g.save(); g.translate(k.x, k.y); g.scale(0.2 + 0.8 * q, 0.2 + 0.8 * q);   // each one swells up from its foot
       if (k.segs) {
         const lines = (s, dx) => { g.beginPath(); for (let i = 0; i < s.length; i += 4) { g.moveTo(s[i] + dx, s[i + 1]); g.lineTo(s[i + 2] + dx, s[i + 3]); } g.stroke(); };
         g.strokeStyle = k.col[0]; k.segs.forEach((s, d) => { if (s.length) { g.lineWidth = [4.2, 3.1, 2.2, 1.6][d] * k.wd; lines(s, 0); } });
         g.strokeStyle = k.col[2]; g.globalAlpha = 0.5; g.lineWidth = 0.9; lines(k.segs[0], -0.9); lines(k.segs[1], -0.7); g.globalAlpha = 1;   // a lit side on the thick stems
-        g.fillStyle = k.col[2]; g.beginPath(); for (let i = 0; i < k.tips.length; i += 2) { g.moveTo(k.tips[i] + 1.5, k.tips[i + 1]); g.arc(k.tips[i], k.tips[i + 1], 1.5, 0, TAU); } g.fill();
-      } else if (k.ribs) {
-        const at = (d, f) => [Math.cos(d.a) * d.len * f, Math.sin(d.a) * d.len * f];
-        g.fillStyle = k.col[0]; g.globalAlpha = 0.3; g.beginPath(); g.moveTo(0, 0); for (const d of k.ribs) { const e = at(d, 1); g.lineTo(e[0], e[1]); } g.fill(); g.globalAlpha = 1;
-        g.strokeStyle = k.col[0]; g.lineWidth = 1.2; g.beginPath();
-        for (const d of k.ribs) { const e = at(d, 1); g.moveTo(0, 0); g.lineTo(e[0], e[1]); }
-        for (const f of [0.38, 0.58, 0.78, 0.97]) k.ribs.forEach((d, i) => { const e = at(d, f); if (i) g.lineTo(e[0], e[1]); else g.moveTo(e[0], e[1]); });   // the fan's net
-        g.stroke();
-        g.strokeStyle = k.col[1]; g.lineWidth = 3; g.beginPath(); g.moveTo(0, 2); g.lineTo(0, -k.ribs[0].len * 0.14); g.stroke();
       } else {
         g.fillStyle = k.col[0]; g.beginPath(); g.ellipse(0, 0, k.rw, k.rh, 0, Math.PI, TAU); g.fill();
         g.strokeStyle = k.col[1]; g.lineWidth = 1.2; g.beginPath();   // the wandering grooves
@@ -585,26 +705,55 @@
       }
       g.restore();
     }
+    // a starfish or two lying over a tile's top edge: five blunt arms, a paler ridge along each
+    for (const s of st.stars) {
+      const q = U.span(p, s.at, s.at + 0.2); if (q < 0.05) continue;
+      g.save(); g.translate(s.x, s.y); g.rotate(s.rot); g.scale(q, q);
+      g.fillStyle = s.col[0]; g.strokeStyle = s.col[0]; g.lineWidth = 3.4; g.beginPath();
+      for (let i = 0; i < 10; i++) { const a = i * TAU / 10 - Math.PI / 2, R = i % 2 ? s.R * 0.4 : s.R; if (i) g.lineTo(Math.cos(a) * R, Math.sin(a) * R); else g.moveTo(Math.cos(a) * R, Math.sin(a) * R); }
+      g.closePath(); g.fill(); g.stroke();
+      g.fillStyle = s.col[2]; g.beginPath();
+      for (let i = 0; i < 5; i++) for (let j = 1; j <= 3; j++) { const a = i * TAU / 5 - Math.PI / 2, d = s.R * j * 0.27; g.moveTo(Math.cos(a) * d + 1, Math.sin(a) * d); g.arc(Math.cos(a) * d, Math.sin(a) * d, 1.15 - j * 0.15, 0, TAU); }
+      g.fill();
+      g.restore();
+    }
+  }
+  /** One sea fan, swaying on its foot: the net of ribs and cross threads, with a faint web of colour behind. */
+  function fan(g, k, q, lean) {
+    const R = k.ribs, n = R.length, s = 0.2 + 0.8 * q;
+    g.save(); g.translate(k.x, k.y); g.rotate(lean); g.scale(s, s);
+    g.fillStyle = k.col[0]; g.globalAlpha = 0.3; g.beginPath(); g.moveTo(0, 0); for (let i = 0; i < n; i++) g.lineTo(R[i].ex, R[i].ey); g.fill(); g.globalAlpha = 1;
+    g.strokeStyle = k.col[0]; g.lineWidth = 1.2; g.beginPath();
+    for (let i = 0; i < n; i++) { g.moveTo(0, 0); g.lineTo(R[i].ex, R[i].ey); }
+    for (let j = 0; j < 4; j++) { const f = 0.38 + j * 0.2; for (let i = 0; i < n; i++) { if (i) g.lineTo(R[i].ex * f, R[i].ey * f); else g.moveTo(R[i].ex * f, R[i].ey * f); } }   // the fan's net
+    g.stroke();
+    g.strokeStyle = k.col[1]; g.lineWidth = 3; g.beginPath(); g.moveTo(0, 2); g.lineTo(0, -R[0].len * 0.14); g.stroke();
+    g.restore();
+  }
+  /** The fish of a school within reach of the point dart away from it. */
+  function flee(s, x, y, reach) {
+    for (const f of s.fish) { const dx = f.px - x, dy = f.py - y, d = Math.hypot(dx, dy) || 1; if (d < reach) { const k = 120 + 260 * (1 - d / reach); f.vx += dx / d * k; f.vy += dy / d * k; } }
   }
   HP.fx.add('coral', {
     label: 'Coral reef', grows: true, days: 14, live: true, fps: 12, covers: true,
-    options: [amount(), {key: 'fish', label: 'Fish', type: 'bool', default: true}, {key: 'light', label: 'Sunlight', type: 'bool', default: true}],
+    options: [amount(), {key: 'fish', label: 'Fish', type: 'bool', default: true}, {key: 'light', label: 'Sunlight', type: 'bool', default: true}, {key: 'water', label: 'Water tint', type: 'bool', default: true}],
     create(c) {
       const r = c.rand, amt = c.opts.amount, corals = [], lanes = [], schools = [];
       const plant = (x, y) => {
         const room = reach(c, x, y - 2, 0, -1, 80), kind = r(), k = {x, y, col: REEF[Math.floor(r() * 3) % 3], at: U.clamp((c.h - y) / (c.h * 0.6), 0, 1) * 0.5 + r() * 0.15};   // the lowest grow first
         if (room < 10) return;
         if (kind < 0.42) {
-          const H = Math.min(room, 20 + r() * 30), segs = [[], [], [], []], tips = [];
+          const H = Math.min(room, 20 + r() * 30), segs = [[], [], [], []];
           const grow = (x, y, a, len, d) => {
             const ex = x + Math.cos(a) * len, ey = y + Math.sin(a) * len; segs[d].push(x, y, ex, ey);
-            if (d === 3 || len < 3.5) { tips.push(ex, ey); return; }
+            if (d === 3 || len < 3.5) return;
             for (let i = 0, n = d < 2 && r() < 0.45 ? 3 : 2; i < n; i++) grow(ex, ey, U.clamp(a + (i - (n - 1) / 2) * (0.75 + r() * 0.3) + (r() - 0.5) * 0.3, -2.7, -0.45), len * (0.6 + r() * 0.2), d + 1);
           };
-          grow(0, 0, -Math.PI / 2 + (r() - 0.5) * 0.3, H * 0.4, 0); k.segs = segs; k.tips = tips; k.wd = U.clamp(H / 34, 0.7, 1.25);
+          grow(0, 0, -Math.PI / 2 + (r() - 0.5) * 0.3, H * 0.4, 0); k.segs = segs; k.wd = U.clamp(H / 34, 0.7, 1.25);
         } else if (kind < 0.74) {
           const H = Math.min(room, 22 + r() * 26), n = 7 + Math.floor(r() * 3), spread = 1.6 + r() * 0.6; k.ribs = [];
-          for (let i = 0; i < n; i++) { const f = i / (n - 1); k.ribs.push({a: -Math.PI / 2 + (f - 0.5) * spread, len: H * (0.7 + 0.3 * Math.sin(Math.PI * f)) * (0.9 + r() * 0.12)}); }
+          for (let i = 0; i < n; i++) { const f = i / (n - 1), a = -Math.PI / 2 + (f - 0.5) * spread, len = H * (0.7 + 0.3 * Math.sin(Math.PI * f)) * (0.9 + r() * 0.12); k.ribs.push({a, len, ex: Math.cos(a) * len, ey: Math.sin(a) * len}); }
+          k.ph = k.x * 0.37;   // its own beat, without another roll of the seed (the reef stays as it was)
         } else { k.rw = 9 + r() * 10; k.rh = Math.min(room, k.rw * (0.7 + r() * 0.25)); k.ph = r() * 6; }
         corals.push(k);
       };
@@ -625,16 +774,52 @@
         const x = 24 + r() * (c.w - 48), room = reach(c, x, c.h - 3, 0, -1, 30), a = {x, y: c.h - 1, len: Math.min(room, 15 + r() * 9), col: REEF[Math.floor(r() * 3) % 3], ph: r() * 6, n: 6 + Math.floor(r() * 3), at: 0.2 + r() * 0.3, shy: 0};
         if (room >= 12) nems.push(a);
       }
-      return {corals, lanes, schools, nems};
+      // What says "under water", made after everything above so that stays as it was: sea grass that sways, more
+      // anemones on the tiles, a starfish or two, grit in the sand, and bubbles that rise now and then.
+      const weeds = [], stars = [], grit = [], bubbles = [], tops = c.rects.filter(b => solid(b) && b.y > c.h * 0.3);
+      const grass = (x, y, max) => {
+        const room = reach(c, x, y - 2, 0, -1, max); if (room < 16) return;
+        for (let i = 0, n = 3 + Math.floor(r() * 3); i < n; i++) weeds.push({x: x + (i - (n - 1) / 2) * 3.5, y, len: room * (0.5 + r() * 0.5), wd: 2 + r() * 1.6, lean: (r() - 0.5) * 0.3, ph: r() * 6, col: Math.floor(r() * 3) % 3, at: U.clamp((c.h - y) / c.h, 0, 1) * 0.4 + r() * 0.2});
+      };
+      for (let x = 20 + r() * 40; x < c.w - 20; x += (70 + r() * 90) / amt) grass(x, c.h - 1, 110);
+      for (const b of tops) {
+        const rr = Math.min(b.r || 0, b.w / 2), on = () => b.x + rr + r() * Math.max(1, b.w - 2 * rr);
+        if (r() < 0.55 * amt) grass(on(), b.y + 3, 60);
+        if (r() < 0.3 * amt) { const x = on(), room = reach(c, x, b.y, 0, -1, 30); if (room >= 12) nems.push({x, y: b.y + 3, len: Math.min(room, 13 + r() * 8), col: REEF[Math.floor(r() * 3) % 3], ph: r() * 6, n: 6 + Math.floor(r() * 3), at: 0.2 + r() * 0.3, shy: 0}); }
+      }
+      for (let i = 0; i < 2 && tops.length; i++) { const b = pick(r, tops), rr = Math.min(b.r || 0, b.w / 2); stars.push({x: b.x + rr + r() * Math.max(1, b.w - 2 * rr), y: b.y + 1, R: 11 + r() * 4, rot: (r() - 0.5) * 1.2, col: REEF[i], at: 0.3 + r() * 0.3}); }
+      for (let i = 0; i < 60; i++) grit.push([r() * c.w, 1 + r() * 5]);
+      for (let i = 0; i < 14; i++) bubbles.push({x: 0, y: -9, r: 2, ph: 0, v: 0});
+      for (const s of schools) {
+        s.post = {kind: 'fish', tags: FISH_TAGS, x: s.x, y: s.y, h: 12, dir: s.dir, hid: true, scare: by => { if (!by || by.x == null) return false; flee(s, by.x, by.y, 260); return true; }};
+      }
+      return {corals, lanes, schools, nems, weeds, stars, grit, bubbles, ph: r() * 6, nb: 0};
     },
     // a finger sends the nearby fish darting away; they drift back to their group afterwards
     touch(st, x, y) {
       for (const a of st.nems) if (Math.hypot(a.x - x, a.y - a.len / 2 - y) < 80) a.shy = 1;
-      for (const s of st.schools) for (const f of s.fish) { const dx = f.px - x, dy = f.py - y, d = Math.hypot(dx, dy) || 1; if (d < 150) { const k = 120 + 260 * (1 - d / 150); f.vx += dx / d * k; f.vy += dy / d * k; } }
+      for (const s of st.schools) flee(s, x, y, 150);
     },
     draw(g, st, c, t, dt) {
       if (c.opts.light !== false && !c.env.night) HP.fx.rays(g, c.w, c.h, t);
-      g.drawImage(still(st, c, gg => paintReef(gg, st, c.progress)), 0, 0);
+      const p = c.progress;
+      if (c.opts.water !== false) {   // the blue of deep water over everything, thicker toward the sea bed
+        if (st.tg !== g) { st.tg = g; st.tint = g.createLinearGradient(0, 0, 0, c.h); st.tint.addColorStop(0, 'rgba(0,96,150,.05)'); st.tint.addColorStop(1, 'rgba(0,70,130,.24)'); }
+        g.fillStyle = st.tint; g.fillRect(0, 0, c.w, c.h);
+      }
+      // sea grass behind the reef: each blade a thin leaf that bends with the swell, more toward its tip
+      for (let k = 0; k < 3; k++) {
+        g.fillStyle = WEED[k]; g.beginPath();
+        for (const w of st.weeds) {
+          if (w.col !== k) continue;
+          const q = U.span(p, w.at, w.at + 0.3); if (q < 0.05) continue;
+          const L = w.len * q, sw = Math.sin(t * 0.9 + w.ph + w.x * 0.012) + 0.35 * Math.sin(t * 2.1 + w.ph * 2), tx = w.x + (w.lean + sw * 0.22) * L, ty = w.y - L, mx = w.x + (w.lean * 0.3 + sw * 0.05) * L, my = w.y - L * 0.55;
+          g.moveTo(w.x - w.wd, w.y); g.quadraticCurveTo(mx - w.wd, my, tx, ty); g.quadraticCurveTo(mx + w.wd, my, w.x + w.wd, w.y);
+        }
+        g.fill();
+      }
+      g.drawImage(still(st, c, gg => paintReef(gg, st, c.progress, c)), 0, 0);
+      for (const k of st.corals) if (k.ribs) { const q = U.span(p, k.at, k.at + 0.35); if (q >= 0.04) fan(g, k, q, Math.sin(t * 0.9 + k.ph + k.x * 0.012) * 0.09); }
       g.lineCap = 'round';
       for (const a of st.nems) {
         const q = U.span(c.progress, a.at, a.at + 0.3); if (q < 0.05) continue;
@@ -649,14 +834,28 @@
         g.fillStyle = a.col[2]; g.beginPath(); for (let i = 0; i < tips.length; i += 2) { g.moveTo(tips[i] + 1.6, tips[i + 1]); g.arc(tips[i], tips[i + 1], 1.6, 0, TAU); } g.fill();
         g.fillStyle = a.col[1]; g.beginPath(); g.ellipse(a.x, a.y - 1, 5.5 * q, (3 + 3 * (1 - open)) * q, 0, 0, TAU); g.fill();   // the foot, fatter when it has pulled in
       }
+      // bubbles: every few seconds a short string of them leaves a coral and wobbles up to the surface
+      if (t >= st.nb && st.corals.length && p > 0.1) {
+        const k = st.corals[Math.floor(Math.random() * st.corals.length)]; let n = 3 + Math.floor(Math.random() * 3), i = 0;
+        for (const b of st.bubbles) if (b.y < -8 && n > 0) { b.x = k.x + (Math.random() - 0.5) * 6; b.y = k.y - 12 + i * 9; b.r = 1.8 + Math.random() * 2.6; b.ph = Math.random() * 6; b.v = 30 + Math.random() * 14; n--; i++; }
+        st.nb = t + 2.5 + Math.random() * 5;
+      }
+      g.strokeStyle = 'rgba(232,250,255,.8)'; g.lineWidth = 1; g.beginPath();
+      for (const b of st.bubbles) if (b.y >= -8) { b.y -= b.v * dt; const x = b.x + Math.sin(t * 3 + b.ph) * 2.5; g.moveTo(x + b.r, b.y); g.arc(x, b.y, b.r, 0, TAU); }
+      g.stroke();
+      g.fillStyle = 'rgba(255,255,255,.75)'; g.beginPath();
+      for (const b of st.bubbles) if (b.y >= -8) { const x = b.x + Math.sin(t * 3 + b.ph) * 2.5 - b.r * 0.35; g.moveTo(x + 0.6, b.y - b.r * 0.35); g.arc(x, b.y - b.r * 0.35, 0.6, 0, TAU); }
+      g.fill();
       if (!c.opts.fish) return;
-      const eyes = [], n = Math.ceil(st.schools.length * U.span(c.progress, 0.02, 0.45));   // the fish arrive as the reef does
+      const eyes = st.eyes || (st.eyes = []), n = Math.ceil(st.schools.length * U.span(c.progress, 0.02, 0.45));   // the fish arrive as the reef does
+      eyes.length = 0;
       for (let i = 0; i < n; i++) {
         const s = st.schools[i]; s.x += s.dir * s.sp * dt;
         if (s.x < -150 || s.x > c.w + 150) {   // gone off one side: come back along another channel
           s.dir = Math.random() < 0.5 ? 1 : -1; s.x = s.dir > 0 ? -140 : c.w + 140; s.y = st.lanes[Math.floor(Math.random() * st.lanes.length)]; s.col = FISH[Math.floor(Math.random() * FISH.length)];
           for (const f of s.fish) f.ox = -s.dir * Math.abs(f.ox);
         }
+        s.post.x = s.x; s.post.y = s.y; s.post.dir = s.dir; s.post.hid = s.x < 0 || s.x > c.w; c.scene.next.push(s.post);   // the whole school is one creature to others
         g.fillStyle = s.col;
         for (const f of s.fish) {
           f.vx += (-f.dx * 3 - f.vx * 2.4) * dt; f.vy += (-f.dy * 3 - f.vy * 2.4) * dt; f.dx += f.vx * dt; f.dy += f.vy * dt;

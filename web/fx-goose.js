@@ -26,6 +26,9 @@
 // It also derails trains: a train posted by another kind may be grabbed, dragged off and dropped. Those calls go
 // to someone else's code, so each is checked and wrapped, and a grabbed train is always dropped again, whatever
 // interrupts the goose.
+// It meets the other kinds by their tags and verbs, never by their names: it chases a "creature", grabs a "vehicle"
+// that offers grab, takes from "food" that offers take, sticks its beak into a "wonder" that is a "trap", and gives
+// way to a "guard". What it posts offers one verb, scare: the only thing that makes it leave.
 (() => {
   const U = HP.fx.util, KEY = 'hp:goose', MAX = 4;
   // milliseconds: how long a tile stays away, when the extra geese leave, an egg's time to hatch, a gosling's to grow up
@@ -157,6 +160,8 @@
     sitglare: {sit: 1, nx: 42, ny: -60, ha: 0.12, wing: 0.22}, sithiss: {sit: 1, nx: 49, ny: -52, ha: 0.05, beak: 1, wing: 0.4},
     charge: {nx: 60, ny: -43, ha: 0.05, beak: 1, wing: 0.75}, peck: {nx: 63, ny: -20, ha: 0.75, beak: 0.5, wing: 0.5},
     tall: {nx: 22, ny: -89, ha: -0.4, beak: 1, wing: 0.3},
+    // held by the beak: the head stays where the trap is while the body heaves back (yank is drawn 10 px further back)
+    stuck: {nx: 44, ny: -58, ha: 0.25, beak: 0.4, wing: 0.8}, yank: {nx: 54, ny: -56, ha: 0.1, beak: 0.4, wing: 0.5},
   };
   /** Draw a goose standing on (x, y), facing f (1 right, -1 left). A is its pose on screen now. walk: 0 standing,
    *  1 walking, more = faster. look: {sc (size), chick (0 to 1, how much of a gosling), wig (wiggle), hiss (lines from the beak), stamp (a foot)}. */
@@ -225,7 +230,30 @@
 
   // ---------- the others ----------
   /** Tell the other kinds where this goose is. No pet function, on purpose. */
-  function post(ctx, x, y, sc, chasing) { if (ctx.scene && ctx.scene.next) ctx.scene.next.push({kind: 'goose', x, y, h: 95 * sc, angry: true, chasing: chasing || null}); }
+  // One object per goose, kept and moved: it offers "scare", the one thing that works on a goose.
+  const TAGS = ['creature', 'animal', 'threat'];
+  function post(q, ctx, x, y, sc, chasing) {
+    if (!ctx.scene || !ctx.scene.next) return;
+    const p = q._.post || (q._.post = {kind: 'goose', tags: TAGS, angry: true, scare: by => shoo(q, by)});
+    p.x = x; p.y = y; p.h = 95 * sc; p.chasing = chasing || null; ctx.scene.next.push(p);
+  }
+  /** Frightened off from by = {x, y}: another kind's "scare", or a guard coming at it. True if it goes. Not with a
+   *  tile in its beak or on its way out with one, and a goose sitting on its loot does not budge either. */
+  function shoo(q, by) {
+    const e = q._, v = e.V;
+    if (!v || q.taken || /flee|runoff/.test(v.mode)) return false;
+    if (v.mode === 'shoo') return true;
+    if (v.mode === 'tug' && v.el) restore(v.el);  // caught with its beak on a tile that has not moved yet: it lets go
+    dropTrain(q);
+    v.el = null; v.i = -1; v.by = by && by.x === +by.x ? by.x : v.x + v.f; v.mode = 'shoo'; v.T = 0;
+    return true;
+  }
+  // what others are to the goose: by their tags (the engine gives every actor a list), never by their kind
+  const has = (a, tag) => !!a.tags && a.tags.indexOf(tag) >= 0;
+  const game = a => has(a, 'creature') && !has(a, 'guard');                     // to be chased
+  const rides = a => has(a, 'vehicle') && typeof a.grab === 'function';          // to be derailed
+  const snack = a => has(a, 'food') && typeof a.take === 'function' && a.carrot !== false;  // carrot: false = a snowman whose nose is gone already
+  const jaws = a => has(a, 'wonder') && has(a, 'trap') && typeof a.trap === 'function';     // to stick its beak in
   const others = ctx => ((ctx.scene && ctx.scene.actors) || []).filter(a => a && a.kind !== 'goose' && !a.hid && a.x === +a.x && a.y === +a.y);  // hid: someone out of sight (hanging off a tile's edge)
   /** The nearest of these, within reach r. */
   function nearest(list, x, y, r) { let best = null, bd = r; list.forEach(a => { const d = Math.hypot(a.x - x, a.y - y); if (d < bd) { bd = d; best = a; } }); return best; }
@@ -236,16 +264,17 @@
   }
   /** Whom to chase: the nearest stick figure, now and then a sheep or a walker instead. It hates everything. */
   function quarry(ctx, x, y) {
-    const all = others(ctx), is = k => a => k.indexOf(a.kind) >= 0, far = Math.hypot(ctx.w, ctx.h);
-    const st = nearest(all.filter(is(['stick'])), x, y, far), ot = nearest(all.filter(is(['sheep', 'walker'])), x, y, far);
+    // by tag: mostly a "person", now and then another creature (an "animal"); never a "guard"
+    const all = others(ctx).filter(game), far = Math.hypot(ctx.w, ctx.h);
+    const st = nearest(all.filter(a => has(a, 'person')), x, y, far), ot = nearest(all.filter(a => !has(a, 'person')), x, y, far);
     const p = (ot && (!st || Math.random() < 0.2)) ? ot : st;
-    return p ? {kind: p.kind, x: p.x, y: p.y, lost: 0} : null;
+    return p ? {person: has(p, 'person'), x: p.x, y: p.y, lost: 0} : null;
   }
 
   /** Another kind's function on an actor (a train's grab, drag, drop): only if it is there, and never trusted. */
   const call = (o, fn, a, b) => { try { if (o && typeof o[fn] === 'function') return o[fn](a, b); } catch (err) {} };
   /** Whatever stops the goose, a train it holds is let go. */
-  function dropTrain(q) { const e = q._; if (e.tr) { const tr = e.tr; e.tr = null; call(tr, 'drop'); } }
+  function dropTrain(q) { const e = q._; if (e.tr) { const tr = e.tr; e.tr = null; call(tr, 'drop'); } if (e.trap) { const tp = e.trap; e.trap = null; call(tp, 'free'); } }  // and a trap that holds it is told to open
   /** Somewhere on screen a good way off: where the train is dragged to. */
   function farFrom(ctx, x, y) { let p; for (let i = 0; i < 40; i++) { p = {x: 70 + Math.random() * (ctx.w - 140), y: 100 + Math.random() * Math.max(1, ctx.h - 130)}; if (Math.hypot(p.x - x, p.y - y) >= 250) break; } return p; }
 
@@ -284,18 +313,20 @@
     }
     if (q.at !== ctx.page) return;
     let tx = q.ax, ty = q.ay, run = false, prey = null;
-    S.geese.some(o => { const v = o._.V;
+    const led = S.geese.some(o => { const v = o._.V;
       if (o.phase === 'chick' || o.gone) return false;
-      if (v && v.mode !== 'flee' && v.mode !== 'runoff') { tx = v.x - v.f * (54 + n * 34); ty = v.y; run = v.mode === 'chase'; prey = run ? v.prey : null; return true; }
-      if (o.phase === 'hiding' && o.hide === ctx.page && o.hx != null) { tx = o.hx + (o.hx < ctx.w / 2 ? -1 : 1) * (lootSize(o)[0] / 2 + 26 + n * 30); ty = o.hy + lootSize(o)[1] / 2; return true; }
+      if (v && v.mode !== 'flee' && v.mode !== 'runoff') { tx = v.x - v.f * (54 + n * 34); ty = v.y; e.out = v.mode === 'shoo' ? (v.x < ctx.w / 2 ? -1 : 1) : 0; run = v.mode === 'chase' || !!e.out; prey = v.mode === 'chase' ? v.prey : null; return true; }
+      if (o.phase === 'hiding' && o.hide === ctx.page && o.hx != null) { tx = o.hx + (o.hx < ctx.w / 2 ? -1 : 1) * (lootSize(o)[0] / 2 + 26 + n * 30); ty = o.hy + lootSize(o)[1] / 2; e.out = 0; return true; }
       return false; });
-    tx = U.clamp(tx, 24, ctx.w - 24);
+    // its goose was frightened off: out after it by the same side, and it waits out there until the goose comes back
+    if (!led && e.out) { tx = e.out < 0 ? -70 : ctx.w + 70; run = true; }
+    if (!e.out) tx = U.clamp(tx, 24, ctx.w - 24);
     const dx = tx - q.ax, dy = ty - q.ay, dist = Math.hypot(dx, dy), go = dist > 12, foe = run ? null : threat(q, ctx, q.ax, q.ay, dt);
     if (go) { const st = Math.min(dist, (run ? 250 : 130) * dt); q.ax += dx / dist * st; q.ay += dy / dist * st; if (Math.abs(dx) > 4) e.f = dx > 0 ? 1 : -1; }
     else if (foe && Math.abs(foe.x - q.ax) > 6) e.f = foe.x > q.ax ? 1 : -1;
     const cross = !run && (!!foe || t % 3 < 0.7);
     goose(g, e.A, q.ax, q.ay, e.f || 1, run ? 'charge' : cross ? 'hiss' : 'glare', t, dt, go ? (run ? 2.6 : 1.7) : 0, {sc, chick: 1 - age, hiss: cross});
-    post(ctx, q.ax, q.ay, sc, prey && {x: prey.x, y: prey.y});
+    if (q.ax > -30 && q.ax < ctx.w + 30) post(q, ctx, q.ax, q.ay, sc, prey && {x: prey.x, y: prey.y});
   }
 
   // ---------- a visit ----------
@@ -317,11 +348,11 @@
   function act(q, g, ctx, t, dt) {
     const e = q._, v = e.V, sp = hurry > 0 ? 2.2 : 1, r = v.i >= 0 ? ctx.rects[v.i] : null;
     const go = m => { v.mode = m; v.T = 0; }, after = () => go(v.i >= 0 && r && r.el === v.el && allowed(r) ? 'tug' : 'exit');
-    let pose = 'glare', honk = false, walk = 0, wig = 0, hiss = false, stamp = false, bt = 0, word = 'HONK!';
+    let pose = 'glare', honk = false, walk = 0, wig = 0, hiss = false, stamp = false, bt = 0, word = 'HONK!', ox = 0;
     v.T += dt * sp;
     // some visits, when a train is running, are spent on the train instead (how many: the pace; never with a tile in hand)
     if (!v.trained && !q.taken && !e.tr && /enter|look|honk|exit/.test(v.mode) && v.x > -40 && v.x < ctx.w + 40) {
-      const tr = nearest(others(ctx).filter(a => a.kind === 'train'), v.x, v.y, 1e5);
+      const tr = nearest(others(ctx).filter(rides), v.x, v.y, 1e5);
       if (tr) {
         if (v.keen == null) v.keen = Math.random() < pace().train || !!ctx.opts.train;
         if (v.keen) { v.trained = true; v.back = {mode: v.mode, T: v.T, x: U.clamp(v.x, 30, ctx.w - 30), y: v.y, f: v.f}; v.tp = {x: tr.x, y: tr.y, dir: tr.dir, a: tr, lost: 0}; v.lunge = 0; go('train-go'); }
@@ -334,18 +365,55 @@
     }
     // a snowman with a carrot for a nose (the snow crew posts its snowmen): on some visits it goes and takes the carrot
     if (!v.veg && /enter|look|honk|exit/.test(v.mode) && v.x > -40 && v.x < ctx.w + 40) {
-      const sm = nearest(others(ctx).filter(a => a.kind === 'snowman' && a.carrot), v.x, v.y, 1e5);
+      const sm = nearest(others(ctx).filter(snack), v.x, v.y, 1e5);
       if (sm) { v.veg = true; if (Math.random() < 0.35 || HP.fx.demo) { v.back = {mode: v.mode, T: v.T, x: U.clamp(v.x, 30, ctx.w - 30), y: v.y, f: v.f}; v.sm = sm; v.pk = 0; go('carrot'); } }
+    }
+    // an open trap that is worth a look (a flytrap) near its way: on some visits it cannot leave it alone
+    if (!v.nosy && /enter|look|honk|exit/.test(v.mode) && v.x > 30 && v.x < ctx.w - 30) {
+      const tp = nearest(others(ctx).filter(a => jaws(a) && a.y > 14 && a.y < ctx.h - 62), v.x, v.y, 260);  // one its beak can reach, standing on the screen
+      if (tp) { v.nosy = true; if (Math.random() < 0.4 || ctx.opts.trap) { v.back = {mode: v.mode, T: v.T, x: U.clamp(v.x, 30, ctx.w - 30), y: v.y, f: v.f}; v.jaw = tp; v.pk = 0; go('trap-go'); } }
+    }
+    // a guard (a ram, a dog) within about 120 px and still coming: it does not wait to be told
+    if (!/tug|drag|shoo|flee|runoff/.test(v.mode)) {
+      const gd = ctx.scene && ctx.scene.near ? ctx.scene.near('guard', v.x, v.y, 200) : null, far = gd ? Math.hypot(gd.x - v.x, gd.y - v.y) : 0;  // watched from 200 px, to know which way it is moving
+      if (gd && far < 120 && v.gx != null && Math.hypot(gd.x - v.gx, gd.y - v.gy) < 60 && far < Math.hypot(v.gx - v.x, v.gy - v.y) - 0.5) shoo(q, gd);
+      if (gd) { v.gx = gd.x; v.gy = gd.y; } else v.gx = null;
     }
     const foe = /look|honk|enter|exit/.test(v.mode) ? threat(q, ctx, v.x, v.y, dt) : null;
     if (v.mode === 'carrot') {  // up to it, a peck, and walk on
       const sd = v.x < v.sm.x ? -1 : 1, tx = U.clamp(v.sm.x + sd * 50, 30, ctx.w - 30), ty = U.clamp(v.sm.y, 70, ctx.h - 6), dx = tx - v.x, dy = ty - v.y, dist = Math.hypot(dx, dy);
       if (dist > 5 && !v.pk) { const st = Math.min(dist, 150 * sp * dt); v.x += dx / dist * st; v.y += dy / dist * st; if (Math.abs(dx) > 6) v.f = dx > 0 ? 1 : -1; walk = 1.5 * sp; if (v.T > 14) go('back'); }
       else { v.pk += dt; v.f = -sd; pose = v.pk % 0.5 < 0.25 ? 'peck' : 'glare'; if (v.pk > 0.9 && !v.took) { v.took = true; call(v.sm, 'take'); } if (v.pk > 1.5) go('back'); }
+    } else if (v.mode === 'trap-go') {  // up to it from the side it is on, a long look, and in goes the beak
+      const sz = q.born ? 0.4 + 0.6 * Math.min(1, (Date.now() - q.born) / GROW) : 1, sd = v.x < v.jaw.x ? 1 : -1;
+      const tx = U.clamp(v.jaw.x - sd * 64 * sz, 30, ctx.w - 30), ty = U.clamp(v.jaw.y + 56 * sz, 70, ctx.h - 6), dx = tx - v.x, dy = ty - v.y, dist = Math.hypot(dx, dy);
+      if (dist > 5 && !v.pk) { const st = Math.min(dist, 150 * sp * dt); v.x += dx / dist * st; v.y += dy / dist * st; if (Math.abs(dx) > 6) v.f = dx > 0 ? 1 : -1; walk = 1.5 * sp; if (v.T > 14) go('back'); }
+      else {
+        v.pk += dt; v.f = sd; pose = v.pk < 0.8 ? 'peek' : 'reach';
+        if (v.pk > 1.2) {
+          if (call(v.jaw, 'trap', {x: v.x + sd * 64 * sz, y: v.y - 56 * sz}) === true) { e.trap = v.jaw; v.left = 3 + Math.random() * 2; puff(v.x + sd * 40, v.y - 50, 3); go('trap-held'); }
+          else go('back');  // shut already, or it would not bite
+        }
+      }
+    } else if (v.mode === 'trap-held') {
+      // caught by the beak: it heaves backward and beats its wings, feathers flying. The trap is drawn again over
+      // everything, so that its jaws are in front of the beak. After a few seconds the trap is told to let go.
+      const yank = v.T % 0.6 < 0.3; pose = yank ? 'yank' : 'stuck'; ox = yank ? -v.f * 10 : 0; wig = 1; stamp = true;
+      if (ctx.scene && ctx.scene.over) ctx.scene.over.push(v.lid || (v.lid = gg => { call(e.trap, 'paint', gg); }));
+      if (Math.floor(v.T / 0.9) !== Math.floor((v.T - dt * sp) / 0.9)) puff(v.x, v.y - 50, 1);
+      if (v.T > v.left) { dropTrain(q); puff(v.x + v.f * 40, v.y - 50, 3); v.chased = v.trained = v.veg = true; v.i = -1; v.el = null; go('huff'); }
+    } else if (v.mode === 'huff') {  // free: draws itself up, shakes itself, and stalks out by the nearer side with nothing
+      pose = 'tall'; wig = 1; hiss = true;
+      if (v.T > 1) { v.d = v.x < ctx.w / 2 ? -1 : 1; go('exit'); }
+    } else if (v.mode === 'shoo') {  // frightened: one honk back at it, a few steps backward, then out by the nearer side at a run
+      const away = v.x >= v.by ? 1 : -1;
+      if (v.T < 0.7) { v.f = -away; pose = 'honk'; honk = true; bt = v.T; }
+      else if (v.T < 1.5) { v.f = -away; v.x += away * 60 * dt; pose = 'hiss'; hiss = true; walk = 1; }
+      else { v.d = v.x < ctx.w / 2 ? -1 : 1; v.f = v.d; v.x += v.d * 300 * dt; pose = 'flap'; walk = 3; if (v.x < -90 || v.x > ctx.w + 90) return done(q); }
     } else if (v.mode === 'train-go') {
       // to the track, a little ahead of the train along its heading (dir, radians): there it stands and glares at
       // the headlight until the train is on it. Not for long: if the train does not come, it goes and gets it.
-      const a = nearest(others(ctx).filter(o => o.kind === 'train'), v.tp.x, v.tp.y, 220);
+      const a = nearest(others(ctx).filter(rides), v.tp.x, v.tp.y, 220);
       if (a) v.tp = {x: a.x, y: a.y, dir: a.dir, a, lost: 0}; else v.tp.lost += dt;
       const hd = v.tp.dir === +v.tp.dir && (v.wait || 0) < 4, hx = hd ? Math.cos(v.tp.dir) : 0, hy = hd ? Math.sin(v.tp.dir) : 0;
       const ax = U.clamp(v.tp.x + hx * 110, 30, ctx.w - 30), ay = U.clamp(v.tp.y + hy * 110, 70, ctx.h - 6);
@@ -377,7 +445,7 @@
     } else if (v.mode === 'chase') {
       // after the same one all the way: whoever of its kind is nearest to where it last was. Neck flat out,
       // wings spread, honking; a peck at the heels when it catches up; a flap up or down to the level they are on
-      const p = nearest(others(ctx).filter(a => a.kind === v.prey.kind), v.prey.x, v.prey.y, 160);
+      const p = nearest(others(ctx).filter(a => game(a) && has(a, 'person') === v.prey.person), v.prey.x, v.prey.y, 160);  // "its kind": a person, or not
       if (p) { v.prey.x = p.x; v.prey.y = p.y; v.prey.lost = 0; } else v.prey.lost += dt;
       const dx = v.prey.x - v.x, dy = v.prey.y - v.y, close = Math.abs(dx) < 64 && Math.abs(dy) < 30;
       if (Math.abs(dx) > 8) v.f = dx > 0 ? 1 : -1;
@@ -443,9 +511,9 @@
       if (v.y < -140) return done(q);
     }
     const age = q.born ? Math.min(1, (Date.now() - q.born) / GROW) : 1;
-    goose(g, e.A, v.x, v.y, v.f, pose, t, dt, walk, {wig, hiss, stamp, sc: 0.4 + 0.6 * age, chick: 1 - age});
+    goose(g, e.A, v.x + ox, v.y, v.f, pose, t, dt, walk, {wig, hiss, stamp, sc: 0.4 + 0.6 * age, chick: 1 - age});
     if (honk) bubble(g, v.x, v.y + (pose === 'charge' || pose === 'peck' || pose === 'grip' ? 34 : 0), v.f, ctx, bt, word);
-    if (v.mode !== 'flee' && v.mode !== 'runoff') post(ctx, v.x, v.y, 0.4 + 0.6 * age, v.mode === 'chase' ? {x: v.prey.x, y: v.prey.y} : null);
+    if (v.mode !== 'flee' && v.mode !== 'runoff') post(q, ctx, v.x, v.y, 0.4 + 0.6 * age, v.mode === 'chase' ? {x: v.prey.x, y: v.prey.y} : null);
   }
 
   // ---------- hiding ----------
@@ -497,7 +565,7 @@
     else if (k === 4 && u < 1.2) { pose = 'sithonk'; honk = true; }
     goose(g, e.A, x + f * lunge, top, f, pose, t, dt, 0, {wig, hiss});
     if (honk) bubble(g, x, top + 16, f, ctx, u);
-    post(ctx, x, top, 1, null);
+    post(q, ctx, x, top, 1, null);
   }
   function extras(g, dt) {
     S.geese.forEach(q => { const p = q._.pop; if (p) { p.t -= dt; if (p.t <= 0) q._.pop = null; else loot(g, q, p.x, p.y - (0.35 - p.t) * 40, p.t / 0.35); } });

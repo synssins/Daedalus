@@ -15,6 +15,7 @@
   const creep = r => 0.15 * Math.min(r.w, r.h);            // how far anything may reach in over a tile's edge
   const PAL = [[40, 13, 8], [150, 30, 6], [236, 92, 12], [255, 176, 44], [255, 246, 196]];   // crust, dark red, orange, yellow, white-hot
   const cache = [];                                        // the last few runs: create() is called again on every layout
+  const FRONT_TAGS = ['threat', 'light'];
 
   /** One soft round dot, made once and stamped wherever something glows or steams. */
   function dot(stops) {
@@ -260,6 +261,19 @@
     // beads to animate: the followed grains whose journey has begun by now, the latest first
     const act = st.act = [];
     for (let n = m.tracks.length - 1; n >= 0 && act.length < 20; n--) { const q = m.tracks[n], len = Math.min(q.path.length - 1, S - q.at); if (len > 12) act.push({q, len}); }
+    // the leading edge, for the others on the dashboard: the cell lava reached last, and, if a second stream is
+    // on the move well away from it, the newest cell there too
+    st.nf = 0;
+    for (let k = 0; k < 2; k++) {
+      let best = -1; const f0 = st.front[0];
+      for (const i of m.cells) {
+        if (m.arr[i] > S || (best >= 0 && m.arr[i] <= m.arr[best])) continue;
+        if (k && (S - m.arr[i] > 200 || Math.hypot((i % W + 0.5) * cs - f0.x, ((i / W | 0) + 0.5) * cs - f0.y) < 160)) continue;
+        best = i;
+      }
+      if (best < 0) break;
+      st.front[k].x = (best % W + 0.5) * cs; st.front[k].y = ((best / W | 0) + 0.5) * cs; st.nf = k + 1;
+    }
   }
 
   HP.fx.add('lava', {
@@ -271,7 +285,7 @@
       const key = [c.seed, c.w, c.h, c.opts.amount, c.opts.water].concat(c.rects.filter(solid).map(b => [b.x, b.y, b.w, b.h, b.r || 0].map(Math.round).join(','))).join('|');
       let hitc = null; for (const e of cache) if (e.key === key) hitc = e;
       if (!hitc) { hitc = {key, sim: simulate(c)}; cache.push(hitc); if (cache.length > 3) cache.shift(); }
-      const m = hitc.sim, st = {sim: m, nz: U.noise(c.seed + 11), emb: [], hit: [], act: []};
+      const m = hitc.sim, st = {sim: m, nz: U.noise(c.seed + 11), emb: [], hit: [], act: [], nf: 0, front: [0, 1].map(() => ({kind: 'lava', tags: FRONT_TAGS, x: 0, y: 0, h: 14, quiet: 0}))};
       st.mc = sheet(m.W, m.H); st.sc = sheet(m.W, m.H); st.gl = sheet(Math.ceil(m.W / 2), Math.ceil(m.H / 2)); st.A = sheet(m.W * 2, m.H * 2); st.T = sheet(m.W * 2, m.H * 2);
       st.img = st.mc.getContext('2d').createImageData(m.W, m.H); st.simg = st.sc.getContext('2d').createImageData(m.W, m.H);
       st.glow = dot([[0, 'rgba(255,236,150,1)'], [0.3, 'rgba(255,140,30,.55)'], [1, 'rgba(255,60,0,0)']]);
@@ -283,6 +297,14 @@
       if (!st.cv) { st.cv = sheet(c.w, c.h); st.cp = -1; }
       if (Math.abs(c.progress - st.cp) > 0.005) { st.cp = c.progress; const s = st.cv.getContext('2d'); s.clearRect(0, 0, c.w, c.h); s.save(); paint(s, st, c); s.restore(); }
       g.drawImage(st.cv, 0, 0);
+      // the front is said to the others: something to keep off, and it glows. A creature right at it is frightened.
+      // After a fright that front keeps quiet for four seconds, so no creature is scared more often than that.
+      const sc = c.scene;
+      if (sc && sc.next) for (let k = 0; k < st.nf; k++) {
+        const q = st.front[k]; sc.next.push(q);
+        if (t < q.quiet) continue;
+        for (const a of sc.actors || []) if (!a.hid && a.tags && a.tags.indexOf('creature') >= 0 && Math.hypot(a.x - q.x, a.y - q.y) < 30) { q.quiet = t + 4; c.util.act(a, 'scare', q); }
+      }
       const m = st.sim, W = m.W, cs = m.cs, wh = m.wh, hit = st.hit;
       const stamp = (cv, x, y, R, a) => { g.globalAlpha = a; g.drawImage(cv, x - R, y - R, 2 * R, 2 * R); };
       g.globalCompositeOperation = 'lighter';

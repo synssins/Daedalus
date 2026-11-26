@@ -7,6 +7,7 @@
   const solidOf = ctx => ctx.rects.filter(r => !r.hidden && !r.flat);
   /** Is the point over the middle of a tile, further in than the rim an overlay may use? Taps there belong to the tile. */
   const deep = (ctx, x, y) => ctx.rects.some(b => !b.hidden && !b.flat && Math.min(x - b.x, b.x + b.w - x, y - b.y, b.y + b.h - y) > 0.15 * Math.min(b.w, b.h));
+  const GLOW = ['light', 'wonder'];  // what every glowing thing here is to the other overlays
   const canvas = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
   /** One soft round glow, drawn once and stamped many times: far cheaper than a gradient per light per frame. */
   const glow = (size, stops) => {
@@ -380,7 +381,7 @@
       d.globalCompositeOperation = 'destination-in'; d.fillStyle = hz; d.fillRect(0, 0, 32, 160);
       const bands = [];
       for (let i = 0; i < 2; i++) bands.push({y: ctx.h * (0.24 + i * 0.13 + r() * 0.04), amp: ctx.h * (0.035 + r() * 0.025), f1: 4 + r() * 3, f2: 9 + r() * 5, ph: r() * TAU, sp: 0.09 + r() * 0.06, tall: ctx.h * (0.24 - i * 0.05)});
-      return {ray, bands, rips: [], now: 0};
+      return {ray, bands, rips: [], now: 0, post: {kind: 'aurora', tags: GLOW, x: ctx.w / 2, y: bands[0].y - bands[0].tall / 2, h: bands[0].tall}};
     },
     // a touch sends a slow bright ripple out along the curtains, both ways from the finger
     touch(st, x) { st.rips.push({x, t: st.now}); if (st.rips.length > 3) st.rips.shift(); },
@@ -388,6 +389,7 @@
       const e = ctx.env;
       st.now = t; while (st.rips.length && t - st.rips[0].t > 6) st.rips.shift();
       if (!ctx.opts.always && !e.night) return;
+      ctx.scene.next.push(st.post);  // something in the sky to look up at
       const strength = ctx.opts.amount * (e.cold ? 0.58 : 0.4);
       g.globalCompositeOperation = 'lighter';
       for (const b of st.bands) {
@@ -457,6 +459,7 @@
       for (let i = st.bursts.length - 1; i >= 0; i--) {
         const b = st.bursts[i]; b.age += dt;
         if (b.age >= b.life) { st.bursts.splice(i, 1); continue; }
+        ctx.scene.next.push(b.post || (b.post = {kind: 'firework', tags: GLOW, x: b.x, y: b.y, h: b.sparks.length > 20 ? 220 : 60}));  // for its short life, something to stare at
         const drag = Math.exp(-1.7 * dt), k = b.age / b.life;
         for (const s of b.sparks) { s.vx *= drag; s.vy = s.vy * drag + 38 * dt; s.x += s.vx * dt; s.y += s.vy * dt; }
         if (b.age < 0.3) { g.globalAlpha = 1 - b.age / 0.3; g.drawImage(st.flash, b.x - 45, b.y - 45, 90, 90); }
@@ -474,16 +477,146 @@
   // ---------- Fairy lights ----------
   // Small soft lights in four pale colours wander the whole screen, each pulsing gently. Most of them like a button
   // that is on and circle its edge; the rest keep to their own corner. A touch scatters them and they drift back.
+  //
+  // Now and then they gather over a figure that can be carried off, a round portal opens beside it onto a green place
+  // under another sky, and the figure goes through: a while later a second portal lets it out on another tile. With
+  // nobody to take, the portal still opens, and a frond reaches out for a look round while a leaf blows through.
   const FAIRY = ['255,232,180', '255,150,205', '150,255,205', '200,165,255'];
+  const PR = 46;  // the portal's radius
+  /** A fern frond from x, y: heading a, curling by bend along its length. */
+  function frond(g, x, y, a, len, bend, col, edge) {
+    const n = Math.max(5, Math.round(len / 8)), step = len / n;
+    let px = x, py = y, an = a;
+    g.fillStyle = col; g.strokeStyle = edge; g.lineWidth = 1; g.lineJoin = 'round'; g.lineCap = 'round'; g.beginPath();
+    for (let i = 1; i < n; i++) {
+      px += Math.cos(an) * step; py += Math.sin(an) * step; an += bend / n;
+      const k = i / n, L = len * 0.3 * Math.min(1, k * 3 + 0.25) * (1 - k * 0.85);
+      for (let sd = -1; sd <= 1; sd += 2) {
+        const la = an + sd * 1.05;
+        g.moveTo(px, py); g.quadraticCurveTo(px + Math.cos(la + sd * 0.55) * L * 0.55, py + Math.sin(la + sd * 0.55) * L * 0.55, px + Math.cos(la) * L, py + Math.sin(la) * L);
+        g.quadraticCurveTo(px + Math.cos(la - sd * 0.45) * L * 0.6, py + Math.sin(la - sd * 0.45) * L * 0.6, px + Math.cos(an) * step * 0.7, py + Math.sin(an) * step * 0.7);
+      }
+    }
+    g.fill(); g.stroke();
+    px = x; py = y; an = a; g.lineWidth = 1.6; g.beginPath(); g.moveTo(x, y);
+    for (let i = 1; i <= n; i++) { px += Math.cos(an) * step; py += Math.sin(an) * step; an += bend / n; g.lineTo(px, py); }
+    g.stroke();
+  }
+  /** One broad leaf standing up from x, y, leaning by a. */
+  function bigLeaf(g, x, y, a, len, wid, col, edge) {
+    g.save(); g.translate(x, y); g.rotate(a); g.fillStyle = col; g.strokeStyle = edge; g.lineWidth = 1.5;
+    g.beginPath(); g.moveTo(0, 0); g.bezierCurveTo(wid, -len * 0.25, wid * 0.9, -len * 0.75, 0, -len); g.bezierCurveTo(-wid * 0.9, -len * 0.75, -wid, -len * 0.25, 0, 0); g.fill(); g.stroke();
+    g.beginPath(); g.moveTo(0, -4); g.lineTo(0, -len * 0.92);
+    for (let i = 1; i < 5; i++) { const yy = -len * i / 5.5; g.moveTo(0, yy); g.lineTo(wid * 0.55, yy - len * 0.1); g.moveTo(0, yy); g.lineTo(-wid * 0.55, yy - len * 0.1); }
+    g.stroke(); g.restore();
+  }
+  // The other place is painted once, as two sheets (sky and far plants; near plants, which sway) and a rim of light.
+  let gate = null;
+  function gateArt() {
+    const S = 256, back = canvas(S, S), front = canvas(S + 32, S), d = back.getContext('2d'), f = front.getContext('2d');
+    const sky = d.createLinearGradient(0, 0, 0, S * 0.66);
+    sky.addColorStop(0, '#2b2170'); sky.addColorStop(0.45, '#b4529c'); sky.addColorStop(0.8, '#ffae6e'); sky.addColorStop(1, '#ffe7a6');
+    d.fillStyle = sky; d.fillRect(0, 0, S, S);
+    d.drawImage(glow(64, [[0, 'rgba(255,255,240,1)'], [0.3, 'rgba(255,250,215,.95)'], [0.36, 'rgba(255,235,170,.45)'], [1, 'rgba(255,220,150,0)']]), 112, 36, 110, 110);
+    d.fillStyle = '#3d8f78'; d.beginPath(); d.moveTo(0, 150); d.bezierCurveTo(50, 118, 90, 160, 140, 140); d.bezierCurveTo(190, 120, 220, 150, S, 132); d.lineTo(S, S); d.lineTo(0, S); d.fill();
+    d.fillStyle = '#226f42'; d.beginPath(); d.moveTo(0, 176); d.bezierCurveTo(60, 150, 110, 190, 160, 170); d.bezierCurveTo(200, 156, 230, 176, S, 166); d.lineTo(S, S); d.lineTo(0, S); d.fill();
+    d.fillStyle = '#114d28'; d.fillRect(0, 214, S, 42);
+    bigLeaf(d, 40, 240, -0.5, 146, 38, '#2c9446', '#0c4520'); bigLeaf(d, 214, 244, 0.45, 156, 40, '#2c9446', '#0c4520');
+    bigLeaf(d, 100, 252, -0.12, 96, 26, '#37a54c', '#0c4520'); bigLeaf(d, 166, 252, 0.2, 90, 24, '#37a54c', '#0c4520');
+    frond(d, 132, 252, -1.5, 110, 0.5, '#48b455', '#0f5226'); frond(d, 74, 252, -1.9, 92, -0.6, '#48b455', '#0f5226');
+    bigLeaf(f, 34, 264, -0.6, 156, 44, '#62d052', '#14602a'); bigLeaf(f, 256, 264, 0.6, 156, 44, '#62d052', '#14602a');
+    frond(f, 92, 262, -1.85, 158, -0.9, '#86e860', '#1b6a2a'); frond(f, 200, 262, -1.3, 158, 0.9, '#86e860', '#1b6a2a'); frond(f, 146, 264, -1.57, 72, 0.3, '#86e860', '#1b6a2a');
+    f.fillStyle = '#ffb0de'; f.beginPath(); for (const q of [[60, 214], [118, 236], [226, 220], [176, 242]]) { f.moveTo(q[0] + 4, q[1]); f.arc(q[0], q[1], 4, 0, TAU); } f.fill();
+    // the rim also shades the picture's edge, so the place looks set back behind the hole
+    const rim = glow(256, [[0.5, 'rgba(0,30,20,0)'], [0.75, 'rgba(0,30,20,.6)'], [0.79, 'rgba(245,255,245,1)'], [0.85, 'rgba(150,255,205,.5)'], [1, 'rgba(150,255,205,0)']]);
+    return {back, front, rim, leaf: leafSprite(['#7fdc58', '#1f6e2c'], 0)};
+  }
+  function drawGate(g, st, P, t) {
+    const A = gate || (gate = gateArt()), e = P.k * P.k * (3 - 2 * P.k), r = PR * e * (1 + 0.02 * Math.sin(t * 3.1)), z = r / 128;
+    g.globalAlpha = 1; g.save(); g.beginPath(); g.arc(P.x, P.y, r, 0, TAU); g.clip();
+    g.drawImage(A.back, P.x - r, P.y - r, 2 * r, 2 * r);
+    g.globalCompositeOperation = 'lighter'; g.globalAlpha = 0.85;
+    for (let i = 0; i < 7; i++) { const s = (9 + 5 * Math.sin(t * 1.3 + i)) * e; g.drawImage(st.dots[i & 1 ? 0 : 2], P.x + Math.sin(t * 0.31 + i * 2.4) * r * 0.75 - s / 2, P.y + Math.cos(t * 0.23 + i * 1.7) * r * 0.6 - r * 0.1 - s / 2, s, s); }
+    g.globalCompositeOperation = 'source-over'; g.globalAlpha = 1;
+    g.drawImage(A.front, P.x - r - (16 - Math.sin(t * 0.9) * 5) * z, P.y - r, 288 * z, 256 * z);
+    g.restore();
+    const R2 = r / 0.79 * (1 + 0.03 * Math.sin(t * 2.3));
+    g.drawImage(A.rim, P.x - R2, P.y - R2, 2 * R2, 2 * R2);
+    if (P.step !== 3 || P.went) return;
+    // nobody went through: a frond reaches out and looks about, and a leaf blows out the other way
+    const u = P.tm / 7, grow = U.span(u, 0.04, 0.3) * (1 - U.span(u, 0.72, 0.95)), v = P.side, lt = P.tm - 1.5;
+    if (grow > 0.02) { g.save(); g.translate(P.x + v * PR * 0.1, P.y + PR * 0.5); g.scale(grow, grow); frond(g, 0, 0, -1.57 + v * (0.75 + 0.35 * Math.sin(P.tm * 1.7)), PR * 1.9, v * (0.9 + 0.5 * Math.sin(P.tm * 1.7 + 1)), '#86e860', '#1b6a2a'); g.restore(); }
+    if (lt > 0 && lt < 4.5) {
+      const sz = 22 * Math.min(1, 0.4 + lt);
+      g.save(); g.globalAlpha = Math.min(1, 4.5 - lt); g.translate(P.x - v * (10 + 48 * lt) + Math.sin(lt * 3) * 8, P.y - 30 * lt + 10 * lt * lt); g.rotate(lt * 2.2); g.scale(0.4 + 0.6 * Math.abs(Math.cos(lt * 2.6)), 1);
+      g.drawImage(A.leaf, -sz / 2, -sz / 2, sz, sz); g.restore();
+    }
+  }
+  /** The nearest figure on two legs within r pixels; carry: only one that can be carried off. */
+  const figure = (ctx, x, y, r, carry) => {
+    let best = null, bd = r;
+    for (const a of ctx.scene.actors) if (!a.hid && a.tags.indexOf('creature') >= 0 && a.tags.indexOf('person') >= 0 && (!carry || typeof a.carry === 'function')) { const d = Math.hypot(a.x - x, a.y - y); if (d < bd) { bd = d; best = a; } }
+    return best;
+  };
+  /** A place on a tile top with room for a portal over it: {x, y}, y where feet stand. Not on the tile "not" if there is another. */
+  function perch(st, ctx, not) {
+    const s = st.solid;
+    for (let i = 0; i < 12 && s.length; i++) {
+      const b = s[Math.floor(Math.random() * s.length)], rr = b.r || 0;
+      if ((b === not && i < 10) || (b.y < PR * 2 && i < 8)) continue;
+      return {x: U.clamp(b.x + rr + Math.random() * (b.w - 2 * rr), PR + 8, ctx.w - PR - 8), y: b.y};
+    }
+    return {x: ctx.w * (0.2 + Math.random() * 0.6), y: ctx.h - 6};
+  }
+  /** One frame of the portal: where the lights are called to (P.lure), how far open it is, who goes through. */
+  function portal(g, st, ctx, t, dt) {
+    let P = st.P;
+    if (!P) {
+      st.wait -= dt; if (st.wait > 0) return;
+      const who = figure(ctx, st.mx, st.my, 1e9, true), at = who || perch(st, ctx);
+      P = st.P = {step: 0, tm: 0, who: !!who, ax: at.x, ay: at.y, ah: who ? who.h || 40 : 0, x: 0, y: 0, k: 0, lure: 1, tx: at.x, ty: at.y, tr: 22, left: 0, out: null, went: false, side: 1, seen: 0};
+    }
+    P.tm += dt; if (P.went) P.left -= dt;
+    const top = y => Math.max(PR + 6, y - PR * 0.85), open = (x, y) => { P.x = P.tx = x; P.y = P.ty = y; P.tr = PR + 9; P.lure = 2; P.tm = 0; P.step++; };
+    if (P.who && P.step < 3) { const a = figure(ctx, P.ax, P.ay, 160, true); if (a) { P.ax = a.x; P.ay = a.y; P.ah = a.h || 40; } }  // it may walk on: keep over it
+    if (P.step < 2) { P.tx = P.ax; P.ty = P.who ? P.ay - P.ah - 16 : top(P.ay); }
+    if (P.step === 0) { if ((P.tm > 2 && st.far < 60) || P.tm > 10) { P.step = 1; P.tm = 0; } }  // gathering
+    else if (P.step === 1) {  // circling overhead; then the portal opens beside it, on the side with more room
+      if (P.tm > (P.who ? 2.5 : 0.8)) { P.side = P.ax < ctx.w / 2 ? 1 : -1; open(U.clamp(P.ax + (P.who ? P.side * (PR + 14) : 0), PR + 6, ctx.w - PR - 6), top(P.ay)); }
+    } else if (P.step === 2 || P.step === 6) {
+      P.k = Math.min(1, P.k + dt / 1.2);
+      if (P.k >= 1) {
+        const a = P.step === 2 && P.who ? figure(ctx, P.ax, P.ay, 200, true) : null;
+        if (a) { const secs = 20 + Math.random() * 20; P.out = perch(st, ctx, U.over(st.solid, a.x, a.y + 4, 6)); P.went = U.act(a, 'carry', {x: P.x, y: P.y, secs, out: P.out}) === true; P.left = secs; }
+        P.step++; P.tm = 0;
+      }
+    } else if (P.step === 3) { if (P.tm > (P.went ? 3.5 : 7)) P.step = 4; }  // open: time to be drawn in, or for the frond's look round
+    else if (P.step === 4 || P.step === 8) {
+      P.k = Math.max(0, P.k - dt / 0.9);
+      if (P.k <= 0) { if (P.step === 4 && P.went) { P.step = 5; P.lure = 0; } else { st.P = null; st.wait = ctx.opts.now ? 20 : 240 + Math.random() * 360; return; } }
+    } else if (P.step === 5) {  // away: the lights go home, then gather where it will come out
+      if (P.left < 8) { P.lure = 1; P.tx = P.out.x; P.ty = top(P.out.y); P.tr = 22; }
+      if (P.left <= 1.4) open(P.out.x, top(P.out.y));
+    } else if (P.step === 7) {  // open until it has stood there a moment
+      if (figure(ctx, P.out.x, P.out.y, 70)) P.seen += dt;
+      if (P.seen > 2.5 || P.tm > 14) P.step = 8;
+    }
+    if (P.k <= 0) return;
+    drawGate(g, st, P, t);
+    if (P.k > 0.3) { const q = st.gatePost; q.x = P.x; q.y = P.y; ctx.scene.next.push(q); }
+  }
   HP.fx.add('fairylights', {
     label: 'Fairy lights',
     live: true, fps: 12,
     options: [{key: 'count', label: 'How many', type: 'range', min: 6, max: 40, step: 1, default: 16},
-      {key: 'always', label: 'By day too', type: 'bool', default: true}],
+      {key: 'always', label: 'By day too', type: 'bool', default: true},
+      {key: 'portal', label: 'Portal', type: 'bool', default: true}],
     create(ctx) {
       const r = ctx.rand, lights = [];
       for (let i = 0; i < 40; i++) { const x = r() * ctx.w, y = r() * ctx.h; lights.push({x, y, hx: x, hy: y, vx: 0, vy: 0, nx: U.noise(ctx.seed + i * 5 + 1), ny: U.noise(ctx.seed + i * 5 + 2), ph: r() * TAU, sp: 0.6 + r() * 0.8, k: i % 4, s: 24 + r() * 14, fond: r() < 0.65, look: r(), b: null}); }
-      return {lights, dots: FAIRY.map(c => glow(48, [[0, 'rgba(255,255,255,1)'], [0.18, 'rgba(' + c + ',.9)'], [0.5, 'rgba(' + c + ',.28)'], [1, 'rgba(' + c + ',0)']]))};
+      const posts = []; for (let i = 0; i < 4; i++) posts.push({kind: 'fairylight', tags: GLOW, x: 0, y: 0, h: 0});
+      // wait: seconds to the next portal (minutes apart; at once when testing)
+      return {lights, posts, gatePost: {kind: 'portal', tags: ['wonder', 'threat'], x: 0, y: 0, h: PR * 2}, solid: solidOf(ctx), P: null, wait: ctx.opts.now ? 1.5 : 120 + Math.random() * 240, far: 0, mx: ctx.w / 2, my: ctx.h / 2, dots: FAIRY.map(c => glow(48, [[0, 'rgba(255,255,255,1)'], [0.18, 'rgba(' + c + ',.9)'], [0.5, 'rgba(' + c + ',.28)'], [1, 'rgba(' + c + ',0)']]))};
     },
     touch(st, x, y) {
       for (const f of st.lights) { const dx = f.x - x, dy = f.y - y, d = Math.hypot(dx, dy) || 1; if (d < 230) { const push = (230 - d) / 230 * 340; f.vx += dx / d * push; f.vy += dy / d * push; } }
@@ -497,6 +630,9 @@
     draw(g, st, ctx, t, dt) {
       if (!ctx.opts.always && !ctx.env.night) return;
       const n = Math.min(st.lights.length, Math.round(ctx.opts.count));
+      if (ctx.opts.portal) portal(g, st, ctx, t, dt); else st.P = null;
+      const P = st.P, lure = P ? P.lure : 0;
+      let far = 0, mx = 0, my = 0;
       g.globalCompositeOperation = 'lighter';
       for (let i = 0; i < n; i++) {
         const f = st.lights[i];
@@ -507,18 +643,25 @@
           if (f.fond) { let best = 420; for (const b of ctx.rects) if (b.on && !b.hidden) { const d = Math.hypot(b.x + b.w / 2 - f.x, b.y + b.h / 2 - f.y); if (d < best) { best = d; f.b = b; } } }
         }
         let tx = f.hx, ty = f.hy;
-        if (f.b && f.b.on) {  // circle just outside the button's edge, never over its label
+        if (lure) {  // called to the portal: a flat ring over a head, or round the rim
+          const a = f.ph + t * (lure === 2 ? 1.1 : 1.9) * f.sp;
+          tx = P.tx + Math.cos(a) * P.tr; ty = P.ty + Math.sin(a) * P.tr * (lure === 2 ? 1 : 0.4); far += Math.abs(tx - f.x) + Math.abs(ty - f.y);
+        } else if (f.b && f.b.on) {  // circle just outside the button's edge, never over its label
           const a = f.ph + t * 0.1 * f.sp, b = f.b;
           tx = b.x + b.w / 2 + U.clamp(Math.cos(a) * 1.5, -1, 1) * (b.w / 2 + 9); ty = b.y + b.h / 2 + U.clamp(Math.sin(a) * 1.5, -1, 1) * (b.h / 2 + 9);
         }
-        const ease = Math.min(1, dt * 1.2);
-        f.vx += (f.nx(t * 0.1 * f.sp) * 12 + U.clamp((tx - f.x) * 0.35, -22, 22) - f.vx) * ease;
-        f.vy += (f.ny(t * 0.1 * f.sp) * 12 + U.clamp((ty - f.y) * 0.35, -22, 22) - f.vy) * ease;
+        const ease = Math.min(1, dt * (lure ? 3 : 1.2)), pull = lure ? 2.5 : 0.35, lim = lure ? 170 : 22;  // they hurry to a portal
+        f.vx += (f.nx(t * 0.1 * f.sp) * 12 + U.clamp((tx - f.x) * pull, -lim, lim) - f.vx) * ease;
+        f.vy += (f.ny(t * 0.1 * f.sp) * 12 + U.clamp((ty - f.y) * pull, -lim, lim) - f.vy) * ease;
         f.x = U.clamp(f.x + f.vx * dt, -10, ctx.w + 10); f.y = U.clamp(f.y + f.vy * dt, -10, ctx.h + 10);
         const fl = f.fl > 0 ? (f.fl = Math.max(0, f.fl - dt * 1.3)) : 0;
         const pulse = Math.sin(t * 0.8 * f.sp + f.ph), s = f.s * (1 + 0.12 * pulse) * (1 + 0.7 * fl * Math.abs(Math.sin(t * 13 + f.ph)));
         g.globalAlpha = Math.min(1, 0.68 + 0.3 * pulse + fl); g.drawImage(st.dots[f.k], f.x - s / 2, f.y - s / 2, s, s);
+        mx += f.x; my += f.y;
       }
+      st.far = far / n; st.mx = mx / n; st.my = my / n;
+      // a few of the lights stand for all of them to the other overlays; gathered at a portal, one is enough
+      for (let i = 0, k = lure ? 1 : Math.min(4, n); i < k; i++) { const q = st.posts[i], f = st.lights[i]; q.x = f.x; q.y = f.y; q.h = f.s; ctx.scene.next.push(q); }
     },
   });
 })();

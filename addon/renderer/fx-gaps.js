@@ -93,7 +93,7 @@
     const p = w.p, c = w.c, N = w.net;
     while (!w.end && c[c.length - 1] - d < ahead) {
       const L = p[p.length - 1], P = p[p.length - 2], nd = N.nodes[L.n];
-      let es = (w.core ? nd.core : nd.e).filter(i => other(N.edges[i], L.n) !== L.back);
+      let es = (w.core ? nd.core : nd.e).filter(i => other(N.edges[i], L.n) !== L.back && (w.face || !N.edges[i].face));  // face: a short cut over a tile, only for walkers allowed on it
       if (!es.length) { if (w.die) { w.end = true; break; } es = nd.e; }
       let way = es[Math.floor(Math.random() * es.length)];
       if (w.want) { let bd = 1e9; for (const i of es) { const q = N.nodes[other(N.edges[i], L.n)], dd = Math.hypot(q.x - w.want.x, q.y - w.want.y); if (dd < bd) { bd = dd; way = i; } } }  // a walker with somewhere to be takes the way that leads nearer to it
@@ -260,7 +260,7 @@
         const len = 50 + r() * 16, kind = [0, 1, 2, 0, 1, 0, 2, 1, 0, 1][i], w = start(net, net.coreList[Math.floor(r() * net.coreList.length)], r() < 0.5, true), patches = [];
         if (kind === 0) for (let k = 0, m = 2 + Math.floor(r() * 2); k < m; k++) patches.push({k: 0.5 + (k + r() * 0.8) * 3.4 / m, off: (r() - 0.5) * 0.5, rx: 0.07 + r() * 0.06, ry: 0.45 + r() * 0.3});
         w.d = len + 20 + r() * 120; grow(w, w.d, 40);
-        fish.push({w, len, kind, patches, sp: 20 + r() * 14, ph: r() * TAU, nz: U.noise(ctx.seed + i * 13 + 5), burst: 0, x: 0, y: 0, a: 0});
+        fish.push({w, len, kind, patches, sp: 20 + r() * 14, ph: r() * TAU, nz: U.noise(ctx.seed + i * 13 + 5), burst: 0, shy: 0, x: 0, y: 0, a: 0, post: {kind: 'koi', tags: ['creature', 'animal'], x: 0, y: 0, h: 10, dir: 1}});
       }
       const sp = []; for (let k = 0; k < 7; k++) sp.push({x: 0, y: 0, a: 0, nx: 0, ny: 0});
       return {net, fish, rings: [], sp, q: new Array(26), food: null, now: 0};
@@ -281,7 +281,7 @@
     },
     draw(g, st, ctx, t, dt) {
       if (ctx.opts.light !== false && !ctx.env.night) HP.fx.rays(g, ctx.w, ctx.h, t);
-      const S = st.sp, q = st.q;
+      const S = st.sp, q = st.q, sc = ctx.scene, threats = sc && sc.all ? sc.all('threat') : null;
       st.now = t; if (st.food && t - st.food.t > 10) st.food = null;
       const food = st.food && t - st.food.t > 1 ? st.food : null;  // they need a moment to notice
       // rings on the water, under the fish
@@ -289,12 +289,19 @@
       for (let i = st.rings.length - 1; i >= 0; i--) {
         const r = st.rings[i]; r.t += dt; if (r.t > 1.6) { st.rings.splice(i, 1); continue; }
         if (r.t < 0) continue;  // a second ring, still to come
-        g.strokeStyle = 'rgba(232,244,255,' + (0.3 * (1 - r.t / 1.6)).toFixed(3) + ')';
+        g.strokeStyle = 'rgba(232,244,255,' + ((r.big ? 0.75 : 0.3) * (1 - r.t / 1.6)).toFixed(3) + ')';
         g.beginPath(); g.arc(r.x, r.y, 5 + r.t * 20, 0, TAU); g.moveTo(r.x + 2 + r.t * 11, r.y); g.arc(r.x, r.y, 2 + r.t * 11, 0, TAU); g.stroke();
       }
       for (const f of st.fish) {
         const w = f.w, L = f.len, K = KOI[f.kind];
         f.burst *= Math.exp(-dt * 1.5);  // calming down
+        // something to fear standing over the water (not over a tile's face): away with a splash, and no second fright for a moment
+        f.shy -= dt;
+        if (threats && f.shy <= 0) for (const th of threats) {
+          const ty = th.y - (th.h || 0) / 2, dx = th.x - f.x, dy = ty - f.y; if (dx * dx + dy * dy > 8100 || st.net.hit(th.x, ty)) continue;
+          f.shy = 3; f.burst = Math.max(f.burst, 170); if (Math.cos(f.a) * dx + Math.sin(f.a) * dy > 0) turnBack(w, w.d, 14);
+          st.rings.push({x: f.x, y: f.y, t: 0, big: true}, {x: f.x, y: f.y, t: -0.15, big: true}); break;
+        }
         let v = f.sp * (0.8 + 0.3 * f.nz(t * 0.25)) + f.burst;
         const fd = food ? Math.hypot(food.x - f.x, food.y - f.y) : 1e9;
         if (fd < 420) {
@@ -309,6 +316,7 @@
           o.nx = -Math.sin(o.a); o.ny = Math.cos(o.a); o.x += o.nx * sway; o.y += o.ny * sway;
         }
         const h = S[0], cx = Math.cos(h.a), cy = Math.sin(h.a); f.x = h.x; f.y = h.y; f.a = h.a;
+        if (sc) { const P = f.post; P.x = h.x; P.y = h.y; P.dir = cx < 0 ? -1 : 1; sc.next.push(P); }  // tell the other kinds where it is
         // outline: nose, down the left side, back up the right
         q[0] = h.x + cx * L * 0.035; q[1] = h.y + cy * L * 0.035;
         for (let k = 0; k < 6; k++) { const o = S[k], hw = KOI_W[k] * L; q[2 + 2 * k] = o.x + o.nx * hw; q[3 + 2 * k] = o.y + o.ny * hw; q[24 - 2 * k] = o.x - o.nx * hw; q[25 - 2 * k] = o.y - o.ny * hw; }
@@ -351,7 +359,15 @@
     options: [{key: 'count', label: 'How many', type: 'range', min: 6, max: 40, step: 1, default: 18}],
     create(ctx) {
       const net = network(ctx), r = ctx.rand, n = U.clamp(Math.round(ctx.opts.count), 6, 40), lines = [], ants = [], nl = Math.max(2, Math.round(n / 5));  // several short lines, so lines cross paths and meet
-      for (let i = 0; i < nl; i++) lines.push({w: start(net, net.coreList[Math.floor(r() * net.coreList.length)], r() < 0.5, true), ants: [], sp: 20 + r() * 9});
+      for (let i = 0; i < nl; i++) lines.push({w: start(net, net.coreList[Math.floor(r() * net.coreList.length)], r() < 0.5, true), ants: [], sp: 20 + r() * 9, cool: 0, post: {kind: 'ants', tags: ['creature'], x: -99, y: -99, h: 5, dir: 1}});
+      // short cuts: some tiles get a link from one corner to the opposite one, straight over the face. Every other line may take them.
+      const corner = (x, y) => { let best = -1, bd = 34; net.nodes.forEach((n, i) => { const d = Math.hypot(n.x - x, n.y - y); if (n.core.length && d < bd) { bd = d; best = i; } }); return best; };
+      const cuts = []; for (const b of net.solid) { const up = r() < 0.5; if (r() < 0.4) cuts.push([corner(b.x, up ? b.y + b.h : b.y), corner(b.x + b.w, up ? b.y : b.y + b.h)]); }
+      for (const c of cuts) {
+        if (c[0] < 0 || c[1] < 0 || c[0] === c[1]) continue;
+        const A = net.nodes[c[0]], B = net.nodes[c[1]]; net.edges.push({a: c[0], b: c[1], len: Math.hypot(A.x - B.x, A.y - B.y), v: false, wid: 8, core: true, face: true}); A.core.push(net.edges.length - 1); B.core.push(net.edges.length - 1);
+      }
+      lines.forEach((l, i) => { l.w.face = i % 2 === 1; });
       for (let i = 0; i < n; i++) { const a = {line: i % nl, d: 0, v: 0, pause: 0, cool: 0, hurry: 0, leg: r() * TAU, ph: r() * TAU, lane: 1.6 + r() * 1.2, x: -99, y: -99, a: 0, ox: 0, oy: 0}; lines[a.line].ants.push(a); ants.push(a); }
       for (const l of lines) { let d = 30 + l.ants.length * 26; grow(l.w, d, 60); for (const a of l.ants) { a.d = d; d -= 15 + r() * 16; } }
       return {net, lines, ants, o: {x: 0, y: 0, a: 0}};
@@ -364,7 +380,7 @@
       for (const a of st.ants) if (Math.hypot(a.x - x, a.y - y) < 140) { a.hurry = 1; a.pause = 0; }
     },
     draw(g, st, ctx, t, dt) {
-      const o = st.o, A = st.ants, k = 1.25;
+      const o = st.o, A = st.ants, k = 1.25, sc = ctx.scene;
       for (const l of st.lines) {
         grow(l.w, l.ants[0].d, 40);
         for (let i = 0; i < l.ants.length; i++) {
@@ -379,6 +395,13 @@
           at(l.w, a.d, 6, o); a.a = o.a; a.x = o.x - Math.sin(o.a) * a.lane + a.ox; a.y = o.y + Math.cos(o.a) * a.lane + a.oy;  // keeps to its own side, like traffic
         }
         const cut = trim(l.w, l.ants[l.ants.length - 1].d, 20); if (cut) for (const a of l.ants) a.d -= cut;
+        // the head of the line is what the other kinds see. Passing something to eat, now and then one ant helps itself and carries a crumb off.
+        const hd = l.ants[0], P = l.post; l.cool -= dt;
+        if (sc) {
+          P.x = hd.x; P.y = hd.y; P.dir = Math.cos(hd.a) < 0 ? -1 : 1; sc.next.push(P);
+          const f = l.cool <= 0 && sc.near ? sc.near('food', hd.x, hd.y, 40) : null;
+          if (f && typeof f.take === 'function') { l.cool = 6; if (Math.random() < 0.4 && U.act(f, 'take', {x: hd.x, y: hd.y})) { l.ants[Math.floor(Math.random() * l.ants.length)].crumb = 45; l.cool = 30; } }
+        }
       }
       // two from different lines meeting head on stop and touch feelers
       for (let i = 0; i < A.length; i++) for (let j = i + 1; j < A.length; j++) {
@@ -406,6 +429,10 @@
       }
       g.strokeStyle = 'rgba(255,236,205,.3)'; g.lineWidth = 1.5; g.stroke();  // a pale rim so they show on a dark backdrop
       g.fillStyle = '#2a1710'; g.fill();
+      // crumbs, held out in front; after a while the ant has got it home
+      g.beginPath();
+      for (const a of A) if (a.crumb > 0) { a.crumb -= dt; const x = a.x + Math.cos(a.a) * 8.6, y = a.y + Math.sin(a.a) * 8.6; g.moveTo(x + 2.1, y); g.arc(x, y, 2.1, 0, TAU); }
+      g.fillStyle = '#f6e7bd'; g.fill(); g.strokeStyle = 'rgba(90,60,20,.6)'; g.lineWidth = 0.7; g.stroke();
     },
   });
 
@@ -417,6 +444,8 @@
   // and may only run on when everything up to the next place it can stand is free; otherwise it brakes, stands at the
   // signal and pulls away when the way clears. Two trains never hold the same thing, so they can never touch.
   const WAGON = ['#e2483d', '#f0b429', '#3b82d6', '#4caf6a'], BOILER = ['#2f9e5e', '#3b6fd6', '#8a4fc9', '#d9822b'];
+  const STEAMER = ['#1d6b45', '#27478f', '#7a2630', '#3a3d47'], XMAS = ['#c5282f', '#1f8a4c'];  // a steam engine's paint; the Christmas train's cars
+  let yard = null;  // the railway now running: when a new one is built, this one's riders are put down first
   const STOP = 22, CLEAR = 30;  // a train stands this far short of the end of its track; a section is given back once the tail is this far past it
   /** One closed circuit through the network, chosen from the seed: its corners and junctions in order, as node numbers.
    *  Several are tried; the winner runs partly round the border and partly through the gaps, with a handful of bends. */
@@ -577,9 +606,25 @@
   // Another kind (the goose) can grab a train, haul it away and dump it. T.off says where the train is: 0 on the track,
   // 1 being hauled, 2 lying where it was dropped, 3 on its way back. Off the track it has no part in the sections at all.
   function sparks(st, x, y, n) { for (; n > 0 && st.puffs.length < 70; n--) st.puffs.push({x, y, t: 0, hot: true, life: 0.3 + Math.random() * 0.3, r: 0, vx: (Math.random() - 0.5) * 90, vy: (Math.random() - 0.8) * 90}); }
+  /** Everybody off, where the train is: it has left the rails, or the railway is being built anew. */
+  function setDown(T) {
+    const e = T.cars[0]; for (const rd of T.riders) U.act(rd, 'alight', e.x, e.y);
+    T.riders = []; T.dwell = 0; if (T.at) { if (T.at.train === T.post) T.at.train = null; T.at = null; }
+  }
+  /** A station, seen from the side: a platform along the tile's top edge, a canopy on two posts and a sign. All of it
+   *  stands above the tile, so the tile's own text is left alone. */
+  function depot(g, S) {
+    const y = S.y, w = S.x2 - S.x1, c1 = S.x1 + 17, c2 = S.x2 - 6;
+    g.fillStyle = '#565a66'; g.fillRect(c1, y - 8.6, 1.3, 6.6); g.fillRect(c2, y - 8.6, 1.3, 6.6); g.fillRect(S.x1 + 5, y - 6.4, 1.1, 4.4);  // posts
+    g.fillStyle = '#8c3f34'; g.beginPath(); g.moveTo(c1 - 4.5, y - 8.2); g.lineTo(c1 - 1.5, y - 11); g.lineTo(c2 + 2.8, y - 11); g.lineTo(c2 + 5.8, y - 8.2); g.closePath(); g.fill();  // canopy
+    g.fillStyle = 'rgba(255,240,215,.8)'; g.fillRect(c1 - 4.5, y - 8.5, c2 - c1 + 10.3, 0.9);  // its pale edge
+    g.fillStyle = '#f2efe4'; g.fillRect(S.x1 + 1, y - 10.4, 9.2, 4.2); g.fillStyle = '#27407e'; g.fillRect(S.x1 + 2.2, y - 8.9, 6.8, 1.2);  // the sign: a board with a bar where a name would be
+    g.fillStyle = '#b5b0a4'; g.fillRect(S.x1, y - 2.6, w, 3.4); g.fillStyle = '#f0d264'; g.fillRect(S.x1, y - 2.6, w, 0.8); g.fillStyle = 'rgba(20,20,30,.5)'; g.fillRect(S.x1, y + 0.2, w, 0.6);  // the platform, a yellow line along its edge
+  }
   /** Grabbed: off the rails with a jolt, and everything it held is given back at once so the others carry on. */
   function derail(st, T) {
     if (T.off) return false;
+    setDown(T);
     for (let i = 0; i < T.held.length; i += 2) st.own[T.held[i]] = -1;
     for (let i = 0; i < T.sig.length; i += 2) st.go[T.sig[i]] = -1;
     T.held = []; T.sig = []; T.off = 1; T.v = 0; T.idle = 0; T.toot = 5;  // toot: a burst of steam
@@ -634,14 +679,19 @@
     options: [{key: 'trains', label: 'Trains', type: 'range', min: 1, max: 4, step: 1, default: 2},
       {key: 'cars', label: 'Cars', type: 'range', min: 1, max: 8, step: 1, default: 4},
       {key: 'speed', label: 'Speed', type: 'range', min: 0.4, max: 2, step: 0.1, default: 1},
-      {key: 'track', label: 'Track', type: 'select', choices: [['network', 'Network'], ['loop', 'Loop']], default: 'network'}],
+      {key: 'track', label: 'Track', type: 'select', choices: [['network', 'Network'], ['loop', 'Loop']], default: 'network'},
+      {key: 'engine', label: 'Engine', type: 'select', choices: [['diesel', 'Diesel'], ['steam', 'Steam']], default: 'diesel'},
+      {key: 'livery', label: 'Livery', type: 'select', choices: [['standard', 'Standard'], ['xmas', 'Christmas']], default: 'standard'}],
     create(ctx) {
       const net = network(ctx), r = ctx.rand, N = net.nodes, still = sheet(ctx), g = still.getContext('2d'), R = 12, o = 2.6, q = {x: 0, y: 0, a: 0};
       const path = circuit(net, ctx); let L = 0; path.forEach((n, i) => { const m = N[path[(i + 1) % path.length]]; L += Math.hypot(N[n].x - m.x, N[n].y - m.y); });
       // no train longer than half the circuit, so a plain loop always has two places for it to stand
-      const nc = Math.min(U.clamp(Math.round(ctx.opts.cars), 1, 8), Math.max(1, Math.floor((L / 2 - 84) / 20))), len = 24 + 20 * nc;
+      const steam = ctx.opts.engine === 'steam', xmas = ctx.opts.livery === 'xmas';  // a steam engine's tender is one more car
+      const nc = Math.min(U.clamp(Math.round(ctx.opts.cars), 1, 8) + (steam ? 1 : 0), Math.max(1, Math.floor((L / 2 - 84) / 20))), len = 24 + 20 * nc;
       const rw = (ctx.opts.track !== 'loop' && railway(net, ctx, path, len, false)) || railway(net, ctx, path, len, true);
-      const st = {still, N, R, trains: [], sig: [], pts: {}, puffs: [], tick: 0, o1: {x: 0, y: 0, a: 0}, o2: {x: 0, y: 0, a: 0}};
+      const st = {still, N, R, steam, xmas, trains: [], stops: [], sig: [], pts: {}, puffs: [], tick: 0, o1: {x: 0, y: 0, a: 0}, o2: {x: 0, y: 0, a: 0}};
+      if (yard) for (const T of yard.trains) setDown(T);
+      yard = st;
       if (!rw) return st;  // a screen too small for any train
       const segs = rw.segs, lamp = rgb => dot(20, [[0, 'rgba(' + rgb + ',1)'], [0.3, 'rgba(' + rgb + ',.55)'], [1, 'rgba(' + rgb + ',0)']]);
       // sleepers first, rails on top, both along the very curve the cars follow; a line's rails stop short of its
@@ -676,16 +726,20 @@
       const nt = U.clamp(Math.round(ctx.opts.trains), 1, rw.M - 1);
       for (let i = 0; i < nt; i++) {
         const pl = places[Math.floor(i * places.length / nt)], X = segs[pl[0]], bl = X.len / X.k, end = (pl[1] + 1) * bl, first = Math.floor(r() * 4), cars = [{len: 24, back: 12}];  // back: how far the car's middle is behind the engine's nose
-        for (let j = 0; j < nc; j++) cars.push({len: 17, back: 24 + 3 + 8.5 + j * 20, col: WAGON[(first + j) % 4]});
+        for (let j = 0; j < nc; j++) cars.push({len: 17, back: 24 + 3 + 8.5 + j * 20, tender: steam && !j, col: xmas ? XMAS[j % 2] : WAGON[(first + j) % 4]});
         for (const car of cars) { car.x = car.y = car.a = 0; }
         // each train has its own pace, so a quick one catches a slow one up and has to follow it from signal to signal
         // off: 0 while it is on the track (see below); wait: seconds it has stood at a signal
         // w: the train's own route, grown ahead and cut off behind; d: where its nose is along it; end: where the section it may run to ends
         // held: what it holds, as pairs (number, where along the route that ends); sig: the signals it has been cleared past, the same way
         rw.own[X.s0 + pl[1]] = i;
-        const T = {off: 0, wait: 0, w: {p: X.p.slice(), c: X.c.slice()}, d: end - STOP - r() * (bl - len - 60), v: 0, top: 55 * ([1.18, 0.8, 1.02, 0.9][i % 4] + (r() - 0.5) * 0.08), seg: pl[0], j: pl[1], end, held: [X.s0 + pl[1], end], sig: [], len, cars, em: r() * 0.17, toot: 0, boil: BOILER[i % 4]};
+        const T = {off: 0, wait: 0, w: {p: X.p.slice(), c: X.c.slice()}, d: end - STOP - r() * (bl - len - 60), v: 0, top: 55 * ([1.18, 0.8, 1.02, 0.9][i % 4] + (r() - 0.5) * 0.08), seg: pl[0], j: pl[1], end, held: [X.s0 + pl[1], end], sig: [], len, cars, em: r() * 0.17, toot: 0, boil: xmas ? XMAS[1] : steam ? STEAMER[i % 4] : BOILER[i % 4]};
+        // riders: who is aboard; at: the station it stands at, dwell: for how much longer; left, gone: the station it last left and how far it has run since; rod: the coupling rods' turn
+        Object.assign(T, {riders: [], at: null, dwell: 0, left: null, gone: 0, rod: 0});
         // what the other kinds see of it (ctx.scene), and what they may do to it
-        T.post = {kind: 'train', x: 0, y: 0, h: 14, dir: 0, grab: () => derail(st, T), drag: (x, y) => haul(st, T, x, y), drop: () => dump(st, T)};
+        T.post = {kind: 'train', tags: ['vehicle'], x: 0, y: 0, h: 14, dir: 0, stopped: false, vx: 0, grab: () => derail(st, T), drag: (x, y) => haul(st, T, x, y), drop: () => dump(st, T),
+          // standing at a station it takes riders, two to a car; they get off at the next station it stops at
+          board: rd => !!(T.at && !T.off && rd && T.riders.length < 2 * (cars.length - 1) && T.riders.indexOf(rd) < 0 && T.riders.push(rd))};
         st.trains.push(T);
       }
       // Headlight. The cone is painted once, lamp at (4, 64) pointing right, fading with distance and towards its sides.
@@ -698,8 +752,24 @@
       // seven wedges, each narrower, so the sides fade out softly
       for (let h = 0.34; h > 0.09; h -= 0.04) { cg.beginPath(); cg.moveTo(4, 64); cg.arc(4, 64, 168, -h, h); cg.closePath(); cg.fill(); }
       st.cone = cone; st.lit = lit; st.tiles = net.solid;
+      // a cloud of smoke: dark underneath, pale where the light falls on it from above, so it shows on any backdrop
+      const smoke = dot(32, [[0, 'rgba(62,64,72,.92)'], [0.5, 'rgba(78,80,88,.6)'], [1, 'rgba(92,94,102,0)']]);
+      smoke.getContext('2d').drawImage(dot(32, [[0, 'rgba(244,244,248,.95)'], [0.5, 'rgba(230,232,238,.5)'], [1, 'rgba(222,224,232,0)']]), 2, 0, 23, 23);
+      // stations: about one in four of the tiles with track along their top edge, two at least; first where a train may stand
+      // anyway, and not two close together. The mark sits on the point that ends that stretch of track: back is how far before it.
+      const cand = [];
+      for (const X of segs) for (let i = 1; i < X.p.length; i++) {
+        const A = X.p[i - 1], B = X.p[i]; if (Math.abs(A.y - B.y) > 1) continue;
+        for (const b of net.solid) { const x1 = Math.max(Math.min(A.x, B.x) + R, b.x + 8), x2 = Math.min(Math.max(A.x, B.x) - R, b.x + b.w - 8); if (b.y > A.y && b.y - A.y < 26 && x2 - x1 >= 44 && !cand.some(c => c.b === b || c.B === B)) cand.push({b, B, x: (x1 + x2) / 2, w: Math.min(x2 - x1, 64), o: r() + (X.k ? 0 : 2)}); }
+      }
+      cand.sort((p, q) => p.o - q.o);
+      for (let pass = 0, want = Math.min(cand.length, Math.max(2, Math.round(cand.length / 4))); pass < 2; pass++) for (const c of cand) {
+        if (st.stops.length >= want || c.B.stn || (!pass && st.stops.some(S => Math.hypot(S.x - c.x, S.y - c.b.y) < 200))) continue;
+        const S = {kind: 'station', tags: ['prop', 'station'], x: c.x, y: c.b.y, x1: c.x - c.w / 2, x2: c.x + c.w / 2, h: 14, train: null};
+        c.B.stn = {S, back: Math.abs(c.B.x - c.x)}; st.stops.push(S);
+      }
       return Object.assign(st, {segs, S: rw.S, at0: rw.at0, own: rw.own, go: rw.go, red: lamp('255,72,56'), green: lamp('80,235,120'), spark: lamp('255,214,110'),
-        steam: dot(32, [[0, 'rgba(255,255,255,.9)'], [0.5, 'rgba(245,247,252,.45)'], [1, 'rgba(240,244,250,0)']])});
+        steam: dot(32, [[0, 'rgba(255,255,255,.9)'], [0.5, 'rgba(245,247,252,.45)'], [1, 'rgba(240,244,250,0)']]), smoke});
     },
     press(st, rect) {  // the engine nearest the pressed tile whistles (of those on the track)
       let best = null, bd = 1e9;
@@ -726,8 +796,18 @@
         let room = T.end - STOP - T.d;
         if (room < T.v * T.v / 68 + 30 && ahead(st, T, ti)) room = T.end - STOP - T.d;
         T.v += U.clamp(T.top * ctx.opts.speed * (0.45 + 0.55 * U.span(f, 0, 1)) - T.v, -70 * dt, 22 * dt);
-        T.v = Math.min(T.v, Math.sqrt(Math.max(0, 68 * room)));  // never faster than it can stop in the room it has
-        T.d += Math.min(T.v * dt, Math.max(0, room));
+        // a station ahead: it stops with its middle at the middle of the platform, stands four to six seconds and pulls out.
+        // Whoever is aboard gets off there. (The track it holds stays its own all the while, so the signals need not know.)
+        let halt = room;
+        if (T.at) { halt = 0; if ((T.dwell -= dt) <= 0) { T.at.train = null; T.left = T.at; T.at = null; T.gone = 0; } }
+        else for (let k = 1; k < p.length; k++) {
+          const s = p[k].stn; if (!s || s.S.train || (s.S === T.left && T.gone < 60)) continue;
+          const d = w.c[k] - s.back + T.len / 2 - T.d; if (d < -2 || d >= halt) continue;
+          halt = Math.max(0, d);
+          if (d < 0.5) { const S = s.S; T.at = S; S.train = T.post; T.dwell = 4 + Math.random() * 2; for (const rd of T.riders) U.act(rd, 'alight', U.lerp(S.x1, S.x2, 0.15 + Math.random() * 0.7), S.y); T.riders = []; }
+        }
+        T.v = Math.min(T.v, Math.sqrt(Math.max(0, 68 * halt)));  // never faster than it can stop in the room it has
+        const step = Math.min(T.v * dt, Math.max(0, halt)); T.d += step; T.gone += step; T.rod += step * 0.45;
         T.wait = T.v < 0.5 && room < 1 ? T.wait + dt : 0;  // how long it has stood at its signal
         while (T.held.length > 2 && T.d - T.len - CLEAR > T.held[1]) { own[T.held[0]] = -1; T.held.splice(0, 2); }  // the tail is well clear of a section or junction: give it back
         while (T.sig.length && T.d > T.sig[1]) { st.go[T.sig[0]] = -1; T.sig.splice(0, 2); }
@@ -784,8 +864,29 @@
           }
           if (c.flip) g.scale(1, 0.62);  // on its side: seen edge on
           if (i) {
-            g.fillStyle = c.col; g.strokeStyle = 'rgba(20,20,30,.75)'; g.lineWidth = 0.9; rbox(g, -8.5, -4.3, 17, 8.6, 1.6); g.fill(); g.stroke();
-            g.fillStyle = 'rgba(0,0,0,.28)'; g.fillRect(-6.3, -2.5, 12.6, 5); g.fillStyle = 'rgba(255,255,255,.3)'; g.fillRect(-6.3, -2.5, 12.6, 1.1);
+            g.fillStyle = c.tender ? st.xmas ? XMAS[0] : T.boil : c.col; g.strokeStyle = 'rgba(20,20,30,.75)'; g.lineWidth = 0.9; rbox(g, -8.5, -4.3, 17, 8.6, 1.6); g.fill(); g.stroke();  // a tender wears the engine's paint
+            if (c.tender) { g.fillStyle = '#0f1013'; rbox(g, -4.5, -3, 11.5, 6, 1.6); g.fill(); g.fillStyle = 'rgba(255,255,255,.2)'; g.fillRect(-2, -1.6, 1.2, 1.2); g.fillRect(2.4, 0.6, 1.2, 1.2); g.fillRect(4.6, -2, 1.1, 1.1); g.fillStyle = '#d8b24a'; g.beginPath(); g.arc(-6.3, 0, 1.1, 0, TAU); g.fill(); }  // coal, and the water filler behind it
+            else { g.fillStyle = 'rgba(0,0,0,.28)'; g.fillRect(-6.3, -2.5, 12.6, 5); g.fillStyle = 'rgba(255,255,255,.3)'; g.fillRect(-6.3, -2.5, 12.6, 1.1); }
+            if (st.xmas && !c.tender) {  // lights along both edges of the roof, every other one lit in turn
+              const on = (Math.floor(t * 2) + i) % 2;
+              for (let q = 0; q < 2; q++) { g.fillStyle = q === on ? '#fff0a8' : '#7a5a1c'; for (let x = -6.8 + q * 4.2; x < 7; x += 8.4) { g.fillRect(x, -4.9, 1.4, 1.4); g.fillRect(x, 3.5, 1.4, 1.4); } }
+            }
+            const nw = T.cars.length - 1; for (let n = i - 1; n < T.riders.length; n += nw) { g.fillStyle = '#f1d2b0'; g.beginPath(); g.arc(n < nw ? -3.4 : 3.4, 0, 1.7, 0, TAU); g.fill(); g.strokeStyle = 'rgba(30,20,10,.7)'; g.lineWidth = 0.7; g.stroke(); }  // riders: heads, from above
+          } else if (st.steam) {
+            g.fillStyle = '#17181d'; for (let q = 0; q < 3; q++) g.fillRect(-3.4 + q * 4.6, -5.5, 3.4, 11);                 // driving wheels, showing either side
+            const r1 = Math.cos(T.rod) * 1.2, r2 = Math.sin(T.rod) * 1.2;                                                  // coupling rods, the two sides a quarter turn apart
+            g.strokeStyle = '#9da1ad'; g.lineWidth = 0.8; g.beginPath(); g.moveTo(-2.2 + r1, -4.9); g.lineTo(8.2 + r1, -4.9); g.moveTo(-2.2 + r2, 4.9); g.lineTo(8.2 + r2, 4.9); g.stroke();
+            g.fillStyle = '#20232a'; rbox(g, -12, -4.4, 24, 8.8, 1.4); g.fill();                   // running plate
+            g.fillStyle = T.boil; rbox(g, -3, -3.3, 12, 6.6, 2.4); g.fill();                        // boiler
+            g.fillStyle = 'rgba(255,255,255,.24)'; g.fillRect(-2.6, -1.3, 11, 1.1);
+            g.fillStyle = '#d8b24a'; g.fillRect(0.1, -3.3, 0.9, 6.6); g.fillRect(5, -3.3, 0.9, 6.6); // brass bands
+            g.fillStyle = '#121317'; rbox(g, 7.6, -3.3, 3.6, 6.6, 1.3); g.fill();                   // smokebox
+            g.fillStyle = '#e8b93c'; g.beginPath(); g.arc(3, 0, 1.5, 0, TAU); g.fill();             // dome
+            g.fillStyle = '#07080a'; g.beginPath(); g.arc(9.2, 0, 2, 0, TAU); g.fill();             // funnel
+            g.strokeStyle = '#8b8f99'; g.lineWidth = 0.9; g.stroke();
+            g.fillStyle = st.xmas ? XMAS[0] : T.boil; rbox(g, -11.6, -4.8, 8.2, 9.6, 1.2); g.fill();  // cab roof
+            g.strokeStyle = 'rgba(15,15,20,.7)'; g.lineWidth = 0.8; g.stroke(); g.fillStyle = 'rgba(0,0,0,.32)'; g.fillRect(-10.4, -3.4, 5.8, 6.8);
+            g.fillStyle = '#c8372d'; g.fillRect(11.2, -4.2, 1.4, 8.4);                             // buffer beam
           } else {
             g.fillStyle = '#20232a'; rbox(g, -12, -4.5, 24, 9, 1.8); g.fill();                    // frame
             g.fillStyle = T.boil; rbox(g, -3, -3.5, 14.2, 7, 3); g.fill();                         // boiler
@@ -797,6 +898,7 @@
             g.strokeStyle = '#8b8f99'; g.lineWidth = 0.9; g.stroke();
             g.fillStyle = '#c8372d'; g.fillRect(11.2, -4.2, 1.4, 8.4);                             // buffer beam
           }
+          if (!i && st.xmas) { g.strokeStyle = '#2fa85c'; g.lineWidth = 1.5; g.beginPath(); g.arc(11.4, 0, 2.3, 0, TAU); g.stroke(); g.fillStyle = '#e8312f'; g.fillRect(8.4, -0.8, 1.6, 1.6); }  // a wreath on the front, with its bow
           if (c.flip) { g.fillStyle = '#17181d'; g.beginPath(); g.arc(-5, 5.4, 2, 0, TAU); g.moveTo(7, 5.4); g.arc(5, 5.4, 2, 0, TAU); g.fill(); }  // and its wheels
           g.restore();
         }
@@ -806,17 +908,26 @@
           g.globalCompositeOperation = 'lighter'; g.globalAlpha = 0.45 + 0.55 * k; g.drawImage(st.steam, hd.x + Math.cos(hd.a) * 11.5 - 5, hd.y + Math.sin(hd.a) * 11.5 - 5, 10, 10);
           if (k > 0.6) { g.globalAlpha = 0.8; g.drawImage(st.red, tl.x - Math.cos(tl.a) * 8.5 - 5, tl.y - Math.sin(tl.a) * 8.5 - 5, 10, 10); }
           g.globalAlpha = 1; g.globalCompositeOperation = 'source-over';
-          if (ctx.scene) { const P = T.post; P.x = hd.x; P.y = hd.y; P.dir = hd.a; ctx.scene.next.push(P); }  // tell the other kinds where it is
+          if (ctx.scene) { const P = T.post; P.x = hd.x; P.y = hd.y; P.dir = hd.a; P.stopped = !!T.at; P.vx = T.v * Math.cos(hd.a); ctx.scene.next.push(P); }  // tell the other kinds where it is
         }
         // steam: puffs are left where the chimney was and swell and thin out as the train moves on; a whistle is three big ones
         const e = T.cars[0]; T.em += dt * (T.off > 1 ? 0.1 : 0.5 + T.v / 55);  // lying there: only a wisp
+        if (st.steam) {
+          // smoke goes by the wheels, not the clock: a cloud from the funnel every so far travelled, so it chuffs quicker the faster it runs;
+          // standing, only a wisp now and then. The clouds swell, drift off on the wind and fade.
+          T.chuff = (T.chuff || 0) + (T.off ? dt * 0.12 : T.v * dt / 13 + dt * 0.3);
+          if ((T.chuff >= 1 || T.toot > 0) && st.puffs.length < 16 * st.trains.length) { T.chuff = 0; const big = T.toot-- > 0 ? 1.8 : 1; st.puffs.push({x: e.x + Math.cos(e.a) * 9.2, y: e.y + Math.sin(e.a) * 9.2, t: 0, smoke: true, life: 3.2, r: (4.6 + Math.random() * 2.2) * big, vx: 8 + (Math.random() - 0.5) * 7, vy: -5 - Math.random() * 4}); }
+        } else
         if ((T.em > 0.17 || T.toot > 0) && st.puffs.length < 8 * st.trains.length) { T.em = 0; const big = T.toot-- > 0 ? 2.2 : 1; st.puffs.push({x: e.x + Math.cos(e.a) * 7.6, y: e.y + Math.sin(e.a) * 7.6, t: 0, r: (3 + Math.random() * 2) * big, vx: (Math.random() - 0.5) * 8, vy: -5 - Math.random() * 5}); }
         if (T.toot < 0) T.toot = 0;
       }
+      // stations stand in front of the trains, and say where they are
+      for (const S of st.stops) { depot(g, S); if (ctx.scene) ctx.scene.next.push(S); }
       for (let i = st.puffs.length - 1; i >= 0; i--) {
         const p = st.puffs[i]; p.t += dt; if (p.t > (p.life || 1.8)) { st.puffs.splice(i, 1); continue; }
         p.x += p.vx * dt; p.y += p.vy * dt;
         if (p.hot) { g.globalAlpha = 1 - p.t / p.life; g.drawImage(st.spark, p.x - 3, p.y - 3, 6, 6); continue; }  // a spark
+        if (p.smoke) { const s = (p.r + p.t * 7) * 2; g.globalAlpha = 0.9 * Math.pow(1 - p.t / p.life, 1.1); g.drawImage(st.smoke, p.x - s / 2, p.y - s / 2, s, s); continue; }
         const s = (p.r + p.t * 8) * 2; g.globalAlpha = 0.6 * Math.pow(1 - p.t / 1.8, 1.3); g.drawImage(st.steam, p.x - s / 2, p.y - s / 2, s, s);
       }
     },
@@ -1103,7 +1214,9 @@
         else { g.strokeStyle = 'rgba(205,220,240,.55)'; g.stroke(); g.strokeStyle = 'rgba(255,255,255,.45)'; g.beginPath(); g.arc(b.x, b.y, 2.7, Math.PI * 1.05, Math.PI * 1.5); g.stroke(); }  // dark glass with a glint
       }
       const glows = {}; for (const c of (warm ? [WARM] : BULBS)) glows[c] = dot(64, [[0, 'rgba(' + c + ',.75)'], [0.35, 'rgba(' + c + ',.26)'], [1, 'rgba(' + c + ',0)']]);
-      return {still, bulbs, glows, now: 0};
+      // what the other kinds see: not every bulb, half a dozen spread along the string
+      const posts = []; for (let n = Math.max(1, Math.ceil(bulbs.length / 6)), i = n >> 1; i < bulbs.length; i += n) posts.push({kind: 'lightstring', tags: ['light'], x: bulbs[i].x, y: bulbs[i].y, h: 10, b: bulbs[i]});
+      return {still, bulbs, glows, posts, now: 0};
     },
     // The bulbs near a finger flare up and fade; a finger run along the string lights them one after another.
     // (They do not swing: the wire and glass are painted once, and at six frames a second a swing would only jerk.)
@@ -1117,6 +1230,7 @@
       st.now = t;
       g.drawImage(st.still, 0, 0, ctx.w, ctx.h);
       const lit = b => b.base === 2 || (b.rect && b.rect.on), out = b => t - b.pop < 4;
+      if (ctx.scene) for (const P of st.posts) if (!out(P.b) && (P.b.base || lit(P.b))) ctx.scene.next.push(P);  // the ones that glow just now
       g.globalCompositeOperation = 'lighter';
       for (const b of st.bulbs) {
         if (out(b)) { if (t - b.pop < 0.3) { g.globalAlpha = 1 - (t - b.pop) / 0.3; g.drawImage(st.glows[b.col], b.x - 42, b.y - 42, 84, 84); } continue; }

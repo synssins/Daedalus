@@ -2,6 +2,7 @@
 // Two small overlays that also serve as the pattern for the others: one drawn rarely (frost), one animated (fireflies).
 (() => {
   const U = HP.fx.util, THAW = 24000;  // a melted patch has frosted over again after this long (ms)
+  const FLY_TAGS = ['creature', 'light', 'wonder'];
 
   /** How hard it is freezing, 0 to 1: five degrees below freezing is full frost; daylight halves it. */
   function frostAmount(ctx) {
@@ -103,13 +104,13 @@
       {key: 'always', label: 'By day too', type: 'bool', default: false}],
     create(ctx) {
       const r = ctx.rand, flies = [];
-      for (let i = 0; i < 40; i++) flies.push({x: r() * ctx.w, y: r() * ctx.h, nx: U.noise(ctx.seed + i * 7 + 1), ny: U.noise(ctx.seed + i * 7 + 2), ph: r() * 6.28, sp: 0.6 + r() * 0.8, hue: 55 + r() * 30});
+      for (let i = 0; i < 40; i++) flies.push({x: r() * ctx.w, y: r() * ctx.h, nx: U.noise(ctx.seed + i * 7 + 1), ny: U.noise(ctx.seed + i * 7 + 2), ph: r() * 6.28, sp: 0.6 + r() * 0.8, hue: 55 + r() * 30, gone: 0, lit: 0, post: null});
       // one soft dot, drawn once and stamped for every fly: far cheaper than a gradient per fly per frame
       const dot = document.createElement('canvas'); dot.width = dot.height = 48;
       const d = dot.getContext('2d'), gr = d.createRadialGradient(24, 24, 0, 24, 24, 24);
       gr.addColorStop(0, 'rgba(255,255,210,1)'); gr.addColorStop(0.25, 'rgba(230,255,120,.75)'); gr.addColorStop(1, 'rgba(160,255,60,0)');
       d.fillStyle = gr; d.fillRect(0, 0, 48, 48);
-      return {flies, dot, shy: 0, sx: 0, sy: 0, lure: 0, gust: 0};
+      return {flies, dot, shy: 0, sx: 0, sy: 0, lure: 0, gust: 0, lights: [], fears: [], top: []};
     },
     touch(st, x, y) { st.shy = 1; st.sx = x; st.sy = y; st.lure = 7; },  // a finger scares the nearby ones away for a moment
     // ...and once the fright is over they come back to where it was and hang about it, as round a lantern. There is
@@ -122,9 +123,23 @@
       const warm = e.temp == null || e.freezing == null ? 1 : U.clamp((e.temp - e.freezing) / 30, 0.25, 1);
       const n = Math.round(ctx.opts.count * warm);
       st.shy = Math.max(0, st.shy - dt * 0.8); st.lure = Math.max(0, st.lure - dt); st.gust = Math.abs(st.gust) < 0.03 ? 0 : st.gust * Math.exp(-dt * 2.2);
+      // what the rest of the dashboard gives them to go by (ctx.scene): lights to drift toward, which are other kinds'
+      // lamps and the tiles that are on, and threats to keep clear of. Something that glows and is a threat is a threat.
+      const sc = ctx.scene, lights = st.lights, fears = st.fears, top = st.top, now = Date.now(); lights.length = fears.length = top.length = 0;
+      if (sc && sc.actors) for (const a of sc.actors) {
+        if (a.hid || !a.tags || a.kind === 'firefly') continue;
+        if (a.tags.indexOf('threat') >= 0) fears.push(a.x, a.y); else if (a.tags.indexOf('light') >= 0) lights.push(a.x, a.y, 18);
+      }
+      for (const b of ctx.rects) if (b.on && !b.hidden) lights.push(b.x + b.w / 2, b.y + b.h / 2, Math.min(b.w, b.h) * 0.45);
       g.globalCompositeOperation = 'lighter';
       for (let i = 0; i < n && i < st.flies.length; i++) {
         const f = st.flies[i];
+        if (f.gone > now) continue;  // caught: back in a minute
+        // gently toward the nearest light, each stopping at its own distance from it; smartly away from a threat
+        let bd = 300, bj = -1;
+        for (let j = 0; j < lights.length; j += 3) { const d = Math.hypot(lights[j] - f.x, lights[j + 1] - f.y); if (d < bd) { bd = d; bj = j; } }
+        if (bj >= 0 && bd > lights[bj + 2] + (i % 5) * 7) { f.x += (lights[bj] - f.x) / bd * 9 * dt; f.y += (lights[bj + 1] - f.y) / bd * 9 * dt; }
+        for (let j = 0; j < fears.length; j += 2) { const dx = f.x - fears[j], dy = f.y - fears[j + 1], d = Math.hypot(dx, dy) || 1; if (d < 90) { f.x += dx / d * 70 * dt; f.y += dy / d * 70 * dt; } }
         f.x += f.nx(t * 0.12 * f.sp) * 26 * dt; f.y += f.ny(t * 0.12 * f.sp) * 22 * dt;
         if (st.shy) { const dx = f.x - st.sx, dy = f.y - st.sy, d = Math.hypot(dx, dy) || 1; if (d < 220) { f.x += dx / d * 240 * st.shy * dt; f.y += dy / d * 240 * st.shy * dt; } }
         else if (st.lure) { const dx = st.sx - f.x, dy = st.sy - f.y, d = Math.hypot(dx, dy) || 1; if (d < 380 && d > 26 + (i % 5) * 9) { f.x += dx / d * 48 * dt; f.y += dy / d * 48 * dt; } }  // each stops at its own distance, so they ring the spot
@@ -132,6 +147,15 @@
         if (f.x < -20) f.x = ctx.w + 20; if (f.x > ctx.w + 20) f.x = -20; if (f.y < -20) f.y = ctx.h + 20; if (f.y > ctx.h + 20) f.y = -20;
         const blink = Math.max(0, Math.sin(t * 0.9 * f.sp + f.ph)); g.globalAlpha = blink * blink * 0.95;
         if (g.globalAlpha > 0.02) g.drawImage(st.dot, f.x - 12, f.y - 12, 24, 24);
+        // the six brightest this frame are kept, brightest first, to be said to the others
+        f.lit = blink * blink;
+        let k = f.lit < 0.25 ? -1 : top.length < 6 ? top.length : f.lit > top[5].lit ? 5 : -1;
+        if (k >= 0) { while (k > 0 && top[k - 1].lit < f.lit) { top[k] = top[k - 1]; k--; } top[k] = f; }
+      }
+      // a lit firefly can be caught: it is gone for a minute, and its place stays dark
+      if (sc && sc.next) for (const f of top) {
+        const q = f.post || (f.post = {kind: 'firefly', tags: FLY_TAGS, x: 0, y: 0, h: 6, take(by) { if (f.gone > Date.now()) return false; f.gone = Date.now() + 60000; return true; }});
+        q.x = f.x; q.y = f.y; sc.next.push(q);
       }
     },
   });

@@ -238,6 +238,8 @@
   const interval = (ctx, opt) => { const v = +ctx.opts[opt.key]; return v > 0 ? U.clamp(v, opt.min, opt.max) : opt.default; };
   /** A time about so long: 35% either way. */
   const about = s => s * (0.65 + Math.random() * 0.7);
+  /** Has the user switched this off? (An option that is on unless it says otherwise.) */
+  const off = v => v === false || v === 'false' || v === 0 || v === '0';
 
   // =====================================================================================================
   // Walkers: acorn folk. A russet acorn cap with a stalk, a cream face, red boots. They drop out of a hatch
@@ -285,7 +287,7 @@
   const ROLES = [['walker', 80], ['floater', 10], ['climber', 6], ['bomber', 4]];  // what one is born as; the working jobs are only given out by the hand (or by a tap)
   const JOBS = [['floater', 12], ['climber', 8], ['builder', 10], ['tunneler', 6], ['blocker', 6], ['digger', 5], ['miner', 4], ['bomber', 5]];
   const DROP = {key: 'drop', label: 'Drop interval', type: 'range', min: 0.3, max: 10, step: 0.1, unit: 's', default: 1.5};  // about this long between two walkers leaving the hatch
-  const TEST = HP.fx.walkTest = {out: 0, home: 0, splat: 0, boom: 0, guard: 0, round: 0, most: 0, off: 0, cut: 0};  // counts, for checks
+  const TEST = HP.fx.walkTest = {out: 0, home: 0, splat: 0, boom: 0, guard: 0, round: 0, most: 0, off: 0, cut: 0, shy: 0, hail: 0};  // counts, for checks
 
   // ---------- the walkers' ground: solid cells, one walker pixel each ----------
   // 0 air, 1 tile, 2 brick. A tile is solid all round. A brick only holds what comes down on it or steps up it:
@@ -459,7 +461,17 @@
       // the screen is pulled away under it: it tumbles the other way, sits seeing stars, then gets up and goes on
       slip:  {frames: ['fall0', 'fall1'], ft: .1, spin: 1.3, vx: 16, dur: .6, enter: 'jolt', next: 'daze', on: {edge: 'fall', wall: 'daze', head: 'daze', bump: 'daze', screen: 'daze', tap: 0}},
       daze:  {frames: ['fall0'], ft: .3, tick: 'stars', dur: 1.3, next: 'back', on: {tap: 0}},
-      build: {frames: ['build0', 'build1'], ft: .1, hold: 1, enter: 'stair', tick: 'brick', on: {built: 'walk'}},
+      // something to run from: it hurries the other way for a moment, then turns back and goes on as before. An edge, a wall
+      // or a blocker ends it at once, so it never leaves the ground it was on.
+      flee:  {frames: ['walk0', 'walk1'], ft: .09, vx: 18, dur: [.7, 1], next: 'back', on: {jolt: 'slip', edge: 'back', wall: 'back', head: 'back', bump: 'back', screen: 'back', exit: 'hopin'}},
+      // somebody of another kind on two legs goes by: a wave, or only a look, and on
+      hail:  {frames: ['wave0', 'wave1', 'wave0', 'wave1'], ft: .14, once: 1, next: 'back', on: {jolt: 'slip'}},
+      peer:  {frames: ['walk0'], dur: .5, next: 'back', on: {jolt: 'slip'}},
+      // carried off by another kind: pulled toward it and out of sight, then set down again, softly
+      taken: {frames: ['fall0', 'fall1'], ft: .1, move: 'free', fade: -2.5, each: 'pull', dur: .5, next: 'gone', on: {tap: 0}},
+      gone:  {frames: [], hide: 1, move: 'free', enter: 'stow', next: 'put', on: {tap: 0}},
+      put:   {frames: ['fall0', 'fall1'], ft: .12, move: 'air', soft: 1, fade: 5, enter: 'unstow', on: {land: 'back', tap: 0}},
+      build:{frames: ['build0', 'build1'], ft: .1, hold: 1, enter: 'stair', tick: 'brick', on: {built: 'walk'}},
       // a tile in the way of the stair: out comes the pickaxe, and the stair goes on through it
       pick:  {frames: ['pick0', 'pick1'], ft: .15, hold: 1, tick: 'chip'},
       // the diggers take the tile away a chunk at a time: sideways (tunneler), straight down (digger), down and forward (miner)
@@ -484,6 +496,9 @@
       unface(c) { if (c.was) c.dir = c.was; },
       jolt(c, W) { if (!c.was) c.was = c.dir; c.dir = W.jolt; },
       stars(c, W) { if (W.parts.length < 60) W.parts.push({x: c.x + (Math.random() - .5) * 10 * W.S, y: c.y - 11 * W.S, vx: (Math.random() - .5) * 30, vy: -18, g: 0, t: 0, life: .7, col: '#ffe45c', sz: W.S, star: 1}); },
+      pull(c) { c.x += (c.tx - c.x) * .3; c.y += (c.ty - c.y) * .3; },
+      stow(c) { c.dur = c.secs; },
+      unstow(c, W) { const mg = 7 * W.S + 4; c.x = U.clamp(c.ox, mg, W.w - mg); c.y = c.y0 = U.clamp(c.oy, c.def.tall * W.S, W.gh * W.S); c.vy = 0; c.alpha = 0; },
       // "hold" is how long it was asked to stand there; without one it stands as long as it likes
       plain(c) { c.role = 'walker'; if (c.hold) { c.dur = about(c.hold); c.hold = 0; } },
       // one is enough: a second that comes down beyond the first is sent back in
@@ -586,6 +601,42 @@
       },
     },
   };
+
+  // ---------- meeting the other kinds ----------
+  // All of it is brief, and only for a plain walker out walking: never one with a job, a leaf or a fuse, never in the
+  // air. Each ends in "back", which turns it the way it was going, so the round's plan is not disturbed.
+  const WALKER_TAGS = ['creature', 'person'];
+  const strolling = c => c.st === 'walk' && c.role === 'walker' && !c.fuse;
+  /** Frightened by something at `by`: off the other way for a moment. Not again for ten seconds, so nothing can pen them in. */
+  function shy(c, W, by) {
+    if (!by || !strolling(c) || W.t < (c.shyT || 0)) return false;
+    c.was = c.dir; c.dir = by.x < c.x ? 1 : -1; c.shyT = W.t + 10; TEST.shy++;
+    return go(c, 'flee', W);
+  }
+  /** Carried off toward `by` for by.secs seconds; set down at by.out, or where it was. Its time away does not count against it. */
+  function taken(c, W, by) {
+    if (!by || !strolling(c)) return false;
+    const o = by.out; c.secs = U.clamp(+by.secs || 3, .5, 30); c.born += c.secs;
+    c.was = c.dir; c.tx = isFinite(by.x) ? +by.x : c.x; c.ty = isFinite(by.y) ? +by.y : c.y; c.ox = o && isFinite(o.x) ? +o.x : c.x; c.oy = o && isFinite(o.y) ? +o.y : c.y;
+    return go(c, 'taken', W);
+  }
+  /** What a walker shows the other kinds: made once, moved each frame. */
+  const card = (c, W) => ({kind: 'walker', tags: WALKER_TAGS, x: c.x, y: c.y, h: c.def.tall * W.S, dir: c.dir, scare: by => shy(c, W, by), carry: by => taken(c, W, by)});
+  /** Who of the other kinds is about: a threat close by sends a walker off, a figure on two legs gets a wave or a look. */
+  function meet(W, sc) {
+    const T = W.thr, P = W.ppl; T.length = P.length = 0;
+    for (const a of sc.actors) { if (a.hid || a.kind === 'walker' || !a.tags) continue; if (a.tags.indexOf('threat') >= 0) T.push(a); else if (a.tags.indexOf('person') >= 0) P.push(a); }
+    if (!T.length && !P.length) return;
+    for (const c of W.list) {
+      if (!strolling(c)) continue;
+      for (const a of T) if (Math.abs(a.x - c.x) < 70 && Math.abs(a.y - c.y) < 36 && shy(c, W, a)) break;
+      if (c.st !== 'walk' || W.t < (c.hiT || 0)) continue;
+      for (const a of P) if (Math.abs(a.x - c.x) < 40 && Math.abs(a.y - c.y) < 30) {
+        c.hiT = W.t + 20; c.was = c.dir; if (Math.abs(a.x - c.x) > 2 * W.S) c.dir = a.x < c.x ? -1 : 1; TEST.hail++;
+        go(c, Math.random() < .5 ? 'hail' : 'peer', W); break;
+      }
+    }
+  }
 
   // ---------- furnished tiles ----------
   // Each round two tiles get a little room cut into them, shut all round: a living room, a bedroom, a bathroom or a
@@ -824,7 +875,7 @@
   HP.fx.add('walkers', {
     label: 'Walkers',
     live: true, z: 1, fps: 12,
-    options: [{key: 'count', label: 'How many', type: 'range', min: 3, max: 200, step: 1, default: 40}, SIZE, DROP],
+    options: [{key: 'count', label: 'How many', type: 'range', min: 3, max: 200, step: 1, default: 40}, SIZE, DROP, {key: 'meet', label: 'React to others', type: 'bool', default: true}],
     create(ctx) {
       heal();  // whatever an earlier round cut
       const S = scale(ctx), W = world(ctx, S); W.opts = ctx.opts;
@@ -833,6 +884,7 @@
       const hs = W.tiles.map(r => r.h).sort((a, b) => a - b);
       W.hard = hs.length ? 2 * hs[hs.length >> 1] + 4 * S : 230;  // two tiles of this layout, and a little
       W.drop = interval(ctx, DROP); W.rest = 0; W.fl = 0;
+      W.meet = !off(ctx.opts.meet); W.scan = 0; W.thr = []; W.ppl = [];
       deal(W, ctx);
       Object.defineProperty(TEST, 'W', {value: W, configurable: true, enumerable: false});  // for the test page's readout
       return W;
@@ -859,6 +911,7 @@
         go(c, 'drop', W); W.list.push(c); W.left--; W.wait = about(W.drop); TEST.out++;
       }
       direct(W);
+      if (W.meet && ctx.scene && (W.scan -= dt) <= 0) { W.scan = .25; meet(W, ctx.scene); }  // a few times a second is enough
       let n = 0, busy = false;
       for (const c of W.list) {
         if (W.t - c.born > 240 && !c.fuse && !c.s.solid && !c.s.hold) { c.fuse = W.t + 5; c.dud = 1; }  // shut in somewhere: do not pile up for ever
@@ -887,7 +940,7 @@
         const left = c.fuse ? Math.ceil(c.fuse - W.t) : 0, top = Math.max(12, c.y - 10 * S - 2);  // kept on the screen for one on the top row
         if (left > 0 && left <= 5) blit(g, W.font, left, 0, c.x, top);  // a bomber's count
         else if (c.bang > W.t && c.st === 'gawk') blit(g, W.font, W.font.ix.bang, 0, c.x, top);
-        if (ctx.scene) ctx.scene.next.push({kind: 'walker', x: c.x, y: c.y, h: c.def.tall * S});  // so other kinds can meet them
+        if (ctx.scene && c.st !== 'taken') { const p = c.post || (c.post = card(c, W)); p.x = c.x; p.y = c.y; p.dir = c.dir; ctx.scene.next.push(p); }  // so other kinds can meet them
       }
       blit(g, W.props, W.props.ix.hatch, 0, W.hatch.x, W.hatch.y + 9 * S);  // over them: they come out from behind its lintel
       drawParts(g, W, dt);
@@ -929,6 +982,22 @@
       sneeze0: [[WOOL, 1, 5], [SHUT, 10, 1], [LEGS, 4, 12]],
       sneeze1: [[WOOL, 1, 5], [SHUT, 12, 6], [LEGS, 4, 12]],
     }};
+  // The ram: the same animal a size up, with a curled horn. Every frame of the sheep is made over with the bigger
+  // wool and head, and it has a few of its own for going at something head down.
+  const RWOOL = ['....wwwwwwww...', '..wwwwwwwwwwww.', '.wwwwWwwwwwwwww', 'wwwwwwwwwwWwwww', 'WwwwwwwwwwwwwWw', 'wwwwWwwwwwwwwww', '.wwwwwwwWwwwwww', '..wwwwwwwwwwww.', '....wWwwwwWww..'];
+  const rhead = (a, b, c) => ['..www...', '.yyypp..', 'yHHyppp.', a, b, c, '....pppp', '....ppp.'];
+  const RHEAD = rhead('yHlypepp', 'yHyypePp', '.yy.phpp'), RSHUT = rhead('yHlypppp', 'yHyyeePp', '.yy.phpp'), RGAPE = rhead('yHlypppp', 'yHyyeekk', '.yy.pkkp'), REEK = rhead('yHlypepp', 'yHyypekk', '.yy.phkk');
+  const RFACE = ['..wwww..', 'yyyppyyy', 'yHppppHy', 'yyeppeyy', '.yeppey.', '..hPPh..', '..pppp..', '...pp...'], RDIZZY = RFACE.map(r => r.replace(/e/g, 's'));
+  const BIG = new Map([[WOOL, RWOOL], [HEAD, RHEAD], [SHUT, RSHUT], [GAPE, RGAPE], [EEK, REEK], [FACE, RFACE], [DIZZY, RDIZZY]]);
+  const RAM_ART = {w: 23, h: 17, pal: Object.assign({H: '#a9762c'}, SHEEP_ART.pal), frames: {}};
+  for (const k in SHEEP_ART.frames) RAM_ART.frames[k] = SHEEP_ART.frames[k].map(l => BIG.has(l[0]) ? [BIG.get(l[0]), l[1] + (l[0] === WOOL ? 0 : 3), l[2] + 1] : [l[0], l[1] + 2, l[2] + 3]);
+  RAM_ART.frames.sleep1[0] = [['....wwwwwwww...'], 1, 7];
+  Object.assign(RAM_ART.frames, {
+    charge0: [[RWOOL, 1, 5], [RHEAD, 15, 7], [['..P.....P..', '.P.......P.', 'P.........P'], 5, 14]],
+    charge1: [[RWOOL, 1, 6], [RHEAD, 15, 8], [['..P...P..', '...P.P...'], 6, 15]],
+    butt0: [[RWOOL, 1, 6], [RHEAD, 15, 8], [LEGS, 6, 15]],
+    butt1: [[RWOOL, 2, 6], [RHEAD, 15, 6], [LEGS, 7, 15]],
+  });
   // the speech bubble, the z's of its sleep and the tufts it eats
   const BUBBLE = ['.wwwwwwwwwwwww.'].concat(new Array(5).fill('wwwwwwwwwwwwwww'), ['.wwwwwwwwwwwww.', '...ww..........', '...w...........']);
   const EXTRA_ART = {w: 15, h: 9, pal: {w: '#fffdf6', k: '#3a2233', z: '#e6f0ff', g: '#8fd85a', G: '#4fa63c', r: '#ff6b8a'},
@@ -1008,10 +1077,20 @@
       leave:  {frames: ['walk0', 'stand', 'walk1', 'stand'], ft: .16, move: 'free', vx: 10, dur: 5, next: 'away'},
       // after a long nap it sometimes goes back where it came from: straight up, trailing sparks
       launch: {frames: ['fall0', 'fall1'], ft: .08, move: 'free', vy: -170, each: 'sparks', dur: 2.2, next: 'away', on: {tap: 0, grab: 0}},
+      // frightened off by another kind: a short run the other way
+      flee:   {frames: ['run0', 'run1'], ft: .1, vx: 28, dur: [1, 1.8], next: 'idle', on: {jolt: 'slip', edge: 'fall', wall: 'idle', screen: 'idle'}},
+      // carried off by another kind: toward it and out of sight, and after a while set down again
+      taken:  {frames: ['fall0', 'fall1'], ft: .1, move: 'fly', speed: 260, fade: -2, dur: .7, next: 'gone', on: {arrive: 'gone', tap: 0, grab: 0}},
+      gone:   {frames: [], hide: 1, move: 'free', enter: 'stow', next: 'put', on: {tap: 0, grab: 0}},
+      put:    {frames: ['fall0', 'fall1'], ft: .1, move: 'air', soft: 1, fade: 4, enter: 'unstow', on: {land: 'idle', tap: 0, grab: 0}},
+      // a bite out of something another kind has standing there, and a good chew
+      munch:  {frames: ['stand', 'yawn'], ft: .22, dur: [2, 3.2], next: 'idle'},
     },
     acts: {
       flip(c) { c.dir = -c.dir; },
       absent(c, W) { c.dur = about(W.away); },
+      stow(c) { c.dur = c.secs; },
+      unstow(c, W) { c.x = U.clamp(c.ox, 10, W.w - 10); c.y = c.y0 = Math.min(c.oy, W.h) - 2; c.vy = 0; c.alpha = 0; },
       doze(c, W) { if (W.ctx.env.night) c.dur /= 3; },
       // that was an antic: when the next one is due. (The yawn on waking at night does not count, or it would never get to anything else.)
       antic(c, W) { const night = W.ctx.env.night; if (!(night && c.st === 'yawn')) c.next = W.t + about(W.trick) * (night ? 3 : 1); },
@@ -1024,7 +1103,10 @@
       // Now and then, on coming to rest: is somebody of another kind standing near, on this level? Then go and see.
       nosy(c, W) {
         const sc = W.ctx.scene; if (!sc || Math.random() > .5) return;
-        for (const a of sc.actors) if (a.kind !== 'sheep' && Math.abs(a.y - c.y) < 12 && Math.abs(a.x - c.x) < 150 && Math.abs(a.x - c.x) > 14 * W.S) { c.dir = a.x < c.x ? -1 : 1; go(c, 'visit', W); return; }
+        // something to eat right beside it, that lets itself be taken: sometimes a bite
+        const f = sc.near('food', c.x, c.y, 60);
+        if (f && Math.abs(f.y - c.y) < 40 && Math.random() < .5 && U.act(f, 'take', c.post)) { c.dir = f.x < c.x ? -1 : 1; go(c, 'munch', W); return; }
+        for (const a of sc.actors) if (a.kind !== 'sheep' && a.kind !== 'ram' && Math.abs(a.y - c.y) < 12 && Math.abs(a.x - c.x) < 150 && Math.abs(a.x - c.x) > 14 * W.S) { c.dir = a.x < c.x ? -1 : 1; go(c, 'visit', W); return; }
       },
       // The meteor's target: a spot on a tile top. The first landing comes from the seed, later ones from chance.
       aim(c, W) {
@@ -1066,15 +1148,77 @@
 
   // which of its moods a finger or a jolt breaks into: the ones with its feet on the ground. A sleeper is not woken
   // by a look, but is thrown out of bed with the rest.
-  for (const k of ['idle', 'walk', 'run', 'graze', 'sit', 'yawn', 'look', 'sneeze', 'gawk', 'visit']) SHEEP.states[k].on = Object.assign({notice: 'gawk', jolt: 'slip'}, SHEEP.states[k].on);
+  for (const k of ['idle', 'walk', 'run', 'graze', 'sit', 'yawn', 'look', 'sneeze', 'gawk', 'visit', 'munch']) SHEEP.states[k].on = Object.assign({notice: 'gawk', jolt: 'slip'}, SHEEP.states[k].on);
   SHEEP.states.sleep.on = {jolt: 'slip'};
   /** May it be petted where it is: standing or sitting on something, not in the air, in a hand, rolling or away. */
   const calm = c => c.plat && !c.s.hide && !c.s.paint && !c.s.move && !c.s.spin && c.st !== 'launch';
 
+  // ---------- the ram ----------
+  // One to a flock. It lives as the sheep do, and keeps watch: when something the others run from (tag "threat") comes
+  // within 420 px of any of the flock, it puts its head down and goes at it: along its tile, and off the end with a leap
+  // if the thing is below. Where it gets to, it butts, and whatever is in reach is told to be off (its scare verb).
+  // If that does nothing, the ram plants itself between the thing and the nearest of the flock, glares, and goes again.
+  /** The threat the ram is after, found again near where it last was (its kind may post a new actor every frame). */
+  const foe = (c, W) => { const sc = W.ctx.scene; return c.foe = c.foe && sc && sc.near('threat', c.foe.x, c.foe.y, 120) || null; };
+  const RAM = Object.assign({}, SHEEP, {art: RAM_ART, half: 8, tall: 11, states: {}, acts: Object.assign({}, SHEEP.acts, {
+    hunt(c, W) {
+      const f = foe(c, W); if (!f) { go(c, 'idle', W); return; }
+      const dx = f.x - c.x, S = W.S;
+      if (f.y > c.y + 6 * S && (c.down || Math.abs(dx) < 40 * S)) { c.down = 1; return; }  // it is below: straight on, off the end of the tile and down at it
+      if (Math.abs(dx) > 3 * S) c.dir = dx < 0 ? -1 : 1;
+      if (Math.abs(dx) < 12 * S) go(c, 'butt', W);
+    },
+    dare(c, W) { const f = foe(c, W); if (f && f.y > c.y + 6 * W.S) go(c, 'pounce', W); },
+    horn(c, W) {
+      const f = foe(c, W), S = W.S, came = c.dir; c.won = false; if (!f) return;
+      if (Math.abs(f.x - c.x) > 3 * S) c.dir = f.x < c.x ? -1 : 1;
+      if (Math.hypot(f.x - c.x, f.y - c.y) > 130) { if (f.y > c.y + 6 * S) c.way = -came; return; }  // out of reach: a butt at the air, and if it is below, the other way round next time
+      burst(W, c.x + c.dir * 10 * S, c.y - 5 * S, 4, ['#fffdf6', '#ffe45c'], 80, {star: 1, life: .4});
+      c.won = U.act(f, 'scare', c.post) === true;
+    },
+    stand(c, W) {
+      const f = foe(c, W), S = W.S;
+      if (c.won || !f) { c.wary = W.t + 5; c.more = 0; if (c.won) c.say = W.t + 1.1; go(c, 'idle', W); return; }  // it is off: a "baa" after it
+      let m = null; for (const o of W.list) if (o !== c && calm(o) && (!m || Math.abs(o.x - f.x) < Math.abs(m.x - f.x))) m = o;
+      if (!m || c.way) { go(c, 'glare', W); return; }
+      c.gx = m.x + (f.x < m.x ? -1 : 1) * Math.min(16 * S, Math.abs(f.x - m.x) / 2); c.dir = c.gx < c.x ? -1 : 1;
+    },
+    hold(c, W) { if (Math.abs(c.gx - c.x) < 3 * W.S) go(c, 'glare', W); },
+    eye(c, W) { const f = foe(c, W); if (f) c.dir = f.x < c.x ? -1 : 1; c.wary = W.t + 1.5; },
+  })});
+  for (const k in SHEEP.states) RAM.states[k] = Object.assign({}, SHEEP.states[k]);
+  Object.assign(RAM.states, {
+    charge: {frames: ['charge0', 'charge1'], ft: .1, vx: 55, busy: 1, each: 'hunt', dur: 12, next: 'butt', on: {jolt: 'slip', edge: 'brink', wall: 'butt', screen: 'butt', tap: 0}},
+    brink:  {frames: ['charge0'], busy: 1, dur: 0, enter: 'dare', next: 'butt'},
+    pounce: {frames: ['charge0'], move: 'air', jump: 180, vx: 20, on: {land: 'butt', crash: 'impact', tap: 0, grab: 0}},
+    butt:   {frames: ['butt0', 'butt1', 'butt1', 'butt0'], ft: .1, once: 1, busy: 1, enter: 'horn', next: 'ward', on: {jolt: 'slip', tap: 0}},
+    ward:   {frames: ['charge0', 'charge1'], ft: .16, vx: 12, busy: 1, enter: 'stand', each: 'hold', dur: 3, next: 'glare', on: {jolt: 'slip', edge: 'glare', wall: 'glare', screen: 'glare'}},
+    glare:  {frames: ['butt0'], dur: [1.2, 2], enter: 'eye', next: 'idle', on: {jolt: 'slip'}},
+  });
+  for (const k of ['idle', 'walk', 'graze', 'sit', 'sleep', 'yawn', 'look', 'gawk', 'visit', 'munch', 'glare']) RAM.states[k].watch = 1;  // what it breaks off to go at a threat
+
+  // ---------- what the flock shows the other kinds ----------
+  const SHEEP_TAGS = ['creature', 'animal'], RAM_TAGS = ['creature', 'animal', 'guard'];
+  /** Frightened off from `by`: a run the other way. */
+  function bolt(c, W, by) { if (!by || !calm(c)) return false; c.dir = by.x < c.x ? 1 : -1; return go(c, 'flee', W); }
+  /** Carried off toward `by` for by.secs seconds; set down at by.out, or where it was. */
+  function borne(c, W, by) {
+    if (!by || !calm(c)) return false;
+    const o = by.out; c.secs = U.clamp(+by.secs || 3, .5, 120); c.tp = null;
+    c.tx = isFinite(by.x) ? +by.x : c.x; c.ty = isFinite(by.y) ? +by.y : c.y; c.ox = o && isFinite(o.x) ? +o.x : c.x; c.oy = o && isFinite(o.y) ? +o.y : c.y;
+    return go(c, 'taken', W);
+  }
+  /** Made once for each, moved each frame. The ram stands its ground and is too heavy to carry: it offers neither. */
+  function flockCard(c, W) {
+    const ram = c.def === RAM, p = {kind: ram ? 'ram' : 'sheep', tags: ram ? RAM_TAGS : SHEEP_TAGS, x: c.x, y: c.y, h: c.def.tall * W.S, dir: c.dir, pet() { if (c.st === 'pet') c.time = 0; else if (calm(c) && !c.s.busy) go(c, 'pet', W); }};
+    if (!ram) { p.scare = by => bolt(c, W, by); p.carry = by => borne(c, W, by); }
+    return p;
+  }
+
   HP.fx.add('sheep', {
     label: 'Sheep',
     live: true, z: 1, fps: 12,
-    options: [{key: 'count', label: 'How many', type: 'range', min: 1, max: 5, step: 1, default: 1}, {key: 'sound', label: 'Sound', type: 'bool', default: false}, SIZE, AWAY, TRICK],
+    options: [{key: 'count', label: 'How many', type: 'range', min: 1, max: 5, step: 1, default: 1}, {key: 'sound', label: 'Sound', type: 'bool', default: false}, SIZE, AWAY, TRICK, {key: 'ram', label: 'Ram', type: 'bool', default: true}],
     create(ctx) {
       const S = scale(ctx), W = world(ctx, S), r = ctx.rand;
       W.sh = sheet(SHEEP_ART, S); W.ex = sheet(EXTRA_ART, S); prep(SHEEP, W.sh); W.marks = []; W.grip = null; W.away = interval(ctx, AWAY); W.trick = interval(ctx, TRICK);
@@ -1093,6 +1237,13 @@
         const c = make(SHEEP, W.sh, 0, -200, 1); c.first = [Math.floor(r() * 1000), r(), r() < .5 ? -1 : 1];
         go(c, 'away', W); c.dur = .3 + i * (1.2 + r() * 1.5); c.next = about(W.trick) * .5; W.list.push(c);
       }
+      if (!off(ctx.opts.ram)) {
+        W.rsh = sheet(RAM_ART, S); prep(RAM, W.rsh);
+        const c = W.ram = make(RAM, W.rsh, 0, -200, 1); c.first = [Math.floor(r() * 1000), r(), r() < .5 ? -1 : 1]; c.wary = 0;
+        go(c, 'away', W); c.dur = 1 + n * 1.5; c.next = about(W.trick) * .5; W.list.push(c);
+      }
+      for (const c of W.list) c.post = flockCard(c, W);
+      W.scan = 0;
       return W;
     },
     tap(W, x, y) {
@@ -1111,7 +1262,16 @@
       c.x = U.clamp(x, 8, W.w - 8); c.y = y + c.def.tall * W.S / 2; c.heldT = W.t;
     },
     draw(g, W, ctx, t, dt) {
-      const S = W.S; W.t += dt;
+      const S = W.S, ram = W.ram; W.t += dt;
+      // the ram's watch, a few times a second: is there a threat within 420 px of any of the flock?
+      if (ram && ctx.scene && (W.scan -= dt) <= 0) {
+        W.scan = .3;
+        if (ram.s.watch && W.t >= ram.wary) {
+          let f = ram.more > 0 && foe(ram, W);  // one it has gone at already: after it a few times more, wherever it has got to
+          if (f) ram.more--; else for (const c of W.list) if (calm(c) && (f = ctx.scene.near('threat', c.x, c.y, 420))) { ram.more = 3; break; }
+          if (f) { ram.foe = f; ram.dir = ram.way || (f.x < ram.x ? -1 : 1); ram.way = ram.down = 0; go(ram, 'charge', W); }
+        }
+      }
       for (const c of W.list) step(c, dt, W);
       g.imageSmoothingEnabled = false;
       let n = 0;
@@ -1126,7 +1286,7 @@
         paint(g, c, W); if (c.say > W.t && !c.s.hide) blit(g, W.ex, W.ex.ix.baa, 0, U.clamp(c.x + 6 * S, 8 * S, W.w - 8 * S), c.y - 11 * S);
         if (c.bang > W.t && c.st === 'gawk') blit(g, W.ex, W.ex.ix.bang, 0, c.x, Math.max(8 * S, c.y - 11 * S));  // kept on the screen for one on the top row
         // tell the other kinds where it stands, and let them stroke it
-        if (ctx.scene && calm(c)) ctx.scene.next.push({kind: 'sheep', x: c.x, y: c.y, h: c.def.tall * S, pet() { if (c.st === 'pet') c.time = 0; else if (calm(c)) go(c, 'pet', W); }});
+        if (ctx.scene && calm(c)) { const p = c.post; p.x = c.x; p.y = c.y; p.dir = c.dir; ctx.scene.next.push(p); }
       }
       drawParts(g, W, dt);
     },

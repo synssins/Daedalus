@@ -170,8 +170,12 @@
   const O_PA = pose(38, 70, 50, -55, 80, 172, 8, 160, -10, -8), O_PB = pose(38, -55, 80, 70, 50, 160, -10, 172, 8, -8);  // legs a blur, arms straight up
   const O_YELP = pose(-20, 20, 40, 10, 60, -40, -60, -50, -70, -20), O_PEEK = pose(24, 44, 78, -10, 82, 60, 80, 40, 90, 14);
   const O_PANIC = anim(0.1667, true, [0, O_PA], [0.0833, O_PB], [0.1667, O_PA]);
-  function goose(sc, f) { let best = null, bd = 1e9; if (sc) for (const a of sc.actors) if (a.kind === 'goose') { const c = a.chasing; if (Math.abs(a.y - f.y) > 60 && !(c && typeof c === 'object' && Math.hypot(c.x - f.x, c.y - f.y) < 90)) continue;  // a goose on another level is no business of this one
-    const d = Math.hypot(a.x - f.x, a.y - f.y); if (d < bd) { bd = d; best = a; } } return best && {g: best, d: bd}; }
+  function goose(sc, f) { let best = null, bd = 1e9; if (sc) for (const a of sc.actors) if (a.kind === 'goose' || (!a.hid && a.tags && a.tags.indexOf('threat') >= 0)) {  // the goose, as ever; and whatever else is tagged "threat" const c = a.chasing; if (Math.abs(a.y - f.y) > 60 && !(c && typeof c === 'object' && Math.hypot(c.x - f.x, c.y - f.y) < 90)) continue;  // a goose on another level is no business of this one
+    const d = Math.hypot(a.x - f.x, a.y - f.y); if (d < bd) { bd = d; best = a; } }
+    const b = f.bogey; if (!best && b) { if (Date.now() < b.till) return {g: b, d: Math.hypot(b.x - f.x, b.y - f.y)}; f.bogey = null; }  // frightened by the verb "scare": the spot it came from stands in for the goose
+    return best && {g: best, d: bd}; }
+  const num = v => typeof v === 'number' && isFinite(v);
+  function bogeyAt(f, by) { f.bogey = {x: by && num(by.x) ? by.x : f.x - f.dir * 40, y: by && num(by.y) ? by.y : f.y, till: Date.now() + 3000}; }
   /** Is this goose a reason to run: near and coming closer, very near, or making for this very figure? */
   function scared(f, gz) {
     const was = f.gd == null ? 1e9 : f.gd, c = gz.g.chasing; f.gd = gz.d;
@@ -488,6 +492,52 @@
     }
   }
 
+  // ---------- the verbs "scare" and "carry", offered on every figure posted to ctx.scene ----------
+  /** One frame of being carried off (f.cry). ph 0: lifted away kicking, smaller and smaller; 1: out of sight; 2: set
+   *  down and growing back. Returns 1 at the moment it is to be put down (the caller says where), 2 when it is over. */
+  function carried(f, dt) {
+    const c = f.cry; c.t += dt; f.lift = 0; f.pin = 0;
+    if (c.ph === 0) { const u = Math.min(1, c.t / 0.7), k = u * u; f.x = c.x0 + (c.tx - c.x0) * k; f.y = c.y0 + (c.ty - c.y0) * k; f.s = c.s * (1 - 0.9 * k); play(f, SB.flail, 0.08); tick(f, dt); if (u >= 1) { c.ph = 1; c.t = 0; } return 0; }
+    if (c.ph === 1) { if (c.t < c.secs) return 0; c.ph = 2; c.t = 0; f.an = null; f.s = c.s * 0.1; return 1; }
+    const u = Math.min(1, c.t / 0.4); f.s = c.s * (0.1 + 0.9 * u); sample(SB.getup, 0, f.p);
+    if (u < 1) return 0;
+    f.s = c.s; f.cry = null; return 2;
+  }
+  function carryOff(f, by) { f.cry = {t: 0, ph: 0, x0: f.x, y0: f.y, pl: f.pl, s: f.s, tx: by.x, ty: by.y, secs: U.clamp(+by.secs || 5, 0.5, 900), out: by.out && num(by.out.x) && num(by.out.y) ? {x: by.out.x, y: by.out.y} : null}; SEEN.carries = (SEEN.carries || 0) + 1; }
+  /** One of the crew is taken. Those near it flinch and stare, run, or creep up for a look at where it was. */
+  function crewCarry(st, f, by) {
+    if (!by || !num(by.x) || !num(by.y) || f.gone || f.guest || f.cry || f.stn || f.hide || (f.act && AIR[f.act.a])) return false;
+    endOv(f); if (f.row) rowEnd(st); bail(f);
+    if (f.held) { U.act(f.held, 'free'); f.held = null; f.rescue = null; }
+    if (f.lad.d > 0 && !f.lad.on) ghost(st, f.lad);  // its ladder is not left lying about with nobody to fetch it
+    for (const o of st.crew) {
+      if (o === f || !spare(st, o) || Math.abs(o.x - f.x) + Math.abs(o.y - f.y) * 1.5 > 300) continue;
+      const r = Math.random(), sd = o.x >= f.x ? 1 : -1, P = st.plats[o.pl];
+      if (r < 0.3) { bogeyAt(o, f); fearStart(st, o); }
+      else if (r < 0.6 && o.pl === f.pl) { o.q.length = 0; o.act = null; o.q.push({a: 'walk', x: U.clamp(f.x + sd * 22, P.x1 + 2, P.x2 - 2), v: 0.35}, rest(SB.look, 2.6, {dir: -sd})); }
+      else { awe(o, by.x, by.y, o.n, false, o.tool === 1); if (o.ov && !o.ov.k) o.ov.t = 0; }
+    }
+    f.fear = null; f.re = null; f.q.length = 0; f.act = null; f.job = null; f.load = 0; carryOff(f, by);
+    return true;
+  }
+  function crewCarried(st, f, dt) {
+    const c = f.cry, r = carried(f, dt);
+    if (r === 1) {  // back: where it was promised, or where it was taken from, on whatever there is to stand on there
+      let P = st.plats[c.pl], x = c.x0;
+      if (c.out) { let bd = 1e9; for (const Q of st.plats) { if (!Q.ok || Q.away) continue; const d = Math.abs(Q.y - c.out.y) * 1.5 + Math.max(0, Q.x1 - c.out.x, c.out.x - Q.x2); if (d < bd) { bd = d; P = Q; } } x = c.out.x; }
+      if (!P.ok || P.away) P = st.plats[0];
+      f.pl = P.i; f.x = U.clamp(x, P.x1 + 2, P.x2 - 2); f.y = P.y; ladFix(f);
+    } else if (r === 2) { f.ov = null; f.re = null; f.act = null; f.q.length = 0; f.q.push(rest(SB.getup, 1.1), rest(SB.shake, 1)); }
+  }
+  function crewVerbs(st, f) {
+    f.vS = by => {
+      if (f.gone || f.cry) return false; if (f.fear) return true;
+      const on = f.act && f.act.a; if (AIR[on] || (on !== 'climb' && Math.abs(f.y - st.plats[f.pl].y) >= 3)) return false;
+      bogeyAt(f, by); fearStart(st, f); return true;
+    };
+    f.vC = by => crewCarry(st, f, by);
+  }
+
   // A tile can be taken away under the crew (a goose drags it off, the tank battle hides them all). Its snow falls,
   // whoever stood on it or was on a ladder against it drops to what is below, and nobody goes there until it is back.
   const awayEl = P => { try { const y = P.rect && P.rect.el && P.rect.el.style; return !!y && (y.visibility === 'hidden' || y.pointerEvents === 'none'); } catch (e) { return false; } };
@@ -653,7 +703,7 @@
   /** A ladder left leaning where its owner can no longer be: it falls flat at its foot, to be fetched like any other. */
   function ladFix(f) { const la = f.lad, L = la.link; if (la.on && L && L.a.i !== f.pl && L.b.i !== f.pl) { la.on = false; la.k = 0; la.d = 1; la.gx = L.fx; la.gd = 1; la.gy = la.gyT = L.a.y - 2; } }
   const grounded = (st, f) => Math.abs(f.y - st.plats[f.pl].y) < 1.5 && (!f.act || f.act.a === 'walk' || f.act.a === 'dig' || f.act.a === 'rest' || f.act.a === 'ball' || f.act.a === 'call');
-  const spare = (st, f) => !f.gone && !f.boss && !f.guest && !f.fear && !f.row && !f.ov && !f.re && !f.grp && !f.sh && grounded(st, f) && st.plats[f.pl].ok;
+  const spare = (st, f) => !f.gone && !f.cry && !f.stn && !f.boss && !f.guest && !f.fear && !f.row && !f.ov && !f.re && !f.grp && !f.sh && grounded(st, f) && st.plats[f.pl].ok;
   const quiet = f => (!f.act || !!f.act.idle) && !f.q.length;
   /** Whatever game this figure was in, it is out of it. */
   function bail(f) { f.grp = null; f.hide = null; f.sh = 0; f.mug = 0; f.bury = 0; f.tong = null; f.shv = null; f.sled = 0; f.duck = 0; }
@@ -1159,8 +1209,155 @@
     g.restore();
   }
 
+  // ---------- something to wonder at, put there by another kind (ctx.scene, tag "wonder") ----------
+  // One of the crew walks over for a good look. If the thing is also a trap (a flytrap on the vine), it takes hold:
+  // the one caught flails; the nearest workmate comes and pulls, and both go down. Sometimes nobody comes, and
+  // never from far off: then it gets itself out after a few seconds.
+  const HELD_TAGS = ['creature', 'person', 'trapped'];
+  function peekStart(st, ctx) {
+    const sc = ctx && ctx.scene; if (!sc || !sc.all) return;
+    const fr = freeCrew(st); if (!fr.length) return;
+    let best = null, bd = 1e9;
+    for (const w of sc.all('wonder')) for (const P of st.plats) {
+      // where a head reaches it: a trap by its middle; anything else if any of it, from its foot to its top, is at head height
+      const lo = P.y - w.y, hi = w.tags.indexOf('trap') >= 0 ? lo : lo + (w.h || 0);
+      if (!P.ok || P.away || hi < 12 || lo > 46 || w.x < P.x1 - 18 || w.x > P.x2 + 18) continue;
+      const f = nearTo(fr, w.x, P.y), d = Math.abs(f.x - w.x) + Math.abs(f.y - P.y) * 1.5;
+      if (d < bd) { bd = d; best = {w, P, a: f}; }
+    }
+    if (!best) return;
+    const {w, P, a} = best, ax = U.clamp(w.x - (w.x > (P.x1 + P.x2) / 2 ? 10 : -10), P.x1 + 2, P.x2 - 2), dir = w.x >= ax ? 1 : -1, trap = w.tags.indexOf('trap') >= 0;
+    const b0 = nearTo(fr, ax, P.y, a), b = trap && b0 && Math.random() > 0.3 && Math.abs(b0.x - ax) + Math.abs(b0.y - P.y) * 1.5 < 420 ? b0 : null;
+    const A = actStart(st, 'peek', {max: 60, need: 1, a, b, stuck: 0, free: 0, fail: 0, idle: idleRest, step: A => A.fail || (A.free && quiet(a) && (!b || quiet(b)))});
+    claim(A, a); if (b) claim(A, b);
+    if (!go(st, a, P, ax)) { actEnd(st, A, true); return true; }
+    const out = () => { if (A.free) return; A.free = 1; U.act(w, 'free'); a.held = null; a.rescue = null; };
+    a.q.push(rest(SB.look, 1.8, {dir}), call(g => {
+      if (!trap || !U.act(w, 'trap', {x: g.x, y: g.y - 34 * g.s})) { A.free = 1; return; }  // only something to look at: a good look, and back to work
+      // anyone may pull it out, the crew or another kind's creature: the verb "rescue" on what it posts
+      g.held = w; g.rescue = () => { if (A.free) return true; out(); g.act = null; g.q.length = 0; react(g, SA.slip, 2.3); return true; }; A.stuck = 1; bump('trapped');
+      g.q.push(rest(SB.flail, b ? 30 : 5 + Math.random() * 4, {dir, until: () => A.free}), call(h => { if (A.free) return; out(); h.q.length = 0; react(h, SA.slip, 2.3); }));
+    }));
+    if (b) b.q.push(rest(SA.stand, 30, {until: () => A.stuck || A.free || A.over}), call(g => {
+      if (A.over || A.free || a.grp !== A) return;
+      if (!go(st, g, P, U.clamp(ax - dir * 15, P.x1 + 2, P.x2 - 2))) { out(); return; }
+      g.q.push(rest(SB.pull, 2, {dir}), call(() => { if (A.over || A.free) return; out(); a.act = null; a.q.length = 0; react(a, SA.slip, 2.3); react(g, SA.slip, 2.3); }));
+    }));
+    return true;
+  }
+  // ---------- another kind's creature is held fast (ctx.scene, tag "trapped") ----------
+  // The nearest of the crew who is free walks over and pulls: the verb "rescue". Never from far off. Not for one of
+  // its own: the game that got that one caught sends its own help, or none.
+  function rescueStart(st, sc) {
+    for (const A of st.acts) if (A.n === 'rescue') return;
+    const all = sc.all('trapped'); if (!all.length) return;
+    const fr = freeCrew(st); if (!fr.length) return;
+    let best = null, bd = 420;
+    for (const w of all) {
+      if (st.crew.some(f => f.held && f.rescue === w.rescue)) continue;
+      for (const P of st.plats) {
+        if (!P.ok || P.away || P.y - w.y < -12 || P.y - w.y > 60 || w.x < P.x1 - 18 || w.x > P.x2 + 18) continue;  // where a hand reaches it
+        const f = nearTo(fr, w.x, P.y), d = Math.abs(f.x - w.x) + Math.abs(f.y - P.y) * 1.5;
+        if (d < bd) { bd = d; best = {w, P, a: f}; }
+      }
+    }
+    if (!best) return;
+    const {w, P, a} = best, tx = w.x, ty = w.y, ax = U.clamp(tx + (a.x >= tx ? 16 : -16), P.x1 + 2, P.x2 - 2), dir = tx >= ax ? 1 : -1;
+    const A = actStart(st, 'rescue', {max: 45, need: 1, a, k: 0, done: 0, idle: idleRest, step: A => A.done && quiet(a)});
+    claim(A, a);
+    if (!go(st, a, P, ax)) { actEnd(st, A, true); return; }
+    // it is posted anew every frame: found again by where it was. Still fast after a pull: twice more, and then it gives up
+    const pull = g => {
+      if (A.over || !sc.near('trapped', tx, ty, 90)) { A.done = 1; return; }
+      g.q.push(rest(SB.pull, 1.6, {dir}), call(h => {
+        const v = sc.near('trapped', tx, ty, 90);
+        if (U.act(v, 'rescue', {x: h.x, y: h.y}) === true) { bump('rescued'); A.done = 1; react(h, SA.slip, 2.3); }
+        else if (v && ++A.k < 3) pull(h); else A.done = 1;
+      }));
+    };
+    a.q.push(call(pull));
+  }
+
+  // ---------- a station, put there by another kind (ctx.scene, tags "station" and "vehicle") ----------
+  // Now and then one to three of the crew walk onto a platform and wait. When something stops there they get on (its
+  // verb "board"), are out of sight for the ride, and are set down where it lets them off. One who is not aboard when
+  // it pulls out runs after it to the end of the platform, and stands there with its head down.
+  function stationStart(st, sc) {
+    st.stnNext = st.clock + 5;
+    const fr = freeCrew(st), all = sc.all('station'); if (!fr.length || !all.length) return;
+    const S = pickOf(all); if (!num(S.x1) || !num(S.x2) || !num(S.y) || S.x2 - S.x1 < 20) return;
+    // the way on: a tile top (or the ground) level with it, or one near enough to step across from
+    let P = null, bd = 1e9;
+    for (const Q of st.plats) { if (!Q.ok || Q.away) continue; const gap = Math.max(0, S.x1 - Q.x2, Q.x1 - S.x2), dy = Math.abs(Q.y - S.y); if (gap <= 60 && dy <= 70 && gap + dy < bd) { bd = gap + dy; P = Q; } }
+    if (!P) return;
+    const mid = (S.x1 + S.x2) / 2, far = f => Math.abs(f.x - mid) + Math.abs(f.y - P.y) * 1.5;
+    const who = fr.filter(f => far(f) < 700).sort((a, b) => far(a) - far(b)).slice(0, 1 + (Math.random() * 3 | 0)); if (!who.length) return;
+    const x1 = S.x1, x2 = S.x2, y = S.y, A = actStart(st, 'station', {max: 80, need: 0, idle: idleRest, step: A => !A.m.some(f => f.grp === A)});
+    who.forEach((f, i) => {
+      const sx = U.clamp(x1 + (x2 - x1) * (0.3 + 0.2 * i + Math.random() * 0.1), x1 + 6, x2 - 6);
+      claim(A, f);
+      if (!go(st, f, P, sx)) { f.grp = null; f.q.length = 0; return; }
+      f.q.push(call(g => { if (g.grp !== A) return; g.grp = null; g.stn = {ph: 0, t: 0, x0: g.x, y0: g.y, x: sx, y, x1, x2, lag: 0.3 + i * 0.5, o: i * 13, saw: 0, vx: sx, cd: 1, rider: null, Q: null}; bump('waits'); }));
+    });
+    st.stnNext = st.clock + (st.force ? 8 : st.play * rnd(1, 2));
+  }
+  const S_SLUMP = SB.glum.k[0][1];
+  /** One frame on the platform (f.stn). ph 0: on to it; 1: waiting; 2: aboard, out of sight; 3: running after it;
+   *  5: head down; 4: set down; 6: off the platform, to the nearest place the crew can stand. */
+  function stnStep(st, f, dt, sc) {
+    const n = f.stn, p = f.p; n.t += dt; f.tool = 0;
+    if (n.ph < 2) {
+      // the platform and whatever stands at it are posted anew every frame: found again by where they are
+      let v = null; if (sc) for (const a of sc.actors) if (!a.hid && a.tags && a.tags.indexOf('station') >= 0 && Math.abs(a.y - n.y) < 8 && n.x >= a.x1 - 4 && n.x <= a.x2 + 4) { v = a.train || null; break; }
+      if (v && v.stopped) {
+        n.saw = 1; n.vx = v.x;
+        if (n.ph === 1 && n.t > n.lag) {
+          const c = n.rider || (n.rider = {alight(x, y) { if (f.stn !== n || n.ph !== 2) return; if (num(x) && num(y)) { n.x = x; n.y = y; } n.ph = 4; n.t = 0; bump('alights'); }});
+          if (U.act(v, 'board', c)) { n.ph = 2; n.t = 0; bump('boards'); } else n.lag = n.t + 0.6;  // no room yet: ask again
+        }
+      } else if (n.saw) {  // it has pulled out without this one
+        const m = v || (sc && sc.near ? sc.near('vehicle', n.vx, n.y, 400) : null);
+        n.cd = m && m.vx ? (m.vx > 0 ? 1 : -1) : m && Math.abs(m.x - f.x) > 4 ? (m.x > f.x ? 1 : -1) : f.dir; n.ph = 3; n.t = 0; bump('missed');
+      } else if (n.ph === 1 && n.t > 75) { n.ph = 5; n.t = 0; }  // nothing came
+    }
+    if (n.ph === 0) {  // a walk if it is level, a hop if it is not
+      const dx = n.x - n.x0, dy = n.y - n.y0, d = Math.hypot(dx, dy), up = dy * dy > 9, u = d < 2 ? 1 : Math.min(1, n.t * (up ? 150 : 46 * f.s) / d);
+      f.x = n.x0 + dx * u; f.y = n.y0 + dy * u; if (Math.abs(dx) > 2) f.dir = dx > 0 ? 1 : -1;
+      if (up) { f.lift = Math.sin(u * Math.PI) * 9; play(f, SA.hop, 0.08); } else play(f, SA.walk);
+      tick(f, dt); if (u >= 1) { f.lift = 0; n.ph = 1; n.t = 0; }
+    } else if (n.ph === 1) { play(f, SA.stand); tick(f, dt); }
+    else if (n.ph === 2) { if (n.t > 240) { n.ph = 4; n.t = 0; } }  // (never set down: back where it got on)
+    else if (n.ph === 3) {
+      const end = n.cd > 0 ? n.x2 - 4 - n.o : n.x1 + 4 + n.o, d = end - f.x;  // (each stops short of the one in front) f.dir = n.cd; f.lift = 0; f.y = n.y;
+      if (d * n.cd > 2) { f.x += n.cd * Math.min(Math.abs(d), 150 * dt); play(f, O_PANIC, 0.05); tick(f, dt); } else { n.ph = 5; n.t = 0; f.an = null; }
+    } else if (n.ph === 5) { f.an = null; for (let j = 0; j < 10; j++) p[j] += (S_SLUMP[j] - p[j]) * 0.3; if (n.t > 3.2) { n.ph = 6; n.t = 0; } }
+    else if (n.ph === 4) { f.x = n.x; f.y = n.y; f.lift = 0; n.ph = 6; n.t = 0; }
+    if (n.ph === 6) {
+      if (!n.Q) { let bd = 1e9; for (const Q of st.plats) { if (!Q.ok || Q.away) continue; const d = Math.abs(Q.y - f.y) * 1.5 + Math.max(0, Q.x1 - f.x, f.x - Q.x2); if (d < bd) { bd = d; n.Q = Q; } } n.Q = n.Q || st.plats[0]; n.x0 = f.x; n.y0 = f.y; n.x = U.clamp(f.x, n.Q.x1 + 2, n.Q.x2 - 2); n.t = 0; }
+      const dx = n.x - n.x0, dy = n.Q.y - n.y0, d = Math.hypot(dx, dy), u = d < 2 ? 1 : Math.min(1, n.t * 170 / d);
+      f.x = n.x0 + dx * u; f.y = n.y0 + dy * u; f.lift = Math.sin(u * Math.PI) * Math.min(30, 6 + d * 0.12); if (Math.abs(dx) > 2) f.dir = dx > 0 ? 1 : -1; play(f, SA.hop, 0.08); tick(f, dt);
+      if (u >= 1) { f.lift = 0; f.y = n.Q.y; f.pl = n.Q.i; f.stn = null; f.q.length = 0; f.act = null; ladFix(f); }
+    }
+  }
+
+  // ---------- lights in the sky, put there by another kind (ctx.scene, tags "light" and "wonder") ----------
+  /** Now and then one of the crew who has one well above its head stops, points and stares for a few seconds. */
+  function skyLook(st, sc) {
+    const f = pickOf(st.crew); if (!spare(st, f) || f.x < 20 || f.x > st.w - 20 || st.clock < f.skyT || Math.random() > 0.2) return;
+    const a = f.act, on = a && a.a; if (on && on !== 'walk' && on !== 'rest') return;
+    let w = null; for (const o of sc.actors) if (!o.hid && o.tags && o.tags.indexOf('light') >= 0 && o.tags.indexOf('wonder') >= 0 && f.y - o.y > 150 && Math.abs(o.x - f.x) < 600) { w = o; break; }
+    if (!w) return;
+    f.skyT = st.clock + rnd(30, 70); bump('gazes'); SEEN.ax = Math.round(f.x); SEEN.ay = Math.round(f.y);
+    f.act = null; if (a) f.q.unshift(a);  // what it was at waits, and is taken up again afterwards
+    f.q.unshift(rest(SB.point, rnd(3, 5), {dir: w.x >= f.x ? 1 : -1, sky: {x: w.x, y: w.y}}));
+  }
+  /** What the crew has to do with other kinds, looked into a little more than once a second. */
+  function mixStep(st, sc) {
+    rescueStart(st, sc); skyLook(st, sc);
+    if (st.clock > st.stnNext && (!st.force || st.force === 'station')) stationStart(st, sc);
+  }
   const GROUPS = {yeti: yetiStart, fight: fightStart, scare: booStart, sled: sledStart, cocoa: cocoaStart, snowman: st => manStart(st, 0), tableau: st => manStart(st, st.force ? 1 + st.tabN++ % 8 : 1 + (Math.random() * 8 | 0)), angel: angelStart, santa: santaStart, camper: camperStart};
-  const GAGS = {shove: shoveStart, icicle: icicleStart, tongue: tongueStart, fort: fortStart, bunny: bunnyStart};
+  const GAGS = {shove: shoveStart, icicle: icicleStart, tongue: tongueStart, fort: fortStart, bunny: bunnyStart, peek: peekStart};
   function tryStart(st, list, ctx) {
     const F = st.force, names = F ? [F] : Object.keys(list).sort(() => Math.random() - 0.5);
     if (!F && list === GROUPS && !st.xmasDone && (ctx.opts.santa || 'xmas') === 'xmas' && xmas(ctx)) { st.xmasDone = 1; names.unshift('santa'); }  // on the two days he is the first thing to happen
@@ -1670,7 +1867,8 @@
       {key: 'always', label: 'Whatever the weather', type: 'bool', default: false},
       {key: 'bump', label: 'Bump interval', type: 'range', min: 8, max: 300, step: 2, unit: 's', default: 24},
       {key: 'play', label: 'Play interval', type: 'range', min: 20, max: 600, step: 10, unit: 's', default: 60},
-      {key: 'santa', label: 'Santa', type: 'select', choices: [['xmas', 'Christmas Eve and Day'], ['any', 'Any time'], ['off', 'Never']], default: 'xmas'}],
+      {key: 'santa', label: 'Santa', type: 'select', choices: [['xmas', 'Christmas Eve and Day'], ['any', 'Any time'], ['off', 'Never']], default: 'xmas'},
+      {key: 'mix', label: 'Interactions', type: 'bool', default: true}],
     create(ctx) {
       const r = ctx.rand, W = ctx.w, H = ctx.h, plats = ground(ctx);
       for (const P of plats) {
@@ -1701,7 +1899,7 @@
       // a panel that wakes while it is snowing shows snow that has been falling for a while
       if (ctx.opts.always || /^snowy/.test(ctx.env.weather || '')) for (const P of plats) { const nz = U.noise(ctx.seed + P.i * 13); for (let i = 0; i < P.n; i++) P.cols[i] = P.cap * (0.3 + 0.55 * (nz(i * 0.37) * 0.5 + 0.5)); }
       const crew = [], n = U.clamp(Math.round(+ctx.opts.crew || 3), 1, 6);
-      for (let i = 0; i < n + 2; i++) { const f = figure(0, plats[0].y, 0.9 + r() * 0.2); Object.assign(f, {gone: true, tx: 0, sx: 0, grp: null, hide: null, sh: 0, mug: 0, bury: 0, tong: null, shv: null, sled: 0, duck: 0, gift: 0, ready: 0, slot: 0, side: 0, cv: null, went: 0, tr: null, boss: false, guest: false, look: '', suit: '', noLad: false, noTool: false, q: [], act: null, re: null, job: null, jx: 0, pl: 0, tool: 0, load: 0, hat: HATS[i], n: i * 2 + 1, rq: 0, ov: null, fear: null, row: null, gd: null, cur: null, em: [], wpn: 0, tt: 0, x0: 0, y0: 0, fxi: 0, fetch: 0, lad: {on: false, k: 0, link: null, len: 130, d: 0, gx: 0, gy: 0, gyT: 0, gd: 1}, T: new Float32Array(4)}); crew.push(f); }
+      for (let i = 0; i < n + 2; i++) { const f = figure(0, plats[0].y, 0.9 + r() * 0.2); Object.assign(f, {gone: true, tx: 0, sx: 0, grp: null, hide: null, sh: 0, mug: 0, bury: 0, tong: null, shv: null, sled: 0, duck: 0, gift: 0, ready: 0, slot: 0, side: 0, cv: null, went: 0, tr: null, boss: false, guest: false, look: '', suit: '', noLad: false, noTool: false, q: [], act: null, re: null, job: null, jx: 0, pl: 0, tool: 0, load: 0, hat: HATS[i], n: i * 2 + 1, rq: 0, ov: null, fear: null, row: null, gd: null, cry: null, stn: null, bogey: null, skyT: 0, vS: null, vC: null, cur: null, em: [], wpn: 0, tt: 0, x0: 0, y0: 0, fxi: 0, fetch: 0, lad: {on: false, k: 0, link: null, len: 130, d: 0, gx: 0, gy: 0, gyT: 0, gd: 1}, T: new Float32Array(4)}); crew.push(f); }
       // two who are not shovellers: the foreman (hard hat, clipboard), and now and then someone in a pink bunny suit
       const boss = crew[n], bunny = crew[n + 1]; Object.assign(boss, {boss: true, look: 'boss', noTool: true, s: 1.04}); Object.assign(bunny, {guest: true, look: 'bunny', suit: '#f7a8cb', noTool: true, noLad: true, s: 0.98});
       // where one can stand out of sight: on the platform just under a tile, behind that tile
@@ -1718,6 +1916,7 @@
       const layer = document.createElement('canvas'); layer.width = W; layer.height = H;
       return {plats, crew, flakes, layer, lg: layer.getContext('2d'), bits: [], balls: [], req: null, quake: 0, row: null, bumpGap: (+ctx.opts.bump || 24), rowNext: (+ctx.opts.bump || 24) * 0.6, force, on: false,
         boss, bunny, covers, ice, iceP: null, iceDirty: true, iceF: [], stuck: [], iceN: 0, acts: [], men: [], ghosts: [], scraps: [], yeti: null, sinceYeti: 0, yetiN: 0, fort: null, fortP: null, shift: null, santa: null, rv: null, rvCv: null, glow: null, wp: null, ep: null,
+        mix: ctx.opts.mix !== false && ctx.opts.mix !== 0, mixT: 0, stnNext: force ? 6 : play * 0.4,
         play, playNext: force ? 7 : play * 0.5, gagNext: force ? 7 : play * 0.25, tabN: 0, sinceRv: 0, work: true, fz: 0, snowing: false, rr: 0, clock: 0, look: 0, chk: 0, w: W, h: H};
     },
     // a finger dragged along a pile brushes it off, as on the plain snow overlay
@@ -1735,12 +1934,12 @@
     swipe(st, dir) {
       if (!st.on) return;
       st.quake = 1;
-      for (const f of st.crew) if (!f.gone && !(f.act && AIR[f.act.a])) topple(f, dir, !!f.act && f.act.a === 'climb');
+      for (const f of st.crew) if (!f.gone && !f.cry && !(f.stn && f.stn.ph === 2) && !(f.act && AIR[f.act.a])) topple(f, dir, !!f.act && f.act.a === 'climb');
       const S = st.santa, V = st.rv; if (S && !S.seat && !S.tp) topple(S.f, dir, false); if (V && !V.f.gone) topple(V.f, dir, false);
     },
     tap(st, x, y, ctx) {
       if (!st.on) return;
-      for (const f of st.crew) if (!f.gone && onFigure(f, x, y, ctx)) {
+      for (const f of st.crew) if (!f.gone && !f.cry && !f.stn && onFigure(f, x, y, ctx)) {
         endOv(f);  // its own reaction comes first; the others go on staring
         if (f.re) return true;
         const a = f.act && f.act.a, firm = !a || a === 'walk' || a === 'dig' || a === 'rest';  // nobody falls off a ladder
@@ -1794,9 +1993,10 @@
       if (st.fort) fortStep(st, g, dt);
       if (st.shift) shiftStep(st, g, dt);
       playStep(st, dt, ctx);
+      if (sc && sc.all && st.mix && (st.mixT -= dt) < 0) { st.mixT = 0.7; mixStep(st, sc); }
 
       // one walks into another on the same tile top (or backs into one who is digging): a row
-      const firm = f => !f.gone && !f.ov && !f.fear && !f.row && !f.re && !f.grp && !f.boss && !f.guest && f.act && (f.act.a === 'walk' || f.act.a === 'dig' || f.act.a === 'rest');
+      const firm = f => !f.gone && !f.cry && !f.stn && !f.ov && !f.fear && !f.row && !f.re && !f.grp && !f.boss && !f.guest && f.act && (f.act.a === 'walk' || f.act.a === 'dig' || f.act.a === 'rest');
       if (!st.row && st.clock > st.rowNext) for (let i = 0; i < st.crew.length && !st.row; i++) for (let j = i + 1; j < st.crew.length; j++) {
         const a = st.crew[i], b = st.crew[j];
         if (a.pl === b.pl && Math.abs(a.x - b.x) < 15 && firm(a) && firm(b) && (a.act.a === 'walk' || b.act.a === 'walk') && (!a.lad.k || a.lad.on) && (!b.lad.k || b.lad.on)) { rowStart(st, a, b); break; }
@@ -1808,15 +2008,20 @@
       let stuckF = null; st.wp = white; st.ep = eyes;
       for (const f of st.crew) {
         if (f.gone) continue;
+        // carried off, or riding: out of sight, and nothing here reaches it until it is back
+        if (f.cry) { crewCarried(st, f, dt); if (f.cry) { if (sc) sc.next.push({kind: 'stick', role: 'crew', x: f.x, y: f.y, h: 40 * f.s, hid: true}); if (f.cry.ph !== 1) { solve(f); limbs(pa, hd, f); } continue; } }
+        if (f.stn && f.stn.ph === 2) { stnStep(st, f, dt, sc); if (sc) sc.next.push({kind: 'stick', role: 'crew', x: f.x, y: f.y, h: 40 * f.s, hid: true}); continue; }
         // a finger came down: stop (once any hop has landed) and stare
         const rq = st.req, on = f.act && f.act.a;
         if (rq && f.rq !== rq.id && on !== 'hop' && on !== 'sled' && on !== 'ride') { f.rq = rq.id; if (!f.fear) awe(f, rq.x, rq.y, f.n + rq.id, on === 'climb', on === 'climb' || (f.tool === 1 && !f.row)); }
         const gz = goose(sc, f); if (!gz) f.gd = null;
         if (!f.fear && gz && !AIR[on] && (on === 'climb' || Math.abs(f.y - st.plats[f.pl].y) < 3) && scared(f, gz)) fearStart(st, f);
+        if (f.fear && f.stn) f.stn = null;
         const row = st.row;
         if (f.fear) fearStep(st, f, dt, gz);
         else if (f.ov) ovStep(f, dt, st.crew);
         else if (f.row) { /* stepped with its opponent, above */ }
+        else if (f.stn) stnStep(st, f, dt, sc);
         else if (row && row.stage === 3 && firm(f) && !(f.lad.k && !f.lad.on)) {  // a fight: down tools and watch; one of them cheers
           f.dir = row.a.x >= f.x ? 1 : -1; f.tool = f.n % 3 ? 2 : 0; play(f, f.n % 3 ? SA.lean : SA.wave); tick(f, dt);
         }
@@ -1824,13 +2029,21 @@
         if (f.gone) continue;
         {
           const B = st.plats[f.pl], an = f.act && f.act.a, nx = !an && f.q.length ? f.q[0].a : '', air = AIR[an] || an === 'climb' || nx === 'hop' || nx === 'climb' || (f.fear && (f.fear.hang || f.fear.cling)) || f.row;
-          const bad = f.pl && (f.x < -5 || f.x > W + 5) ? 1 : !air && Math.abs(f.y - B.y) > 3 ? 2 : !air && !f.ov && f.pl && (f.x < B.x1 - 8 || f.x > B.x2 + 8) ? 3 : 0;
+          const bad = f.stn ? 0 : f.pl && (f.x < -5 || f.x > W + 5) ? 1 : !air && Math.abs(f.y - B.y) > 3 ? 2 : !air && !f.ov && f.pl && (f.x < B.x1 - 8 || f.x > B.x2 + 8) ? 3 : 0;
           if (bad) flag(st, f, bad);
         }
         const hang = f.fear && f.fear.hang;
-        if (sc) sc.next.push({kind: 'stick', role: 'crew', x: f.x, y: f.y, h: 40 * f.s, hid: !!hang});  // hid: out of a goose's sight
+        if (f.held && f.grp == null) { U.act(f.held, 'free'); f.held = null; f.rescue = null; }  // its game was cut short: the trap lets go
+        if (sc) {
+          if (!f.vS) crewVerbs(st, f);
+          const post = {kind: 'stick', role: 'crew', x: f.x, y: f.y, h: 40 * f.s, hid: !!hang, scare: f.vS, carry: f.vC};  // hid: out of a goose's sight
+          if (f.held) { const tr = f.held; post.tags = HELD_TAGS; post.rescue = f.rescue; if (sc.over) sc.over.push(gg => U.act(tr, 'paint', gg)); }
+          sc.next.push(post);
+        }
+        const sky = f.act && f.act.sky && !f.fear && !f.ov && !f.re ? f.act.sky : null; if (sky) f.p[9] = -30;  // head back, to look up at the light
         solve(f);
         if (hang) { reach(f, 0, hang.gx, hang.gy); reach(f, 1, hang.gx, hang.gy); }
+        if (sky) reach(f, 0, sky.x, sky.y);  // the arm straight at it
         const aa = f.act && f.act.a, C = st.plats[f.pl], J = f.J, s = f.s, T = f.T;
         if (!f.noLad) {
           // the ladder: leaning on its tile, under an arm, or swinging between the two
@@ -1838,7 +2051,7 @@
           let x1 = cx - f.dir * half * 0.97, y1 = cy + half * 0.2, x2 = cx + f.dir * half * 0.97, y2 = cy - half * 0.2;
           // while its owner works, rests or plays, a carried ladder lies on the ground; it stays there until it is fetched
           const far = la.d > 0 && (aa === 'drop' || Math.abs(f.x - la.gx) > 30 || Math.abs(C.y - 2 - la.gyT) > 4);
-          const busy = !la.on && !k && (f.re || f.row || f.fear || far || (aa && !MOVING[aa]) || (!f.fetch && (la.d > 0 || f.grp)));
+          const busy = !la.on && !k && (f.re || f.row || f.fear || f.stn || far || (aa && !MOVING[aa]) || (!f.fetch && (la.d > 0 || f.grp)));
           if (la.d > 0 && k > 0 && far) ghost(st, la);  // (whatever led here: it is not swung across from far away)
           if (busy && !la.d) { la.gx = C.x2 - C.x1 > la.len ? U.clamp(f.x, C.x1 + half - 6, C.x2 - half + 6) : (C.x1 + C.x2) / 2; la.gd = f.dir; la.gy = la.gyT = C.y - 2; }  // all of it on the tile, where there is room
           if (la.d) la.gy += U.clamp(la.gyT - la.gy, -500 * dt, 500 * dt);
@@ -1902,7 +2115,7 @@
       g.lineCap = 'butt'; g.lineWidth = 6.8; g.setLineDash([1.7, 8.3]); g.stroke(rungs); g.setLineDash([]);  // rungs: one dashed stroke down the middle
       ink(g, pa, hd);
       tools(g, shafts, blades);
-      for (const f of st.crew) if (!f.gone && !f.hide && !f.suit) hat(g, f);
+      for (const f of st.crew) if (!f.gone && !f.hide && !f.suit && !(f.cry && f.cry.ph === 1) && !(f.stn && f.stn.ph === 2)) hat(g, f);
       for (const f of st.crew) if (f.gift && !f.gone) giftStep(st, f, g, dt);  // Santa's presents: carried, opened, and what was inside
       for (let i = st.scraps.length - 1; i >= 0; i--) {  // torn wrapping paper: it flies, and lies in the snow for a while
         const c = st.scraps[i]; if ((c.l -= dt) < 0) { st.scraps.splice(i, 1); continue; }
@@ -2482,6 +2695,29 @@
     }
   }
 
+  /** The verbs on a fighter. A fright takes the pair, as a goose does. Carried off, its opponent starts back and stares,
+   *  and waits; it is set down at the spot promised and leaps home from there. */
+  function fightVerbs(st, f) {
+    const duel = () => { for (const du of st.duels) if (du.f[0] === f || du.f[1] === f) return du; return null; };
+    f.vS = by => {
+      const du = duel(); if (!du || du.f[0].cry || du.f[1].cry) return false; if (du.scare) return true;
+      for (const o of du.f) bogeyAt(o, by); scareStart(st, du, Math.hypot(f.bogey.x - f.x, f.bogey.y - f.y)); return true;
+    };
+    f.vC = by => {
+      const du = duel(); if (!du || !by || !num(by.x) || !num(by.y) || du.scare || du.pet || du.phase.slice(0, 3) === 'pet' || du.f[0].cry || du.f[1].cry || !calmish(f)) return false;
+      for (const o of du.f) { endOv(o); o.q.length = 0; if (calmish(o)) o.cur = null; if (o !== f) { awe(o, by.x, by.y, o.n, false, false); if (o.ov) o.ov.t = 0; } }
+      f.cur = null; f.chg = null; f.p[10] = 0; f.had = f.wpn || f.had; f.wpn = 0; f.y = st.plats[f.pl].y; carryOff(f, by); return true;
+    };
+  }
+  function fightCarried(st, du, f, dt) {
+    const c = f.cry, r = carried(f, dt), P = st.plats[c.pl];
+    if (r === 1) { f.x = c.out ? c.out.x : c.x0; f.y = c.out ? c.out.y : c.y0; }
+    else if (r === 2) {
+      if (c.out) leapTo(f, P, U.clamp(c.x0, P.x1 + 4, P.x2 - 4), c.x0 >= f.x ? 1 : -1, 0, false); else f.y = P.y;
+      f.q.push({tr: T_WIPE, wp: f.had}); f.had = 0; du.phase = 'salute';
+    }
+  }
+
   /** Play a fighter's queued tracks. False when it has nothing to do. */
   function advance(st, f, dt) {
     let s = f.cur;
@@ -2503,6 +2739,7 @@
   const calmish = f => f.pin === 0 && f.lift < 1 && Math.abs(f.p[10]) < 8 && f.y > 0;
   function duelStep(st, du, dt) {
     const a = du.f[0], b = du.f[1];
+    if (a.cry || b.cry) { for (const f of du.f) { if (f.cry) fightCarried(st, du, f, dt); else if (f.ov) ovStep(f, dt, st.figs); else if (!advance(st, f, dt)) idle(f, dt); } return; }  // one has been carried off: the other waits
     // a goose outranks everything: the fight, a stare, a truce
     const ga = goose(st.scene, a), gb = goose(st.scene, b); if (!ga) a.gd = null; if (!gb) b.gd = null;
     if (du.scare) { scareStep(st, du, dt); return; }
@@ -2558,7 +2795,7 @@
       }
       const spots = plats.filter(P => P.y >= 52 && P.x2 - P.x1 >= 150);
       for (let i = spots.length - 1; i > 0; i--) { const j = r() * (i + 1) | 0, t = spots[i]; spots[i] = spots[j]; spots[j] = t; }
-      for (let i = 0; i < n; i++) figs.push(Object.assign(figure(0, -60, 0.95 + r() * 0.13), {col: SASH[i], wpn: 0, wt: 1, pl: 0, q: [], cur: null, tt: 0, x0: 0, y0: 0, fxi: 0, em: [], tip: [0, 0], tr: new Float32Array(8), seen: false, hx: 0, hy: 0, calm: false, watch: false, n: i * 2 + 1, rq: 0, ov: null, had: 0, panic: false, yelp: 0, gd: null}));
+      for (let i = 0; i < n; i++) figs.push(Object.assign(figure(0, -60, 0.95 + r() * 0.13), {col: SASH[i], wpn: 0, wt: 1, pl: 0, q: [], cur: null, tt: 0, x0: 0, y0: 0, fxi: 0, em: [], tip: [0, 0], tr: new Float32Array(8), seen: false, hx: 0, hy: 0, calm: false, watch: false, n: i * 2 + 1, rq: 0, ov: null, had: 0, panic: false, yelp: 0, gd: null, cry: null, bogey: null, vS: null, vC: null}));
       // one soft dot for every glow, stamped where light is wanted
       const glow = document.createElement('canvas'); glow.width = glow.height = 64;
       const gg = glow.getContext('2d'), gr = gg.createRadialGradient(32, 32, 0, 32, 32, 32);
@@ -2611,6 +2848,7 @@
       }
       const pa = new Path2D(), hd = new Path2D(), staffs = new Path2D(), swords = new Path2D(), thin = new Path2D(), hot = new Path2D(), dust = new Path2D(), dot3 = new Path2D(), eyes = new Path2D(), hearts = new Path2D();
       for (const f of st.figs) {
+        if (f.cry && f.cry.ph === 1) { sn.next.push({kind: 'stick', role: 'fighter', x: f.x, y: f.y, h: 40 * f.s, hid: true}); continue; }  // carried off: out of sight
         solve(f); const J = f.J, s = f.s;
         if (f.wpn) {
           const a = (f.p[11] + f.p[10]) * D, vx = f.dir * Math.sin(a), vy = -Math.cos(a);
@@ -2628,7 +2866,8 @@
         }
         while (f.em.length) emit(st, f, f.em.shift());
         dots(dot3, f); eye(eyes, f); if (f.panic) marks(dot3, thin, f, !!f.cur && f.lift < 1);
-        sn.next.push({kind: 'stick', role: 'fighter', x: f.x, y: f.y - f.lift, h: 40 * f.s});
+        if (!f.vS) fightVerbs(st, f);
+        sn.next.push({kind: 'stick', role: 'fighter', x: f.x, y: f.y - f.lift, h: 40 * f.s, hid: !!f.cry, scare: f.vS, carry: f.vC});
       }
       // dust, swooshes, stars and sparks
       for (let i = st.fx.length - 1; i >= 0; i--) {
@@ -2660,6 +2899,7 @@
       // a sash at the waist and a headband with a tail that streams behind, in each fighter's own colour
       g.lineWidth = 2.8;
       for (const f of st.figs) {
+        if (f.cry && f.cry.ph === 1) continue;
         const J = f.J, s = f.s; let ux = J[2] - J[0], uy = J[3] - J[1]; const ul = Math.hypot(ux, uy) || 1; ux /= ul; uy /= ul;
         const bx = J[4] + f.dir * uy * HR * s, by = J[5] - f.dir * ux * HR * s, up = f.chg ? 1 : 0, tx = bx - f.dir * (up ? 2 : 9) * s + up * Math.sin(st.clock * 31) * 3, ty = up ? by - 13 : by + 4;  // the tail whips upward while power gathers
         if (!f.seen) { f.hx = tx; f.hy = ty; f.seen = true; }
