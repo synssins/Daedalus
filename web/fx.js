@@ -207,19 +207,34 @@
     if (p < 0) p = 0;
     return opts.loop === 'stay' ? Math.min(1, p) : p - Math.floor(p);
   }
+  // Dashboards left behind keep their overlays as they were, paused: the snow that lay, the crew's work, where
+  // everyone stood. Swiping back takes them up again. A kind that changes real tiles (it has restore) is the
+  // exception: the tiles are rebuilt with every dashboard, so it gives them back and starts again.
+  const parked = new Map();  // layout signature -> {items, rects}
+  let cur = null;
   function build() {
+    const sig = W + 'x' + H + '|' + key + '|' + JSON.stringify(config) + '|' + rects.map(r => [Math.round(r.x), Math.round(r.y), Math.round(r.w), Math.round(r.h), r.flat ? 1 : 0, r.hidden ? 1 : 0].join(',')).join(';');
     items.forEach(it => { if (it.def.restore) { try { it.def.restore(it.st, it.ctx); } catch (e) { fail(it.kind, e); } } });  // a kind that goes gives back the tiles it took, hid or cut
-    items = []; scene.actors = []; scene.next = []; scene.over.length = 0;
+    const stay = items.filter(it => !it.def.restore);
+    if (cur && stay.length) { parked.delete(cur.sig); parked.set(cur.sig, {items: stay, rects: cur.rects}); if (parked.size > 8) parked.delete(parked.keys().next().value); }
+    // the same dashboard, laid out the same, with the same overlays: its kept state fits. The rectangles it knows
+    // are brought up to date (the tiles' elements are new), so everything it remembers points at the live tiles.
+    const back = parked.get(sig); parked.delete(sig);
+    if (back && back.rects.length === rects.length) { back.rects.forEach((r, i) => Object.assign(r, rects[i])); rects = back.rects; }
+    items = []; scene.actors = []; scene.next = []; scene.over.length = 0; cur = null;
     if (!W) return;
     config.forEach((c, n) => {
       const def = kinds[c.kind]; if (!def) return;
+      const kept = back && back.rects === rects && back.items.find(it => it.n === n && it.kind === c.kind);
+      if (kept) { items.push(kept); return; }
       const opts = {}; (def.options || []).forEach(o => { opts[o.key] = o.default; }); Object.assign(opts, c);
       if (HP.fx.demo) opts.now = 1;  // the Studio's Preview: kinds that wait (a goose's visit, the tank battle) start at once
       const seed = U.hash(key + '/' + c.kind + '/' + n + '/' + (opts.start || ''));
       const ctx = {w: W, h: H, rects, gaps, env, opts, seed, scene, util: U, rand: U.rng(seed), redraw, page: key, pages, progress: def.grows ? progressOf(def, opts) : 1, days: +opts.days || def.days || 7};
       let st = null; try { st = def.create ? def.create(ctx) : {}; } catch (e) { fail(c.kind, e); return; }
-      items.push({def, ctx, st, kind: c.kind});
+      items.push({def, ctx, st, kind: c.kind, n});
     });
+    cur = {sig, rects};
     items.sort((a, b) => (a.def.z || 0) - (b.def.z || 0));
     grow(); loop();  // grow() draws, and sets how often to draw again from the cycles now in use
   }
@@ -296,10 +311,12 @@
     /** The Studio's preview: show a growing overlay at this point of its cycle (0 to 1), or null for the real clock. */
     preview(p) { preview = p; items.forEach(it => { if (it.def.grows) it.ctx.progress = progressOf(it.def, it.ctx.opts); }); redraw(); },
     get count() { return items.length; },
+    /** Drop everything kept for dashboards not on screen, and what is on screen too: the next layout builds afresh. */
+    forget() { parked.clear(); items.forEach(it => { if (it.def.restore) { try { it.def.restore(it.st, it.ctx); } catch (e) { fail(it.kind, e); } } }); items = []; cur = null; },
     /** Everything on the dashboard right now: the same object every kind gets as ctx.scene. For tests and tools. */
     get scene() { return scene; },
   };
-  /** Sunlight under water, for the koi pond and the coral reef: slanted beams from the surface and wavering
+  /** Sunlight under water, for the coral reef: slanted beams from the surface and wavering
    *  patches of light on the seabed. Both kinds call it; it draws once a frame. */
   HP.fx.rays = (g, w, h, t) => {
     if (HP.fx.rays.t === t) return; HP.fx.rays.t = t;

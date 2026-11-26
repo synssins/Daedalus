@@ -2,6 +2,7 @@
 // Overlays that live in the channels between the buttons: circuit traces, koi, ants, a toy train, flowing water or
 // lava, constellations and a string of lights. Most of them share one idea: the gaps between the buttons, plus a line
 // around the screen's border, joined up into a network of points and links that things can travel along.
+// The koi began here too; their pond is now the whole screen, seen from above.
 (() => {
   const U = HP.fx.util, TAU = Math.PI * 2;
 
@@ -244,78 +245,172 @@
   });
 
   // ---------- Koi pond ----------
-  // Koi seen from above cruise the channels and the screen's edge. Each is a spine of seven points on its route, so the
-  // body bends round the corners; the tail waves faster the faster it swims.
+  // The whole screen is the pond, seen from above: koi swim anywhere, over the tiles too. Each is a spine of seven
+  // points dragged behind its nose like a rope, so the body bends through every turn; the tail waves faster the
+  // faster it swims. Nothing tints the screen: the water is only rings, a few lily pads and a faint net of light.
   const KOI = [  // body, patches, fins, line down the back
     {body: '#f6f1e8', patch: '#ee5a1e', fin: 'rgba(250,236,215,.6)', back: 'rgba(190,150,120,.35)'},
     {body: '#f27a1c', patch: null, fin: 'rgba(255,170,90,.6)', back: 'rgba(170,60,10,.5)'},
     {body: '#f4f1ec', patch: null, fin: 'rgba(240,242,250,.55)', back: 'rgba(170,165,160,.45)'}];
   const KOI_W = [0.05, 0.105, 0.125, 0.11, 0.075, 0.04];  // half width along the body, as a share of its length
+  /** The net of light the sun throws on a pond floor: bright lines where the cells of a warped honeycomb meet, on a
+   *  small canvas that repeats without a seam. Made once; drawing it is two pattern fills. */
+  let NET = null;
+  function caustic() {
+    if (NET) return NET;
+    const n = 128, c = NET = document.createElement('canvas'); c.width = c.height = n;
+    const d = c.getContext('2d'), im = d.createImageData(n, n), r = U.rng(77), px = [], py = [], k = TAU / n;
+    for (let i = 0; i < 13; i++) { px.push(r() * n); py.push(r() * n); }
+    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+      const wx = x + 7 * Math.sin(y * k * 2) + n, wy = y + 7 * Math.sin(x * k * 2 + 1) + n; let d1 = 1e9, d2 = 1e9;  // the warp bends the straight cell walls
+      for (let i = 0; i < 13; i++) { let dx = Math.abs(wx - px[i]) % n, dy = Math.abs(wy - py[i]) % n; if (dx > n / 2) dx = n - dx; if (dy > n / 2) dy = n - dy; const dd = dx * dx + dy * dy; if (dd < d1) { d2 = d1; d1 = dd; } else if (dd < d2) d2 = dd; }
+      const v = Math.max(0, 1 - (Math.sqrt(d2) - Math.sqrt(d1)) / 6), o = (y * n + x) * 4;
+      im.data[o] = 235; im.data[o + 1] = 250; im.data[o + 2] = 255; im.data[o + 3] = v * v * 255;
+    }
+    d.putImageData(im, 0, 0); return c;
+  }
+  /** One lily pad on its own little canvas: a flat disc with a notch, its shadow on the water, perhaps a flower. */
+  function lily(r, a, flower, dark) {
+    const s = Math.ceil(r * 2 + 10), c = document.createElement('canvas'); c.width = c.height = s;
+    const d = c.getContext('2d'), cut = 0.24;
+    d.translate(s / 2, s / 2);
+    for (let k = 0; k < 2; k++) {  // the shadow first, a little down and to the right, then the pad
+      d.save(); if (!k) d.translate(2, 3); d.rotate(a);
+      d.beginPath(); d.moveTo(0, 0); d.arc(0, 0, r, cut, TAU - cut); d.closePath();
+      d.fillStyle = !k ? 'rgba(0,10,25,.22)' : dark ? '#3b8a47' : '#4c9c4f'; d.fill();
+      if (k) {
+        d.strokeStyle = 'rgba(18,66,34,.75)'; d.lineWidth = 1; d.stroke();
+        d.strokeStyle = 'rgba(200,240,180,.32)'; d.lineWidth = 0.8; d.beginPath();
+        for (let i = 1; i < 7; i++) { const v = cut + (TAU - 2 * cut) * i / 7; d.moveTo(0, 0); d.lineTo(Math.cos(v) * r * 0.86, Math.sin(v) * r * 0.86); }
+        d.stroke();
+      }
+      d.restore();
+    }
+    if (flower) {
+      const fr = Math.min(8, r * 0.5); d.translate(-Math.cos(a) * r * 0.25, -Math.sin(a) * r * 0.25);  // away from the notch
+      for (let ring = 0; ring < 2; ring++) {
+        d.fillStyle = ring ? '#fff6f8' : '#f6b9cf'; d.strokeStyle = 'rgba(190,90,130,.45)'; d.lineWidth = 0.5;
+        for (let i = 0, m = ring ? 5 : 8; i < m; i++) { const v = TAU * i / m + ring * 0.4, q = fr * (ring ? 0.3 : 0.58); d.beginPath(); d.ellipse(Math.cos(v) * q, Math.sin(v) * q, fr * (ring ? 0.34 : 0.46), fr * 0.22, v, 0, TAU); d.fill(); d.stroke(); }
+      }
+      d.fillStyle = '#f2c230'; d.beginPath(); d.arc(0, 0, fr * 0.2, 0, TAU); d.fill();
+    }
+    return c;
+  }
+  const koiRing = (st, x, y, big, wait) => { if (st.rings.length < 18) st.rings.push({x, y, t: -(wait || 0), big: !!big}); };
   HP.fx.add('koi', {
-    label: 'Koi pond', live: true, fps: 12,
-    options: [{key: 'count', label: 'How many', type: 'range', min: 2, max: 10, step: 1, default: 5}, {key: 'light', label: 'Sunlight', type: 'bool', default: true}],
+    label: 'Koi pond', live: true, fps: 12, covers: true,
+    options: [{key: 'count', label: 'How many', type: 'range', min: 2, max: 10, step: 1, default: 5}, {key: 'light', label: 'Sunlight', type: 'bool', default: true}, {key: 'pads', label: 'Lily pads', type: 'bool', default: true}],
     create(ctx) {
-      const net = network(ctx), r = ctx.rand, fish = [], n = U.clamp(Math.round(ctx.opts.count), 2, 10);
+      const r = ctx.rand, W = ctx.w, H = ctx.h, fish = [], pads = [], n = U.clamp(Math.round(ctx.opts.count), 2, 10);
+      // lily pads: the same on every tablet. Three where the screen is empty, three in the gaps; a pad may lap a tile's rim, no further.
+      if (ctx.opts.pads !== false) {
+        const solid = ctx.rects.filter(b => !b.hidden), open = [], gap = [];  // flat tiles too: a pad must not sit on a clock
+        for (let i = 0; i < 500; i++) {
+          const x = 16 + r() * (W - 32), y = 16 + r() * (H - 32); const e = Math.min(x, y, W - x, H - y) - 3; let c = e;
+          for (const b of solid) c = Math.min(c, Math.hypot(Math.max(b.x - x, 0, x - b.x - b.w), Math.max(b.y - y, 0, y - b.y - b.h)));
+          if (c >= 15) open.push({x, y, c, e}); else if (c >= 3.5 && e >= 11) gap.push({x, y, c, e});
+        }
+        for (const list of [open, gap]) for (let k = 0, m = 0; k < list.length && m < 3; k++) {
+          const p = list[k]; if (pads.some(o => Math.hypot(o.x - p.x, o.y - p.y) < (list === open ? 110 : 170))) continue;
+          const rad = U.clamp(Math.min(p.c + (list === open ? 0 : 7), p.e), 9, 21), flower = list === open ? m === 0 : m === 1;
+          pads.push({x: p.x, y: p.y, img: lily(rad, r() * TAU, flower, r() < 0.5), post: {kind: 'lilypad', tags: ['prop'], view: 'top', x: p.x, y: p.y, h: rad * 2}}); m++;
+        }
+      }
       for (let i = 0; i < n; i++) {
-        const len = 50 + r() * 16, kind = [0, 1, 2, 0, 1, 0, 2, 1, 0, 1][i], w = start(net, net.coreList[Math.floor(r() * net.coreList.length)], r() < 0.5, true), patches = [];
+        const len = 36 + r() * 34, kind = [0, 1, 2, 0, 1, 0, 2, 1, 0, 1][i], patches = [], a = r() * TAU, x = 50 + r() * (W - 100), y = 50 + r() * (H - 100), sx = new Float32Array(7), sy = new Float32Array(7);
         if (kind === 0) for (let k = 0, m = 2 + Math.floor(r() * 2); k < m; k++) patches.push({k: 0.5 + (k + r() * 0.8) * 3.4 / m, off: (r() - 0.5) * 0.5, rx: 0.07 + r() * 0.06, ry: 0.45 + r() * 0.3});
-        w.d = len + 20 + r() * 120; grow(w, w.d, 40);
-        fish.push({w, len, kind, patches, sp: 20 + r() * 14, ph: r() * TAU, nz: U.noise(ctx.seed + i * 13 + 5), burst: 0, shy: 0, x: 0, y: 0, a: 0, post: {kind: 'koi', tags: ['creature', 'animal'], x: 0, y: 0, h: 10, dir: 1}});
+        for (let k = 0; k < 7; k++) { sx[k] = x - Math.cos(a) * k * len / 6; sy[k] = y - Math.sin(a) * k * len / 6; }
+        const sp = 16 + r() * 16;  // its own pace
+        fish.push({len, kind, patches, sp, v: sp, ph: r() * TAU, nz: U.noise(ctx.seed + i * 13 + 5), burst: 0, shy: 0, x, y, a, w: 0, sx, sy, flee: 0, fa: 0, rest: 0, next: 6 + r() * 30, mate: -1, mt: 4 + r() * 20, eat: null, ring: 0,
+          post: {kind: 'koi', tags: ['creature', 'animal'], view: 'top', x, y, h: 10, dir: 1}});
       }
       const sp = []; for (let k = 0; k < 7; k++) sp.push({x: 0, y: 0, a: 0, nx: 0, ny: 0});
-      return {net, fish, rings: [], sp, q: new Array(26), food: null, now: 0};
+      return {fish, pads, rings: [], sp, q: new Array(26), food: [], pat: null, now: 0};
     },
-    // A tap on open water is a pinch of food: rings where it lands, and a moment later the fish near by come for it
-    // and nose about the spot. Never over a tile, and the tap is not kept: nothing of the pond is under the finger.
+    // A tap on open water is a pinch of food: pellets and rings where it lands, and a moment later the fish near by
+    // come and eat them. The middle of a tile keeps its tap.
     tap(st, x, y, ctx) {
-      if (U.over(ctx.rects, x, y)) return;
-      st.food = {x, y, t: st.now}; st.rings.push({x, y, t: 0}, {x, y, t: -0.3});
+      if (deep(ctx, x, y)) return false;
+      for (let i = 0; i < 4 && st.food.length < 12; i++) st.food.push({x: U.clamp(x + (Math.random() - 0.5) * 30, 12, ctx.w - 12), y: U.clamp(y + (Math.random() - 0.5) * 30, 12, ctx.h - 12), t: st.now, gone: false});
+      koiRing(st, x, y); koiRing(st, x, y, false, 0.3);
+      return true;
     },
     touch(st, x, y) {
-      // the near ones dart off; one that was heading for the finger whips round first
+      // the near ones dart off, away from the finger, and the water rings where it came down
       for (const f of st.fish) {
-        const dx = x - f.x, dy = y - f.y, d = Math.hypot(dx, dy); if (d > 230) continue;
-        f.burst = Math.max(f.burst, 60 + 150 * (1 - d / 230));
-        if (Math.cos(f.a) * dx + Math.sin(f.a) * dy > 0) turnBack(f.w, f.w.d, 14);
+        const d = Math.hypot(x - f.x, y - f.y); if (d > 230) continue;
+        f.burst = Math.max(f.burst, 60 + 150 * (1 - d / 230)); f.flee = 0.9; f.fa = Math.atan2(f.y - y, f.x - x); f.rest = 0;
       }
+      koiRing(st, x, y);
     },
     draw(g, st, ctx, t, dt) {
-      if (ctx.opts.light !== false && !ctx.env.night) HP.fx.rays(g, ctx.w, ctx.h, t);
-      const S = st.sp, q = st.q, sc = ctx.scene, threats = sc && sc.all ? sc.all('threat') : null;
-      st.now = t; if (st.food && t - st.food.t > 10) st.food = null;
-      const food = st.food && t - st.food.t > 1 ? st.food : null;  // they need a moment to notice
-      // rings on the water, under the fish
-      g.lineWidth = 1.2;
-      for (let i = st.rings.length - 1; i >= 0; i--) {
-        const r = st.rings[i]; r.t += dt; if (r.t > 1.6) { st.rings.splice(i, 1); continue; }
-        if (r.t < 0) continue;  // a second ring, still to come
-        g.strokeStyle = 'rgba(232,244,255,' + ((r.big ? 0.75 : 0.3) * (1 - r.t / 1.6)).toFixed(3) + ')';
-        g.beginPath(); g.arc(r.x, r.y, 5 + r.t * 20, 0, TAU); g.moveTo(r.x + 2 + r.t * 11, r.y); g.arc(r.x, r.y, 2 + r.t * 11, 0, TAU); g.stroke();
+      const W = ctx.w, H = ctx.h, S = st.sp, q = st.q, sc = ctx.scene, threats = sc && sc.all ? sc.all('threat') : null, F = st.fish, food = st.food;
+      st.now = t;
+      // sunlight from above: the net of light, twice, at two sizes drifting two ways. Where the two cross it is brighter.
+      if (ctx.opts.light !== false && !ctx.env.night) {
+        g.fillStyle = st.pat || (st.pat = g.createPattern(caustic(), 'repeat'));
+        for (let k = 0; k < 2; k++) {
+          const s = k ? 1.9 : 2.7, m = 128 * s, ox = (k ? -t * 5 : t * 7) % m, oy = (k ? t * 6 + 50 : t * 4) % m;
+          g.save(); g.globalAlpha = (k ? 0.1 : 0.14) * (0.8 + 0.2 * Math.sin(t * 0.3 + k * 2)); g.translate(ox, oy); g.scale(s, s); g.fillRect(-ox / s, -oy / s, W / s, H / s); g.restore();
+        }
       }
-      for (const f of st.fish) {
-        const w = f.w, L = f.len, K = KOI[f.kind];
+      for (let i = food.length - 1; i >= 0; i--) if (food[i].gone || t - food[i].t > 30) food.splice(i, 1);  // eaten, or sunk
+      for (let n = 0; n < F.length; n++) {
+        const f = F[n], L = f.len, K = KOI[f.kind];
         f.burst *= Math.exp(-dt * 1.5);  // calming down
-        // something to fear standing over the water (not over a tile's face): away with a splash, and no second fright for a moment
+        // something to fear within reach, anywhere on the surface: away with a splash, and no second fright for a moment
         f.shy -= dt;
         if (threats && f.shy <= 0) for (const th of threats) {
-          const ty = th.y - (th.h || 0) / 2, dx = th.x - f.x, dy = ty - f.y; if (dx * dx + dy * dy > 8100 || st.net.hit(th.x, ty)) continue;
-          f.shy = 3; f.burst = Math.max(f.burst, 170); if (Math.cos(f.a) * dx + Math.sin(f.a) * dy > 0) turnBack(w, w.d, 14);
-          st.rings.push({x: f.x, y: f.y, t: 0, big: true}, {x: f.x, y: f.y, t: -0.15, big: true}); break;
+          const ty = th.y - (th.h || 0) / 2, dx = th.x - f.x, dy = ty - f.y; if (dx * dx + dy * dy > 14400) continue;
+          f.shy = 3; f.burst = Math.max(f.burst, 170); f.flee = 1.2; f.fa = Math.atan2(-dy, -dx); f.rest = 0;
+          koiRing(st, f.x, f.y, true); koiRing(st, f.x, f.y, true, 0.15); break;
         }
-        let v = f.sp * (0.8 + 0.3 * f.nz(t * 0.25)) + f.burst;
-        const fd = food ? Math.hypot(food.x - f.x, food.y - f.y) : 1e9;
-        if (fd < 420) {
-          if (!w.want && Math.cos(f.a) * (food.x - f.x) + Math.sin(f.a) * (food.y - f.y) < 0) turnBack(w, w.d, 14);  // heading away: round it comes
-          w.want = food; v = fd < 50 ? v * 0.25 : v + 60;  // hurries over, then dawdles at the food
-        } else if (w.want) w.want = null;
-        w.d += v * dt; f.ph += dt * (2.2 + v * 0.11);
-        grow(w, w.d, 30); w.d -= trim(w, w.d, L + 10);
-        for (let k = 1; k < w.p.length - 1; k++) { const c = w.p[k]; if (c.sharp && !c.done && w.c[k] <= w.d) { c.done = true; if (st.rings.length < 8) st.rings.push({x: c.x, y: c.y, t: 0}); } }
+        // where it would like to go, as a vector: its own wandering curve, then whatever pushes or pulls
+        const wa = f.a + f.nz(t * 0.11 + 40) * 1.2; let wx = Math.cos(wa), wy = Math.sin(wa), turn = 1.4, goal = f.sp * (0.8 + 0.3 * f.nz(t * 0.25));
+        // company: now and then it falls in beside another for a while, then goes its own way again
+        f.mt -= dt;
+        if (f.mt <= 0) {
+          if (f.mate >= 0 || F.some(o => o.mate === n)) { f.mate = -1; f.mt = 15 + Math.random() * 40; }  // one that is followed leads, and follows nobody
+          else { let bd = 350; for (let i = 0; i < F.length; i++) { const o = F[i], d = Math.hypot(o.x - f.x, o.y - f.y); if (o === f || o.mate >= 0 || d >= bd) continue; let c = 0; for (const p of F) if (p.mate === i) c++; if (c < 2) { bd = d; f.mate = i; } } f.mt = f.mate >= 0 ? 15 + Math.random() * 25 : 5 + Math.random() * 10; }  // twos and threes, no more
+        }
+        if (f.mate >= 0 && F[f.mate]) {
+          const o = F[f.mate], side = n & 1 ? 1 : -1, dx = o.x - Math.sin(o.a) * side * L * 0.7 - Math.cos(o.a) * L * 0.3 - f.x, dy = o.y + Math.cos(o.a) * side * L * 0.7 - Math.sin(o.a) * L * 0.3 - f.y, d = Math.hypot(dx, dy) || 1;
+          const pull = Math.min(1.6, d / 70); wx += dx / d * pull + Math.cos(o.a) * 0.5; wy += dy / d * pull + Math.sin(o.a) * 0.5;
+          goal = d < 110 ? U.clamp(o.v + (d - 25) * 0.25, f.sp * 0.5, f.sp * 2) : f.sp * 1.5;  // catches up, then keeps the other's pace
+        } else f.mate = -1;
+        // a body length apart
+        for (let i = 0; i < F.length; i++) { const o = F[i]; if (o === f) continue; const dx = f.x - o.x, dy = f.y - o.y, R = (L + o.len) * 0.5, dd = dx * dx + dy * dy; if (dd < R * R && dd > 0.01) { const d = Math.sqrt(dd), k = (1 - d / R) * (f.eat ? 1 : 2.5); wx += dx / d * k; wy += dy / d * k; } }
+        // food dropped for it. Food that other overlays offer (a carrot, a pumpkin) is left alone: koi eat only what is thrown to them.
+        if (f.eat && f.eat.gone) f.eat = null;
+        if (!f.eat) { let bd = 400; for (const p of food) { const d = Math.hypot(p.x - f.x, p.y - f.y); if (!p.gone && t - p.t > 0.6 && d < bd) { bd = d; f.eat = p; } } }  // they need a moment to notice
+        if (f.eat) {
+          const p = f.eat, dx = p.x - f.x, dy = p.y - f.y, d = Math.hypot(dx, dy) || 1;
+          wx = wx * 0.3 + dx / d * 3; wy = wy * 0.3 + dy / d * 3; turn = 4; goal = Math.min(f.sp + 55, d * 1.5 + 6); f.rest = 0;  // slower as it nears, so it cannot circle the pellet for ever
+          if (d < 6) { p.gone = true; f.eat = null; f.rest = 0.8; koiRing(st, p.x, p.y); }  // mouth at the surface: gone, with a small ring
+        }
+        // the screen's edge turns it back, harder the nearer it is
+        const M = 95, e0 = 1 - f.x / M, e1 = 1 - (W - f.x) / M, e2 = 1 - f.y / M, e3 = 1 - (H - f.y) / M;
+        if (e0 > 0) wx += e0 * e0 * 5; if (e1 > 0) wx -= e1 * e1 * 5; if (e2 > 0) wy += e2 * e2 * 5; if (e3 > 0) wy -= e3 * e3 * 5;
+        if (f.flee > 0) { f.flee -= dt; wx = wx * 0.4 + Math.cos(f.fa) * 4; wy = wy * 0.4 + Math.sin(f.fa) * 4; turn = 6; }
+        // now and then it stops and hangs, fins moving, comes up for a mouthful of air, and goes on
+        f.next -= dt;
+        if (f.next <= 0 && !f.eat && f.flee <= 0) { f.rest = 3 + Math.random() * 4; f.next = 15 + Math.random() * 35; }
+        if (f.rest > 0) { const b = f.rest; f.rest -= dt; goal = 0; turn = 0.3; if (b > 1 && f.rest <= 1) koiRing(st, f.x, f.y); }
+        f.v += (goal - f.v) * Math.min(1, dt * 1.6);
+        const v = f.v + f.burst; let da = Math.atan2(wy, wx) - f.a; da -= TAU * Math.round(da / TAU);
+        turn = Math.max(turn, v / 45);  // a fast fish may turn faster, or it would run out of pond
+        f.w += (U.clamp(da * 2.5, -turn, turn) - f.w) * Math.min(1, dt * 5); f.a += f.w * dt;  // the turning itself eases in and out: curves, never a snap
+        f.ring -= dt; if (Math.abs(f.w) > 1.7 && v > 14 && f.ring <= 0) { f.ring = 2.5; koiRing(st, f.x, f.y); }  // a sharp turn stirs the surface
+        f.x = U.clamp(f.x + Math.cos(f.a) * v * dt, 6, W - 6); f.y = U.clamp(f.y + Math.sin(f.a) * v * dt, 6, H - 6);
+        f.ph += dt * (2.2 + v * 0.11);
+        // the rope: each point of the spine keeps its distance behind the one before
+        const sx = f.sx, sy = f.sy, seg = L / 6; sx[0] = f.x; sy[0] = f.y;
+        for (let k = 1; k < 7; k++) { const dx = sx[k] - sx[k - 1], dy = sy[k] - sy[k - 1], d = Math.hypot(dx, dy) || 1; sx[k] = sx[k - 1] + dx / d * seg; sy[k] = sy[k - 1] + dy / d * seg; }
         for (let k = 0; k < 7; k++) {
-          const o = at(w, w.d - k * L / 6, 14, S[k]), sway = Math.sin(f.ph - k * 0.8) * L * 0.055 * Math.pow(k / 6, 1.6) * (1 + f.burst / 130);
-          o.nx = -Math.sin(o.a); o.ny = Math.cos(o.a); o.x += o.nx * sway; o.y += o.ny * sway;
+          const o = S[k], sway = Math.sin(f.ph - k * 0.8) * L * 0.055 * Math.pow(k / 6, 1.6) * (1 + f.burst / 130);
+          o.a = k ? Math.atan2(sy[k - 1] - sy[k], sx[k - 1] - sx[k]) : f.a; o.nx = -Math.sin(o.a); o.ny = Math.cos(o.a); o.x = sx[k] + o.nx * sway; o.y = sy[k] + o.ny * sway;
         }
-        const h = S[0], cx = Math.cos(h.a), cy = Math.sin(h.a); f.x = h.x; f.y = h.y; f.a = h.a;
+        const h = S[0], cx = Math.cos(h.a), cy = Math.sin(h.a);
         if (sc) { const P = f.post; P.x = h.x; P.y = h.y; P.dir = cx < 0 ? -1 : 1; sc.next.push(P); }  // tell the other kinds where it is
         // outline: nose, down the left side, back up the right
         q[0] = h.x + cx * L * 0.035; q[1] = h.y + cy * L * 0.035;
@@ -348,6 +443,17 @@
         for (let sd = -1; sd <= 1; sd += 2) { const ex = U.lerp(h.x, b1.x, 0.45) + h.nx * sd * L * 0.058, ey = U.lerp(h.y, b1.y, 0.45) + h.ny * sd * L * 0.058; g.moveTo(ex + 1, ey); g.arc(ex, ey, 1, 0, TAU); }
         g.fill();
       }
+      // rings on the surface, over the fish
+      g.lineWidth = 1.2;
+      for (let i = st.rings.length - 1; i >= 0; i--) {
+        const r = st.rings[i]; r.t += dt; if (r.t > 1.6) { st.rings.splice(i, 1); continue; }
+        if (r.t < 0) continue;  // a second ring, still to come
+        g.strokeStyle = 'rgba(232,244,255,' + ((r.big ? 0.75 : 0.3) * (1 - r.t / 1.6)).toFixed(3) + ')';
+        g.beginPath(); g.arc(r.x, r.y, 5 + r.t * 20, 0, TAU); g.moveTo(r.x + 2 + r.t * 11, r.y); g.arc(r.x, r.y, 2 + r.t * 11, 0, TAU); g.stroke();
+      }
+      // what floats: the pads (fish pass beneath them) and the food
+      for (const p of st.pads) { g.drawImage(p.img, Math.round(p.x - p.img.width / 2), Math.round(p.y - p.img.height / 2)); if (sc) sc.next.push(p.post); }
+      if (food.length) { g.fillStyle = '#8a5a2b'; g.beginPath(); for (const p of food) { g.moveTo(p.x + 1.7, p.y); g.arc(p.x, p.y, 1.7, 0, TAU); } g.fill(); }
     },
   });
 

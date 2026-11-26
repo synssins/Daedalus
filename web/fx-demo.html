@@ -111,6 +111,7 @@ function apply() {
   HP.fx.env({night: $('night').checked, elevation: $('night').checked ? -20 : 40, weather: $('weather').value, temp, freezing: 32, cold: temp <= 32, month: +$('month').value, date: q.has('date') ? new Date(q.get('date') + 'T12:00:00') : new Date()});
   const sel = [...$('kind').selectedOptions], first = sel.some(o => o.value === want[0]) ? want[0] : sel[0] && sel[0].value;  // opt goes to the kind named first in the address
   const list = sel.map(o => Object.assign({kind: o.value}, o.value === first ? opt : {}, cfg[o.value]));
+  HP.fx.forget();  // this page changes the weather and the options under an overlay: each time it starts afresh
   HP.fx.layout(rects); HP.fx.use(list, 'demo/one', false, ['demo/one', 'demo/two']); HP.fx.preview(+$('p').value); $('pv').textContent = Math.round($('p').value * 100) + '%';
 }
 // every option of every chosen overlay, as the Studio offers them; a change builds the overlays again

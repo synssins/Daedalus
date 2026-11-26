@@ -114,7 +114,7 @@ ctx.scene.over.push(g => { ... })       // draw in front of every overlay this f
 | Train | `vehicle` | | `grab`, `drag`, `drop`, `board` |
 | Train station | `prop`, `station` | | |
 | Ants | `creature` | `food` | |
-| Koi pond | `creature`, `animal` | `threat` | |
+| Koi pond | `creature`, `animal`; lily pads `prop` | `threat` | |
 | String lights | `light` | | |
 | Vine (Flytraps) | `wonder`, `trap` | | `trap`, `free`, `paint` |
 | Vine (flowers) | `wonder` | | |
