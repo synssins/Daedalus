@@ -323,9 +323,9 @@
   }
   HP.fx.add('koi', {
     label: 'Koi pond', live: true, fps: 12, covers: true,
-    options: [{key: 'count', label: 'How many', type: 'range', min: 2, max: 10, step: 1, default: 5}, {key: 'light', label: 'Sunlight', type: 'bool', default: true}, {key: 'pads', label: 'Lily pads', type: 'bool', default: true}],
+    options: [{key: 'count', label: 'How many', type: 'range', min: 2, max: 20, step: 1, default: 5}, {key: 'light', label: 'Sunlight', type: 'bool', default: true}, {key: 'pads', label: 'Lily pads', type: 'bool', default: true}],
     create(ctx) {
-      const r = ctx.rand, W = ctx.w, H = ctx.h, fish = [], pads = [], n = U.clamp(Math.round(ctx.opts.count), 2, 10);
+      const r = ctx.rand, W = ctx.w, H = ctx.h, fish = [], pads = [], n = U.clamp(Math.round(ctx.opts.count), 2, 20);
       // lily pads: the same on every tablet. Three where the screen is empty, three in the gaps; a pad may lap a tile's rim, no further.
       if (ctx.opts.pads !== false) {
         const solid = ctx.rects.filter(b => !b.hidden), open = [], gap = [];  // flat tiles too: a pad must not sit on a clock
@@ -341,7 +341,7 @@
         }
       }
       for (let i = 0; i < n; i++) {
-        const len = 36 + r() * 34, kind = [0, 1, 2, 0, 1, 0, 2, 1, 0, 1][i], patches = [], a = r() * TAU, x = 50 + r() * (W - 100), y = 50 + r() * (H - 100), sx = new Float32Array(7), sy = new Float32Array(7);
+        const len = 36 + r() * 34, kind = [0, 1, 2, 0, 1, 0, 2, 1, 0, 1][i % 10], patches = [], a = r() * TAU, x = 50 + r() * (W - 100), y = 50 + r() * (H - 100), sx = new Float32Array(7), sy = new Float32Array(7);
         if (kind === 0) for (let k = 0, m = 2 + Math.floor(r() * 2); k < m; k++) patches.push({k: 0.5 + (k + r() * 0.8) * 3.4 / m, off: (r() - 0.5) * 0.5, rx: 0.07 + r() * 0.06, ry: 0.45 + r() * 0.3});
         for (let k = 0; k < 7; k++) { sx[k] = x - Math.cos(a) * k * len / 6; sy[k] = y - Math.sin(a) * k * len / 6; }
         const sp = 16 + r() * 16;  // its own pace
@@ -454,9 +454,10 @@
         f.x = U.clamp(f.x + Math.cos(f.a) * v * dt, 6, W - 6); f.y = U.clamp(f.y + Math.sin(f.a) * v * dt, 6, H - 6);
         f.ph += dt * (2.2 + v * 0.11);
         if (lift) { const k = lift * lift; f.x = U.clamp(U.lerp(up.x0, up.x, k), 6, W - 6); f.y = U.clamp(U.lerp(up.y0, up.y, k), 6, H - 6); f.ph += dt * 18; g.globalAlpha = Math.min(1, (1 - lift) * 4); }
-        // the rope: each point of the spine keeps its distance behind the one before
+        // the rope: each point of the spine keeps its distance behind the one before. A joint bends only so far,
+        // counted from the head back, or a tight circle would fold the body over itself.
         const sx = f.sx, sy = f.sy, seg = L / 6; sx[0] = f.x; sy[0] = f.y;
-        for (let k = 1; k < 7; k++) { const dx = sx[k] - sx[k - 1], dy = sy[k] - sy[k - 1], d = Math.hypot(dx, dy) || 1; sx[k] = sx[k - 1] + dx / d * seg; sy[k] = sy[k - 1] + dy / d * seg; }
+        for (let k = 1, pa = f.a + Math.PI; k < 7; k++) { let b = Math.atan2(sy[k] - sy[k - 1], sx[k] - sx[k - 1]) - pa; b -= TAU * Math.round(b / TAU); pa += U.clamp(b, -0.5, 0.5); sx[k] = sx[k - 1] + Math.cos(pa) * seg; sy[k] = sy[k - 1] + Math.sin(pa) * seg; }
         for (let k = 0; k < 7; k++) {
           const o = S[k], sway = Math.sin(f.ph - k * 0.8) * L * 0.055 * Math.pow(k / 6, 1.6) * (1 + f.burst / 130);
           o.a = k ? Math.atan2(sy[k - 1] - sy[k], sx[k - 1] - sx[k]) : f.a; o.nx = -Math.sin(o.a); o.ny = Math.cos(o.a); o.x = sx[k] + o.nx * sway; o.y = sy[k] + o.ny * sway;

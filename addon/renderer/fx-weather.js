@@ -604,12 +604,12 @@
     } else if (P.step === 5) {  // away: the lights go home, then gather where it will come out
       if (P.left < 8) { P.lure = 1; P.tx = P.out.x; P.ty = top(P.out.y); P.tr = 22; }
       if (P.left <= 1.4) open(P.out.x, top(P.out.y));
-    } else if (P.step === 7) {  // open until it has stood there a moment
-      if (figure(ctx, P.out.x, P.out.y, 70)) P.seen += dt;
+    } else if (P.step === 7) {  // open until it has stood there a moment, or has left
+      if (figure(ctx, P.out.x, P.out.y, 70)) P.seen += dt; else if (P.seen > 0) P.seen = 9;  // it has come out and run off: shut at once, so that it is not frightened again on its way back
       if (P.seen > 2.5 || P.tm > 14) P.step = 8;
     }
     if (P.k <= 0) return;
-    drawGate(g, st, P, t);
+    ctx.scene.over.push(gg => drawGate(gg, st, P, t));  // in front of every kind, whatever the order they are drawn in
     if (P.k > 0.3) { const q = st.gatePost; q.x = P.x; q.y = P.y; q.h = P.r * 2; ctx.scene.next.push(q); }
   }
   /** One frame of the lead light (st.L): light number L.i goes down to a creature that offers lure, hovers a little ahead of
@@ -806,7 +806,9 @@
       const sp = gone ? 760 : 250, e = Math.min(1, dt * 4), pull = gone ? 3 : 2.2, wait = gone && S.k > 0;  // it leaves once the beam is out
       S.vx += ((wait ? 0 : U.clamp((tx - S.x) * pull, -sp, sp)) - S.vx) * e; S.vy += ((wait ? 0 : U.clamp((ty - S.y) * pull, -sp, sp)) - S.vy) * e;
       S.x += S.vx * dt; S.y += S.vy * dt;
-      const A = ship || (ship = shipArt(g)), x = S.x, y = S.y + Math.sin(t * 2.2) * 2.5;
+      const x = S.x, y = S.y + Math.sin(t * 2.2) * 2.5;
+      ctx.scene.over.push(g => {  // the saucer and its beam: in front of every kind, whatever the order they are drawn in
+      const A = ship || (ship = shipArt(g));
       if (S.k > 0) {  // the beam: a pale cone from the belly to the ground, and the pool of light where it lands
         const len = Math.max(20, gy - y - 9), half = Math.max(26, S.ah * 0.9), bx = hx - S.x + S.bx;
         g.save(); g.translate(x, y + 9); g.scale(1, len / 100); g.globalAlpha = S.k; g.fillStyle = A.ray;
@@ -823,6 +825,7 @@
         const sz = 7 + 4 * s; g.globalAlpha = 0.55 + 0.45 * Math.sin(t * 7 - i * 2.1); g.drawImage(A.lamp, Math.cos(th) * 33 - sz / 2, s * 5.5 - sz / 2, sz, sz);
       }
       g.restore(); g.globalAlpha = 1; g.globalCompositeOperation = 'source-over';
+      });
       if (x > -40 && x < ctx.w + 40 && y > -20) { const q = st.post; q.x = x; q.y = y; ctx.scene.next.push(q); }
     },
   });
