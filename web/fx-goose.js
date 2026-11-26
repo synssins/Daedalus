@@ -232,21 +232,87 @@
   /** Tell the other kinds where this goose is. No pet function, on purpose. */
   // One object per goose, kept and moved: it offers "scare", the one thing that works on a goose.
   const TAGS = ['creature', 'animal', 'threat'];
-  function post(q, ctx, x, y, sc, chasing) {
+  function post(q, ctx, x, y, sc, chasing, hid) {
     if (!ctx.scene || !ctx.scene.next) return;
-    const p = q._.post || (q._.post = {kind: 'goose', tags: TAGS, angry: true, scare: by => shoo(q, by)});
-    p.x = x; p.y = y; p.h = 95 * sc; p.chasing = chasing || null; ctx.scene.next.push(p);
+    const p = q._.post || (q._.post = {kind: 'goose', tags: TAGS, angry: true, scare: by => shoo(q, by), lure: by => lure(q, by), carry: by => carry(q, by)});
+    p.x = x; p.y = y; p.h = 95 * sc; p.chasing = chasing || null; p.hid = !!hid; ctx.scene.next.push(p);  // hid: carried off, out of sight
   }
   /** Frightened off from by = {x, y}: another kind's "scare", or a guard coming at it. True if it goes. Not with a
    *  tile in its beak or on its way out with one, and a goose sitting on its loot does not budge either. */
   function shoo(q, by) {
     const e = q._, v = e.V;
-    if (!v || q.taken || /flee|runoff/.test(v.mode)) return false;
+    if (!v || q.taken || e.cy || /flee|runoff|stomp/.test(v.mode)) return false;
     if (v.mode === 'shoo') return true;
     if (v.mode === 'tug' && v.el) restore(v.el);  // caught with its beak on a tile that has not moved yet: it lets go
     dropTrain(q);
     v.el = null; v.i = -1; v.by = by && by.x === +by.x ? by.x : v.x + v.f; v.mode = 'shoo'; v.T = 0;
     return true;
+  }
+  const point = by => !!by && by.x === +by.x && by.y === +by.y;
+  /** Something dangled in front of it at by = {x, y}: another kind's "lure". It does not follow politely: neck out
+   *  and after it, snapping, for as long as the calls keep coming (about one a second). True if it went. Not with a
+   *  tile in its beak, a train in tow, its beak in a trap, on its way out or in the middle of a chase. A gosling
+   *  left on its own trots after it too, slowly. */
+  function lure(q, by) {
+    const e = q._, v = e.V;
+    if (!point(by) || !cur || e.cy) return false;
+    if (!v) {
+      if (q.phase !== 'chick' || q.at !== cur.page || !e.alone) return false;
+      e.lu = {x: by.x, y: by.y}; e.lt = 2.2; return true;
+    }
+    if (q.taken || e.tr || e.trap || v.over || v.x < -40 || v.x > cur.w + 40) return false;
+    if (v.mode !== 'lure') {
+      if (/^(enter|look|honk|exit)$/.test(v.mode)) v.back = {mode: v.mode, T: v.T, x: U.clamp(v.x, 30, cur.w - 30), y: v.y, f: v.f};
+      else if (!/^(back|gloat|lost)$/.test(v.mode)) return false;
+      v.mode = 'lure'; v.T = 0;
+    }
+    v.lu = {x: by.x, y: by.y}; v.lt = 2.2;  // it gives up when nothing has called for this long
+    return true;
+  }
+  /** Taken out of sight toward by = {x, y, secs, out}: another kind's "carry" (a saucer's beam, a portal). True if it
+   *  went. Not with a tile in its beak or a train in tow. It is back after secs seconds, at out or where it was;
+   *  a grown goose then leaves in a huff, a gosling goes on as before. by.mark means nothing to a goose. */
+  function carry(q, by) {
+    const e = q._, v = e.V, c = cur;
+    if (!point(by) || !c || e.cy || q.taken || e.tr) return false;
+    if (v ? /tug|drag|train-haul|flee|runoff|stomp/.test(v.mode) : q.phase !== 'chick' || q.at !== c.page) return false;
+    const x = v ? v.x : q.ax, y = v ? v.y : q.ay, out = point(by.out) ? by.out : null;
+    if (x < -30 || x > c.w + 30) return false;
+    dropTrain(q);  // a trap that holds it by the beak has to let go
+    // up: the point is above it (a beam), so it rises; otherwise it is beside it, and it is drawn in
+    e.cy = {x: by.x, y: by.y, x0: x, y0: y, up: y - 48 - by.y > Math.abs(by.x - x), T: 0, due: 0, secs: by.secs > 0 ? +by.secs : 6,
+      bx: U.clamp(out ? out.x : x, 30, c.w - 30), by: U.clamp(out ? out.y : y, 70, c.h - 6)};
+    if (v) { v.el = null; v.i = -1; v.over = v.chased = v.trained = v.veg = v.nosy = true; v.mode = 'carried'; v.T = 0; }
+    return true;
+  }
+  /** One frame of a goose that is being carried off. Going: up a beam it rises flapping and honking, feet paddling,
+   *  and shrinks; into a portal it goes neck first, leaning into it, a foot braking and dirt flying. Away: nothing is
+   *  drawn and its actor is "hid". Returns the place where it has just been set down again, once; else null. */
+  function carried(q, g, ctx, t, dt, f, sc, ch) {
+    const e = q._, c = e.cy, n = c.up ? 1.5 : 1.1;
+    if (!c.due) {
+      c.T += dt;
+      if (c.T < n) {
+        const k = c.T / n, k2 = k * k, s = sc * (1 - (c.up ? 0.5 : 0.7) * k2), u = c.up ? k2 : k2 * k;
+        const x = U.lerp(c.x0, c.x, u), y = U.lerp(c.y0, c.y + 48 * s, u);
+        if (!c.up) f = c.x >= c.x0 ? 1 : -1;
+        g.save(); g.globalAlpha = Math.min(1, (1 - k) * 5);
+        if (c.up) goose(g, e.A, x + Math.sin(t * 8) * 3, y, f, 'flap', t, dt, 3, {sc: s, chick: ch, wig: 1});
+        else {
+          g.translate(x - f * Math.abs(Math.sin(t * 19)) * 6 * (1 - k), y); g.rotate(f * 0.6 * k2);
+          goose(g, e.A, 0, 0, f, 'charge', t, dt, 0.01, {sc: s, chick: ch, stamp: true});
+          if (Math.floor(c.T / 0.18) !== Math.floor((c.T - dt) / 0.18)) puff(x + f * 12, y - 3, 1, 2);
+        }
+        g.restore();
+        bubble(g, x, y, f, ctx, c.T % 0.8, ch > 0.5 ? 'PEEP!' : 'HONK!');
+        post(q, ctx, x, y, s, null);
+        return null;
+      }
+      c.due = Date.now() + c.secs * 1000;  // by the clock: it comes back on time even if the dashboard was not shown meanwhile
+    }
+    if (Date.now() < c.due) { post(q, ctx, c.bx, c.by, sc, null, true); return null; }
+    e.cy = null; e.A = {}; puff(c.bx, c.by - 44 * sc, 6);
+    return c;
   }
   // what others are to the goose: by their tags (the engine gives every actor a list), never by their kind
   const has = (a, tag) => !!a.tags && a.tags.indexOf(tag) >= 0;
@@ -312,6 +378,7 @@
       return;
     }
     if (q.at !== ctx.page) return;
+    if (e.cy) { const p = carried(q, g, ctx, t, dt, e.f || 1, sc, 1 - age); if (p) { q.ax = p.bx; q.ay = p.by; e.hx0 = null; } return; }  // carried off, and back unchanged
     let tx = q.ax, ty = q.ay, run = false, prey = null;
     const led = S.geese.some(o => { const v = o._.V;
       if (o.phase === 'chick' || o.gone) return false;
@@ -327,6 +394,9 @@
       if (!(e.wn > t)) { e.wn = t + 4 + Math.random() * 6; e.wx = U.clamp(e.hx0 + (Math.random() - 0.5) * 320, 24, ctx.w - 24); e.wy = U.clamp(e.hy0 + (Math.random() - 0.5) * 60, 70, ctx.h - 6); e.pk = Math.random() < 0.6; }
       tx = e.wx; ty = e.wy;
     } else e.hx0 = null;
+    // on its own and a light is dangled before it: after it, at its own slow pace
+    e.alone = alone;
+    if (alone && e.lt > 0) { e.lt -= dt; tx = e.lu.x; ty = U.clamp(e.lu.y + 30 * sc, 70, ctx.h - 6); }
     if (!e.out) tx = U.clamp(tx, 24, ctx.w - 24);
     const dx = tx - q.ax, dy = ty - q.ay, dist = Math.hypot(dx, dy), go = dist > 12, foe = run ? null : threat(q, ctx, q.ax, q.ay, dt);
     if (go) { const st = Math.min(dist, (run ? 250 : alone ? 55 : 130) * dt); q.ax += dx / dist * st; q.ay += dy / dist * st; if (Math.abs(dx) > 4) e.f = dx > 0 ? 1 : -1; }
@@ -336,8 +406,92 @@
     if (q.ax > -30 && q.ax < ctx.w + 30) post(q, ctx, q.ax, q.ay, sc, prey && {x: prey.x, y: prey.y});
   }
 
+  // ---------- the giant ----------
+  // On a dashboard whose world is drawn small (ctx.scene.scale of 0.25 or less: a block of flats, a map) the goose is
+  // a giant, far too big for the screen. It takes nothing there. Every visit is a walk along the street at the bottom
+  // of the screen, side on, from one side to the other: two huge feet, two legs as tall as the screen, and along the
+  // top quarter the underside of its belly. All of it is in front of the tiles; no tile is ever changed. The legs are
+  // slender and the walk is three or four long steps, a few seconds in all, so most of the dashboard stays clear.
+  // The option "giant" (not in the list, for the test page) makes any dashboard such a one.
+  const isGiant = ctx => !!ctx.opts.giant || (ctx.scene && ctx.scene.scale > 0 && ctx.scene.scale <= 0.25);
+  function stride(q, ctx) {
+    // sized from the screen: Z for the feet (each a quarter of the screen wide), B for the body (so big that only the belly's lowest curve shows)
+    const Z = ctx.w / 76, B = ctx.h / 32, d = Math.random() < 0.5 ? -1 : 1;
+    q._.V = {mode: 'stomp', page: ctx.page, i: -1, el: null, d, f: d, Z, B, x0: d > 0 ? -24 * B : ctx.w + 24 * B, x: 0, y: ctx.h, T: 0, p: 0, sh: 0, hn: 1.5 + Math.random() * 1.5, hT: 0, sn: 0, seen: {}, dust: []};
+  }
+  /** One frame of the walk. p counts steps: each foot is down for 0.6 of its step and swings forward for the rest,
+   *  the two half a step apart, so one comes down about every second, a third of the screen further on. */
+  function giant(q, g, ctx, t, dt) {
+    const e = q._, v = e.V, W = ctx.w, H = ctx.h, Z = v.Z, B = v.B, d = v.d, S = W * 0.66, gy = H - 0.4 * Z, p0 = v.p;
+    v.T += dt; v.p += (W + 48 * B) / 7.5 * dt / S; v.sh = Math.max(0, v.sh - dt);
+    const bx = v.x = v.x0 + d * v.p * S, bob = Math.sin(v.p * 2 * Math.PI * 2) * 0.012 * H + v.sh * 0.03 * H, by = H * 0.25 + 13 * B + bob;  // by: the body's own ground line, far below its belly
+    if ((bx - 24 * B * d - (d > 0 ? W : 0)) * d > 0) return done(q);
+    // the feet: far one first. A foot that has just come down thuds
+    const HIP = [-8, 6], foot = [null, null];
+    for (let i = 0; i < 2; i++) {
+      const ph = v.p + (i ? 0 : 0.5), k = Math.floor(ph), c = ph - k, at = n => v.x0 + d * ((n - (i ? 0 : 0.5) + 0.3) * S + HIP[i] * B), u = c > 0.6 ? (c - 0.6) / 0.4 : 0, uu = u * u * (3 - 2 * u);
+      foot[i] = {x: U.lerp(at(k), at(k + 1), uu), up: Math.sin(Math.PI * u) * 0.17 * H, tip: Math.sin(Math.PI * u) * 0.45};
+      if (k > Math.floor(p0 + (i ? 0 : 0.5))) thud(q, ctx, at(k) + d * 5 * Z, gy);
+    }
+    // everyone on the street gets out of its way: about once a second, and nobody more than a few times at one place
+    v.sn -= dt;
+    if (v.sn <= 0) { v.sn = 1;
+      others(ctx).forEach(a => { if (!has(a, 'creature') || !(Math.abs(a.x - bx) < 12 * B + 250 || ((a.x - bx) * d > 0 && a.y > H - 140))) return;
+        const key = Math.round(a.x / 100) + '|' + Math.round(a.y / 100); v.seen[key] = (v.seen[key] || 0) + 1;
+        if (v.seen[key] <= 3) U.act(a, 'scare', {x: bx, y: H}); }); }
+    g.save();
+    if (v.sh > 0) g.translate((Math.random() - 0.5) * 30 * v.sh, (Math.random() - 0.5) * 36 * v.sh);  // the ground shakes
+    g.lineCap = 'round'; g.lineJoin = 'round';
+    // slender legs from hips that are above the screen, each with its knee, which bends back as the foot lifts; then the feet
+    for (let i = 0; i < 2; i++) {
+      const o = foot[i], col = i ? BEAK : BEAK2, hx = bx + d * HIP[i] * B, hy = by - (i ? 22 : 24) * B, ay = gy - o.up - 2 * Z;
+      g.strokeStyle = g.fillStyle = col; { const kx = (hx + o.x) / 2 - d * (0.02 * W + o.up * 0.6), ky = (hy + ay) / 2 + 0.06 * H; g.lineWidth = 0.04 * W; g.beginPath(); g.moveTo(hx, hy); g.lineTo(kx, ky); g.lineTo(o.x, ay); g.stroke(); g.beginPath(); g.arc(kx, ky, 0.027 * W, 0, 6.3); g.fill(); }
+      { const sq = 1 - o.up / (0.17 * H); g.fillStyle = 'rgba(10,14,30,' + (0.1 + 0.14 * sq).toFixed(3) + ')'; g.beginPath(); g.ellipse(o.x + d * 5 * Z, gy + 0.2 * Z, (7 + 5 * sq) * Z, (0.9 + 0.7 * sq) * Z, 0, 0, 6.3); g.fill(); g.fillStyle = col; }  // its shadow on the street
+      g.save(); g.translate(o.x, gy - o.up); g.scale(d * Z, Z); g.rotate(o.tip);
+      g.beginPath(); g.moveTo(-4, -2); g.quadraticCurveTo(5, -7, 14, -3); g.lineTo(15, 2); g.quadraticCurveTo(4, 4, -4, -2); g.fill();
+      g.lineWidth = 0.5; g.strokeStyle = LINE; g.beginPath(); g.moveTo(1, -3.4); g.lineTo(14.3, -0.8); g.moveTo(0, -1.4); g.lineTo(14.6, 1); g.stroke();  // the webs between the toes
+      g.restore();
+    }
+    // the belly: the goose's own body outline, so large that only its lowest curve comes down into the top of the screen
+    g.save(); g.translate(bx, by); g.rotate(Math.sin(v.p * 2 * Math.PI) * 0.012); g.scale(d * B, B);
+    g.beginPath(); g.moveTo(-38, -50); g.bezierCurveTo(-22, -60, 14, -60, 28, -47); g.bezierCurveTo(39, -36, 30, -15, 8, -13); g.bezierCurveTo(-13, -11, -27, -22, -38, -50);
+    g.fillStyle = WHITE; g.fill(); g.lineWidth = 0.25; g.strokeStyle = LINE; g.stroke();
+    g.beginPath(); g.moveTo(-27, -27); g.bezierCurveTo(-13, -13, 14, -13, 29, -30); g.bezierCurveTo(14, -20, -12, -19, -27, -27); g.fillStyle = SHADE; g.fill();
+    g.restore();
+    // dust where a foot came down: a low ring spreading along the street
+    for (let i = v.dust.length - 1; i >= 0; i--) {
+      const o = v.dust[i]; o.t += dt; if (o.t > 0.7) { v.dust.splice(i, 1); continue; }
+      g.strokeStyle = 'rgba(236,228,214,' + (0.7 * (1 - o.t / 0.7)).toFixed(3) + ')'; g.lineWidth = 0.5 * Z; g.beginPath(); g.ellipse(o.x, gy, (8 + o.t * 26) * Z, (1 + o.t * 3.4) * Z, 0, 0, 6.3); g.stroke();
+    }
+    g.restore();
+    // from far above: HONK HONK, in its usual bubble, only very much bigger, shaking, just under the belly
+    v.hn -= dt; if (v.hn <= 0) { v.hn = 99; v.hT = 1.5; }  // once on a walk this short
+    if (v.hT > 0) {
+      const k = Math.min(1, 0.4 + (1.5 - v.hT) * 6); v.hT -= dt;
+      g.save(); g.translate(U.clamp(bx + d * 6 * B, 290, W - 290) + (Math.random() - 0.5) * 8, H * 0.25 + 96 + (Math.random() - 0.5) * 8); g.rotate(-0.04 * d + (Math.random() - 0.5) * 0.03); g.scale(k, k);
+      g.fillStyle = WHITE; g.strokeStyle = LINE; g.lineWidth = 3; g.lineJoin = 'round';
+      U.box(g, {x: -270, y: -56, w: 540, h: 112, r: 50}); g.fill(); g.stroke();
+      g.beginPath(); g.moveTo(-d * 60, -54); g.lineTo(-d * 20, -130); g.lineTo(d * 6, -55); g.fill(); g.stroke();
+      g.fillRect(-d * 27 - 31, -57, 62, 6);  // the tail joins the bubble without a seam
+      g.fillStyle = INK; g.font = '800 78px ' + FONT; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('HONK HONK', 0, 4);
+      g.restore();
+    }
+    // what the others see: a threat on the street that nothing can move (no verbs)
+    if (ctx.scene && ctx.scene.next) { const P = e.gp || (e.gp = {kind: 'goose', tags: TAGS, view: 'side', giant: true}); P.x = bx; P.y = H; P.h = H; ctx.scene.next.push(P); }
+  }
+  /** A foot came down at x: the ground shakes, dust, dirt, a feather from above, and whatever stood there and can
+   *  be flattened (another kind's "stomp") is told so. */
+  function thud(q, ctx, x, y) {
+    const v = q._.V, Z = v.Z;
+    v.sh = 0.3; if (v.dust.length < 4) v.dust.push({x, t: 0});
+    puff(x, y - 6, 3, 2); puff(v.x + (Math.random() - 0.5) * 0.5 * ctx.w, ctx.h * 0.25, 1 + (Math.random() < 0.4 ? 1 : 0));
+    // once for each place: the other foot lands close by, and the thing may be a fresh object by then
+    others(ctx).forEach(a => { const key = 's' + Math.round(a.x / 50); if (Math.abs(a.x - x) < 11 * Z && a.y > ctx.h - 60 && typeof a.stomp === 'function' && !v.seen[key]) { v.seen[key] = 1; U.act(a, 'stomp', {x, y}); } });
+  }
+
   // ---------- a visit ----------
   function begin(q, ctx) {
+    if (isGiant(ctx)) { if (S.geese.some(o => o !== q && o._.V && o._.V.mode === 'stomp')) schedule(q); else stride(q, ctx); return; }  // one giant at a time
     const i = pick(ctx.rects, q, ctx.page), r = ctx.rects[i];
     q._.A = {};
     if (r) {
@@ -353,10 +507,16 @@
   }
   function done(q) { q._.V = null; if (!q.taken && q.phase === 'away' && !(q.next > Date.now())) { schedule(q); save(); } }
   function act(q, g, ctx, t, dt) {
+    if (q._.V.mode === 'stomp') return giant(q, g, ctx, t, dt);
     const e = q._, v = e.V, sp = hurry > 0 ? 2.2 : 1, r = v.i >= 0 ? ctx.rects[v.i] : null;
     const go = m => { v.mode = m; v.T = 0; }, after = () => go(v.i >= 0 && r && r.el === v.el && allowed(r) ? 'tug' : 'exit');
     let pose = 'glare', honk = false, walk = 0, wig = 0, hiss = false, stamp = false, bt = 0, word = 'HONK!', ox = 0;
     v.T += dt * sp;
+    if (e.cy) {  // carried off by another kind: nothing else happens to it until it is set down again
+      const age = q.born ? Math.min(1, (Date.now() - q.born) / GROW) : 1, p = carried(q, g, ctx, t, dt, v.f, 0.4 + 0.6 * age, 1 - age);
+      if (p) { v.x = p.bx; v.y = p.by; if (v.mode === 'carried') go('ruffled'); }
+      return;
+    }
     // some visits, when a train is running, are spent on the train instead (how many: the pace; never with a tile in hand)
     if (!v.trained && !q.taken && !e.tr && /enter|look|honk|exit/.test(v.mode) && v.x > -40 && v.x < ctx.w + 40) {
       const tr = nearest(others(ctx).filter(rides), v.x, v.y, 1e5);
@@ -413,6 +573,20 @@
     } else if (v.mode === 'huff') {  // free: draws itself up, shakes itself, and stalks out by the nearer side with nothing
       pose = 'tall'; wig = 1; hiss = true;
       if (v.T > 1) { v.d = v.x < ctx.w / 2 ? -1 : 1; go('exit'); }
+    } else if (v.mode === 'ruffled') {  // set down again after being carried off: a shake, a honk, and out in a huff
+      if (v.T < 1) wig = 1;
+      else { pose = 'honk'; honk = true; bt = v.T - 1; if (v.T > 2.1) go('huff'); }
+    } else if (v.mode === 'lure') {
+      // after a light: neck flat out and at a run until its beak is on it, then it snaps at it. When nobody has
+      // called for a while the light is gone
+      const lx = v.lu.x - v.x; if (Math.abs(lx) > 14) v.f = lx > 0 ? 1 : -1;
+      const tx = U.clamp(v.lu.x - v.f * 60, 30, ctx.w - 30), ty = U.clamp(v.lu.y + 40, 70, ctx.h - 6), dx = tx - v.x, dy = ty - v.y, dist = Math.hypot(dx, dy);
+      if (dist > 10) { const st = Math.min(dist, 210 * dt); v.x += dx / dist * st; v.y += dy / dist * st; pose = 'charge'; walk = 2.4; }
+      else pose = v.T % 0.4 < 0.2 ? 'charge' : 'reach';
+      v.lt -= dt; if (v.lt <= 0) go('lost');
+    } else if (v.mode === 'lost') {  // where did it go: looks about, one honk, and back to what it was doing
+      if (v.T < 1.2) { pose = 'peek'; if (Math.floor(v.T / 0.4) !== Math.floor((v.T - dt * sp) / 0.4)) v.f = -v.f; }
+      else { pose = 'honk'; honk = true; bt = v.T - 1.2; if (v.T > 2.2) go('back'); }
     } else if (v.mode === 'shoo') {  // frightened: one honk back at it, a few steps backward, then out by the nearer side at a run
       const away = v.x >= v.by ? 1 : -1;
       if (v.T < 0.7) { v.f = -away; pose = 'honk'; honk = true; bt = v.T; }
@@ -607,7 +781,7 @@
       cur = ctx;
       const now = Date.now();
       // the engine builds this again when the dashboard or its layout changes: a visit under way cannot go on
-      S.geese.forEach(q => { const e = q._, v = e.V; dropTrain(q); if (!v) return;
+      S.geese.forEach(q => { const e = q._, v = e.V; dropTrain(q); e.cy = null; if (!v) return;
         e.V = null; if (v.mode === 'drag') release(q); else if (v.el) restore(v.el);
         if (q.phase === 'away' && !(q.next > now)) schedule(q); });
       S.geese = S.geese.filter(q => !q.gone);
@@ -645,12 +819,13 @@
       if (S.egg && now - S.egg.at >= EGG) hatch();
       if (S.geese.length > 1 && now - S.hatched >= RESET && !S.geese[1].gone) flyOff();
       let line = 0;
+      const big = isGiant(ctx);
       const sticks = others(ctx).some(a => a.kind === 'stick');
       for (let i = 0; i < S.geese.length; i++) {
         const q = S.geese[i], e = q._;
         if (q.taken && now >= q.due) release(q);
         if (q.gone && !e.V) { S.geese.splice(i--, 1); continue; }  // flown
-        if (q.phase === 'chick' && !e.V) { chick(q, g, ctx, t, dt, now, line++); continue; }
+        if (q.phase === 'chick' && !e.V) { if (!big) chick(q, g, ctx, t, dt, now, line++); continue; }  // no goslings beside a giant
         if (!e.V && q.phase === 'away') {
           if (q.next - now > mean() * 1.4) q.next = now + mean() * 1.4;  // the interval was shortened meanwhile
           // stick figures on the dashboard: it does not wait for its usual visit. It comes out soon after first
@@ -664,7 +839,7 @@
         if (e.V) act(q, g, ctx, t, dt);
         else if (q.phase === 'hiding' && q.hide === ctx.page && q.hx != null) nest(q, g, ctx, t, dt);
       }
-      if (S.egg && S.egg.page === ctx.page) egg(g, t, now);
+      if (S.egg && S.egg.page === ctx.page && !big) egg(g, t, now);
       extras(g, dt);
     },
     // The screen was double-tapped: every tile any goose holds is back at once, wherever it belongs (one from another
