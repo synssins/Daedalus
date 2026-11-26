@@ -58,11 +58,14 @@
     if (HP.stack && HP.stack.length > 1) { ctx.back(); setTimeout(nearest, 60); return true; }
     return false;
   };
+  // OK: a click at the middle of the button. el.click() gives no place (0, 0), and an overlay that takes taps by
+  // place (the koi pond) then takes every press as a tap in the top left corner.
+  const press = el => { const p = mid(el); el.dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true, view: window, clientX: p.x, clientY: p.y})); };
   const DIR = {ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1]};
   window.addEventListener('keydown', e => {
     const d = DIR[e.key];
     if (d) { e.preventDefault(); if (ring && ring.style.opacity === '0' && !lost()) mark(cur); else if (!step(d[0], d[1]) && d[0]) turn(d[0]); }
-    else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); if (lost()) nearest(); else { mark(cur); cur.click(); setTimeout(() => { if (lost()) nearest(); }, 80); } }
+    else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); if (lost()) nearest(); else { mark(cur); press(cur); setTimeout(() => { if (lost()) nearest(); }, 80); } }
     else if (e.key === 'Escape' || e.key === 'Backspace') { if (HP.remoteBack()) e.preventDefault(); }
   });
 })();
