@@ -544,7 +544,7 @@
   function carryOff(f, by) { const up = beamed(f, by); f.lu = null; f.cry = {t: 0, ph: 0, up, dur: up ? U.clamp((f.y - by.y) / 110, 1.4, 3.2) : 0.7, tw: 0, y2: null, hh: 0, x0: f.x, y0: f.y, pl: f.pl, s: f.s, tx: by.x, ty: by.y, secs: U.clamp(+by.secs || 5, 0.5, 900), out: by.out && num(by.out.x) && num(by.out.y) ? {x: by.out.x, y: by.out.y} : null}; SEEN.carries = (SEEN.carries || 0) + 1; }
   /** One of the crew is taken. Those near it flinch and stare, run, or creep up for a look at where it was. */
   function crewCarry(st, f, by) {
-    if (!by || !num(by.x) || !num(by.y) || f.gone || f.guest || f.cry || f.stn || f.hide || (f.act && AIR[f.act.a])) return false;
+    if (!by || !num(by.x) || !num(by.y) || f.gone || f.guest || f.cry || f.stn || (f.act && AIR[f.act.a])) return false;  // (one behind a tile in a game is taken like any other: bail() below brings it out)
     endOv(f); if (f.row) rowEnd(st); bail(f);
     if (f.held) { U.act(f.held, 'free'); f.held = null; f.rescue = null; }
     if (f.lad.d > 0 && !f.lad.on) ghost(st, f.lad);  // its ladder is not left lying about with nobody to fetch it
@@ -719,6 +719,7 @@
     lick: anim(1, false, [0, S_STAND], [0.6, pose(26, 10, 4, -14, 6, 30, 30, 20, 40, 14)], [1, pose(26, 10, 4, -14, 6, 30, 30, 20, 40, 14)]),
     flail: lp(0.3, pose(26, 20, 20, -30, 10, 160, 10, -60, -20, 14), pose(26, -20, 10, 30, 20, -50, -10, 150, 20, 14)),
     pull: lp(0.5, pose(-14, 30, 20, -20, 10, 72, 14, 62, 24, -8), pose(-30, 40, 30, -10, 10, 78, 6, 68, 14, -12)),
+    yank: lp(0.36, pose(22, 26, 8, -6, 22, 60, 30, 50, 40, 30), pose(42, 4, 26, 16, 4, 70, 20, 60, 30, 36)),  // stuck by the tongue: the head stays, the rest heaves
     stuck: lp(0.8, pose(0, 2, 0, -2, 0, 4, 4, -4, 4, -24), pose(0, 2, 0, -2, 0, 4, 4, -4, 4, 24)),
     shake: lp(0.2, pose(10, 6, 2, -6, 2, 30, 40, 20, 60, 8), pose(-6, 6, 2, -6, 2, 12, 30, 38, 44, -6)),
     take: anim(1.6, false, [0, S_STAND], [0.3, pose(4, 6, 2, -6, 2, 80, 10, 70, 20, -4)], [0.9, pose(4, 6, 2, -6, 2, 80, 10, 70, 20, -4)], [1.15, pose(0, 20, 30, -10, 40, 168, 0, 20, 60, -10)], [1.4, pose(0, 20, 30, -10, 40, 168, 0, 20, 60, -10)], [1.6, S_STAND]),
@@ -863,11 +864,12 @@
    *  hears it through, has a good belly laugh and walks off; the teller is left standing. False when there is no way to o. */
   function tale(st, f, o) {
     const Q = st.plats[o.pl], sd = o.x >= f.x ? 1 : -1, m = {ok: 0};
-    if (!go(st, f, Q, o.pl === f.pl ? o.x - sd * 24 : o.x - 24)) return false;
-    f.tale = 0; f.q[f.q.length - 1].v = 2.2; o.act = null; o.q.length = 0; bump('tales');
+    const n0 = f.q.length; if (!go(st, f, Q, o.pl === f.pl ? o.x - sd * 24 : o.x - 24)) return false;
+    for (let i = n0; i < f.q.length; i++) if (f.q[i].a === 'walk') f.q[i].v = 2.6;  // at a run, all the way
+    f.tale = 0; o.act = null; o.q.length = 0; bump('tales');
     f.q.push(rest(SL.sky, 1.3, {face: o}), rest(SL.big, 1.3, {face: o}), rest(SL.beam, 1.1, {face: o, hopH: 12}), rest(SB.flail, 0.9, {face: o}), rest(SL.big, 0.8, {face: o}), rest(SL.sky, 0.8, {face: o}),
       call(() => { m.ok = 1; }), rest(SA.stand, 3, {face: o}), rest(SL.droop, 1.8));
-    o.q.push(rest(SA.stand, 30, {face: f, until: () => m.ok}), rest(SB.laugh, 2.6, {face: f}), call(g => {
+    o.q.push(rest(SA.stand, 60, {face: f, until: () => m.ok}), rest(SB.laugh, 2.6, {face: f}), call(g => {
       const d = g.x >= f.x ? 1 : -1, a = U.clamp(g.x + d * 80, Q.x1 + 2, Q.x2 - 2), b = U.clamp(g.x - d * 80, Q.x1 + 2, Q.x2 - 2);
       g.q.unshift({a: 'walk', x: Math.abs(a - g.x) >= 30 || Math.abs(a - g.x) >= Math.abs(b - g.x) ? a : b});
     }));
@@ -878,7 +880,7 @@
     for (const f of st.crew) {
       if (!f.tale) continue; if (st.clock > f.tale || f.gone) { f.tale = 0; continue; }
       if (!spare(st, f)) continue;
-      const o = nearTo(freeCrew(st).filter(o => Math.abs(o.x - f.x) + Math.abs(o.y - f.y) * 1.5 < 450), f.x, f.y, f);
+      const o = nearTo(freeCrew(st), f.x, f.y, f);  // the nearest who is free, however far
       if (o) { f.act = null; f.q.length = 0; tale(st, f, o); }
     }
   }
@@ -888,7 +890,7 @@
     const P = st.plats[f.pl], o = nearTo(freeCrew(st).filter(o => Math.abs(o.x - f.x) + Math.abs(o.y - f.y) * 1.5 < 450), f.x, f.y, f), m = {ok: 0};
     if (!up) f.q.push(rest(SB.getup, 1.1));
     f.q.push(rest(SA.stand, 0.6), rest(SL.patd, 1.5));
-    if (up) { f.tale = st.clock + 45; if (o && tale(st, f, o)) return; }  // nobody free to hear it yet (they ran from the light too): it keeps for a while
+    if (up) { const w = nearTo(freeCrew(st), f.x, f.y, f); f.tale = st.clock + 120; if (w && tale(st, f, w)) return; }  // nobody free to hear it yet (they ran from the light too): it keeps for a while
     if (!o) return;
     const sd = o.x >= f.x ? 1 : -1; o.act = null; o.q.length = 0; bump('greets');
     if (o.pl === f.pl) o.q.push({a: 'walk', x: U.clamp(f.x + sd * 20, P.x1 + 2, P.x2 - 2), v: 1.3}, rest(SB.pat, 1.3, {dir: -sd}), call(() => { m.ok = 1; }));
@@ -1206,7 +1208,7 @@
   // ---------- C3: a tongue frozen to the ladder ----------
   function tongueStart(st) {
     const fr = freeCrew(st); if (fr.length < 2) return;
-    const lad = f => { let b = null; for (const L of st.lads) if (L.up && L.a.ok && !L.a.away && !L.b.away && (f.pl === L.a.i || f.pl === L.b.i) && (!b || Math.abs(L.fx - f.x) < Math.abs(b.fx - f.x))) b = L; return b; };
+    const lad = f => { let b = null; for (const L of st.lads) if (L.up && L.a.ok && !L.a.away && !L.b.away && (f.pl === L.a.i || f.pl === L.b.i) && L.fx + L.sd * 25 > 24 && L.fx + L.sd * 25 < st.w - 24 && (!b || Math.abs(L.fx - f.x) < Math.abs(b.fx - f.x))) b = L; return b; };
     const a = fr.filter(lad)[0]; if (!a) return;
     const TL = lad(a), F = TL.a, b = nearTo(fr, a.x, F.y, a);
     // now and then nobody comes, and never from far away: it pulls itself free and goes down alone
@@ -1217,12 +1219,15 @@
     a.q.push(call(g => {
       const L = TL; if (!L.up || L.b.away || L.a.i !== g.pl) { A.fail = 1; return; }
       const u = Math.min(0.85, 35 * g.s / (L.fy - L.ty)), pt = {x: L.fx + (L.tx - L.fx) * u, y: L.fy - 35 * g.s}, ax = U.clamp(pt.x + L.sd * 19, L.a.x1 + 2, L.a.x2 - 2);
-      g.q.push({a: 'walk', x: ax}, rest(SB.lick, 1, {dir: -L.sd}), call(() => { g.tong = pt; A.stuck = 1; A.ax = ax; A.sd = L.sd; bump('licks'); }), rest(SB.flail, solo ? 2.5 + Math.random() * 1.5 : 45, {dir: -L.sd, until: () => A.free}),
-        call(h => { if (!solo || A.over || A.free) return; A.free = 1; h.tong = null; h.q.length = 0; react(h, SA.slip, 2.3); }));
+      // the tongue is out from the start of the lick, so it is seen to go on the rung; then it will not come off.
+      // Help comes at a run. With nobody coming, or after about eight seconds of waiting, it tears itself free.
+      g.q.push({a: 'walk', x: ax}, call(() => { g.tong = pt; }), rest(SB.lick, 1.3, {dir: -L.sd}), call(() => { A.stuck = 1; A.ax = ax; A.sd = L.sd; bump('licks'); }), rest(SB.yank, solo ? 2.5 + Math.random() * 1.5 : 8, {dir: -L.sd, until: () => A.free}),
+        call(h => { if (A.over || A.free) return; A.free = 1; h.tong = null; h.q.length = 0; react(h, SA.slip, 2.3); if (!solo && b.grp === A) { b.q.length = 0; b.act = null; } }));
     }));
     if (!solo) b.q.push(rest(SA.stand, 45, {until: () => A.stuck || A.over}), call(g => {
       if (A.over || a.grp !== A) return;  // (the game ended meanwhile: the other one is about its own business)
       if (!go(st, g, F, A.ax + A.sd * 13)) { A.fail = 1; return; }
+      for (const o of g.q) if (o.a === 'walk') o.v = 2.2;
       g.q.push(call(() => bump('pulls')), rest(SB.pull, 2, {dir: -A.sd}), call(() => { if (A.over || a.grp !== A || !a.tong) return; A.free = 1; a.tong = null; a.act = null; a.q.length = 0; react(a, SA.slip, 2.3); react(g, SA.slip, 2.3); }));
     }));
     return true;
@@ -2066,6 +2071,7 @@
         for (const grp of grps) {
           const all = []; for (const Q of grp) for (const L of Q.links) if (L.type && L.b === Q) all.push(L);
           let can = all.filter(L => got.has(L.a)); if (!can.length) can = all;
+          const short = Math.min.apply(null, can.map(L => L.len)); can = can.filter(L => L.len <= short * 1.6);  // not one that runs down past the tile below, beside that tile's own
           can.sort((a, b) => a.fx - b.fx);
           const keep = can.length > 2 ? [can[0], can[can.length - 1]] : can;
           for (const L of all) { if (keep.indexOf(L) >= 0) { L.up = 0; lads.push(L); } else { L.a.links.splice(L.a.links.indexOf(L), 1); L.b.links.splice(L.b.links.indexOf(L), 1); } }
@@ -2180,7 +2186,7 @@
       // (counted for the checks: two at work on one spot)
       for (let i = 0; i < st.crew.length; i++) { const a = st.crew[i]; if (a.gone || a.grp || !a.act || a.act.a !== 'dig') continue; for (let j = i + 1; j < st.crew.length; j++) { const b = st.crew[j]; if (!b.gone && !b.grp && b.pl === a.pl && b.act && b.act.a === 'dig' && Math.abs(a.x - b.x) < 30) bump('crowd'); } }
       const rails = new Path2D(), rungs = new Path2D(), pa = new Path2D(), hd = new Path2D(), pa2 = new Path2D(), hd2 = new Path2D(), shafts = new Path2D(), blades = new Path2D(), white = new Path2D(), eyes = new Path2D(), whl = new Path2D(), snow = new Path2D(), mugs = new Path2D();
-      let stuckF = null; st.wp = white; st.ep = eyes;
+      let stuckF = null; st.wp = white; st.ep = eyes; const late = [], run = fn => fn();
       for (const f of st.crew) {
         if (f.gone) continue;
         // carried off, or riding: out of sight, and nothing here reaches it until it is back
@@ -2220,6 +2226,7 @@
         const calm = !f.fear && !f.ov && !f.re, sky = calm && f.act && f.act.sky ? f.act.sky : calm && f.lu && f.lu.up ? f.lu : null; if (sky || (calm && f.act && f.act.up)) f.p[9] = -30;  // head back, to look up at the light
         solve(f);
         if (hang) { reach(f, 0, hang.gx, hang.gy); reach(f, 1, hang.gx, hang.gy); }
+        if (f.tong && f.grp && f.grp.stuck) { reach(f, 0, f.tong.x, f.tong.y + 9); reach(f, 1, f.tong.x, f.tong.y + 16); }  // both hands on the ladder, pushing
         if (sky && !sky.tag) reach(f, 0, sky.x, sky.y);  // the arm straight at it
         const aa = f.act && f.act.a, C = st.plats[f.pl], J = f.J, s = f.s, T = f.T;
         // a ladder on its way to be set up: under an arm, or swinging up against its tile. Once up it is drawn with the rest.
@@ -2235,7 +2242,7 @@
         // one behind a tile, or in costume, is drawn by itself (clipped to what shows past the tile); the rest all together
         // one standing on its own two feet has its legs in the snow (drawn before the snow); one sitting, lying, in
         // the air or on a ladder is drawn after it, or the snow would hide it
-        const deep = !f.lift && aa !== 'climb' && aa !== 'hop' && aa !== 'drop' && Math.abs(f.y - C.y) < 2 && f.y - J[1] > hipH() * s * 0.85;
+        const deep = f.row ? true : !f.lift && aa !== 'climb' && aa !== 'hop' && aa !== 'drop' && Math.abs(f.y - C.y) < 2 && f.y - J[1] > hipH() * s * 0.85;
         const own = !!f.hide || !!f.suit, PA = own ? new Path2D() : deep ? pa : pa2, HD = own ? new Path2D() : deep ? hd : hd2, SH = own ? new Path2D() : shafts, BL = own ? new Path2D() : blades;
         if (!f.noTool) {
           // the shovel: in both hands, planted to lean on, or slung across the back
@@ -2256,14 +2263,14 @@
         }
         if (f.sled) { const y = f.y - f.lift + 1.5, d = f.dir, x = J[0], bk = f.act && f.act.train ? 30 : 11; SH.moveTo(x - d * bk, y); SH.lineTo(x + d * 11, y); SH.quadraticCurveTo(x + d * 17, y, x + d * 16, y - 6); }
         limbs(PA, HD, f); dots(white, f); eye(eyes, f);
-        if (f.fear) marks(white, whl, f, f.fear.run); else if (f.row && f.row.stage < 3 && f.row.t > 0.4) marks(white, whl, f, false);
-        if (own) {
+        if (f.fear) marks(white, whl, f, f.fear.run); else if ((f.row && f.row.stage < 3 && f.row.t > 0.4) || (f.tong && f.grp && f.grp.stuck)) marks(white, whl, f, false);
+        if (own) (f.hide ? run : late.push.bind(late))(() => {  // one in costume and in the open: after the snow, so that it does not hide it
           g.save();
           if (f.hide) { const R = f.hide; g.beginPath(); g.rect(0, 0, W, H); g.rect(R.x, R.y, R.w, R.h); g.clip('evenodd'); }
           g.lineCap = g.lineJoin = 'round'; g.strokeStyle = INK; g.lineWidth = f.suit ? 6.6 : 5.2; g.stroke(PA); g.lineWidth = 2.8; g.stroke(HD);
           g.strokeStyle = f.suit || BONE; g.lineWidth = f.suit ? 4.2 : 2.5; g.stroke(PA); g.fillStyle = f.suit || BONE; g.fill(HD);
           if (!f.noTool) tools(g, SH, BL); hat(g, f); g.restore();
-        }
+        });
         if (f.mug) {  // a steaming mug in the front hand
           const mx = J[16] + f.dir * 1.5, my = J[17] - 3, w = Math.sin(st.clock * 3 + f.n) * 1.6;
           mugs.rect(mx - 2.4, my - 3, 4.8, 6); mugs.rect(mx + f.dir * 2.4 - 0.6, my - 1.6, f.dir * 2.2 + 0.6, 2.6);
@@ -2295,7 +2302,7 @@
       if (st.men.length) menStep(st, g, dt, sc);
       if (st.fort) fortStep(st, g, dt);
       if (st.shift) shiftStep(st, g, dt);
-      ink(g, pa2, hd2);
+      ink(g, pa2, hd2); for (const fn of late) fn();
       tools(g, shafts, blades);
       for (const f of st.crew) if (!f.gone && !f.hide && !f.suit && !(f.cry && f.cry.ph === 1) && !(f.stn && f.stn.ph === 2)) hat(g, f);
       for (const f of st.crew) if (f.gift && !f.gone) giftStep(st, f, g, dt);  // Santa's presents: carried, opened, and what was inside
