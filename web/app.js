@@ -3,7 +3,9 @@
 // ---------- native bridge ----------
 const pending = {}; let seq = 0;
 function native(cmd, extra, ms) {
-  if (!(window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.native)) {
+  // the iPad app's bridge, or the Android app's (which takes text)
+  const ios = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.native, droid = window.DaedalusNative;
+  if (!ios && !droid) {
     // Not inside the tablet app: this is the Studio's preview pane. Its settings come from the page address.
     if (cmd !== 'ping') return Promise.reject(new Error('no native bridge'));
     const q = new URLSearchParams(location.search);
@@ -12,7 +14,7 @@ function native(cmd, extra, ms) {
   }
   return new Promise((res, rej) => {
     const id = ++seq; pending[id] = res;
-    try { window.webkit.messageHandlers.native.postMessage(Object.assign({id, cmd}, extra)); }
+    try { const m = Object.assign({id, cmd}, extra); if (ios) ios.postMessage(m); else droid.post(JSON.stringify(m)); }
     catch (e) { delete pending[id]; rej(e); }
     setTimeout(() => { if (pending[id]) { delete pending[id]; rej(new Error('native: no reply')); } }, ms || 3000);
   });
