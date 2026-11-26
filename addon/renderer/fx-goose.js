@@ -380,10 +380,11 @@
       const tp = nearest(others(ctx).filter(a => jaws(a) && a.y > 14 && a.y < ctx.h - 62), v.x, v.y, 260);  // one its beak can reach, standing on the screen
       if (tp) { v.nosy = true; if (Math.random() < 0.4 || ctx.opts.trap) { v.back = {mode: v.mode, T: v.T, x: U.clamp(v.x, 30, ctx.w - 30), y: v.y, f: v.f}; v.jaw = tp; v.pk = 0; go('trap-go'); } }
     }
-    // a guard (a ram, a dog) within about 120 px and still coming: it does not wait to be told
+    // a guard (a ram, a dog) within about 120 px and coming at a run: it does not wait to be told. One that only
+    // wanders nearer, or that the goose itself walks up to, is no reason to go
     if (!/tug|drag|shoo|flee|runoff/.test(v.mode)) {
       const gd = ctx.scene && ctx.scene.near ? ctx.scene.near('guard', v.x, v.y, 200) : null, far = gd ? Math.hypot(gd.x - v.x, gd.y - v.y) : 0;  // watched from 200 px, to know which way it is moving
-      if (gd && far < 120 && v.gx != null && Math.hypot(gd.x - v.gx, gd.y - v.gy) < 60 && far < Math.hypot(v.gx - v.x, v.gy - v.y) - 0.5) shoo(q, gd);
+      if (gd && far < 120 && v.gx != null && Math.hypot(gd.x - v.gx, gd.y - v.gy) > 6 && Math.hypot(gd.x - v.gx, gd.y - v.gy) < 60 && far < Math.hypot(v.gx - v.x, v.gy - v.y) - 0.5) shoo(q, gd);
       if (gd) { v.gx = gd.x; v.gy = gd.y; } else v.gx = null;
     }
     const foe = /look|honk|enter|exit/.test(v.mode) ? threat(q, ctx, v.x, v.y, dt) : null;
