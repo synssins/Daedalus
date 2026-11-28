@@ -695,7 +695,7 @@ def build_app() -> web.Application:
     r.add_post("/api/scene", tablet_scene)
     r.add_get("/api/scenes", tablet_scenes)
     r.add_get("/api/fxmeta", tablet_fxmeta)
-    for p in ("/api/camera_proxy/{t:.*}", "/api/camera_proxy_stream/{t:.*}", "/api/hls/{t:.*}", "/api/tts_proxy/{t:.*}"):
+    for p in ("/api/camera_proxy/{t:.*}", "/api/camera_proxy_stream/{t:.*}", "/api/hls/{t:.*}", "/api/tts_proxy/{t:.*}", "/api/media_player_proxy/{t:.*}"):
         r.add_get(p, ha_media)
     r.add_route("OPTIONS", "/api/{t:.*}", lambda request: web.Response())
 

@@ -15,7 +15,10 @@ const TILES = [['lock.fake_plain', 'Fake Lock', 1, 1], ['lock.fake_code', 'Fake 
   ['alarm_control_panel.fake_alarm', 'Fake Alarm', 1, 19], ['light.fake_full', 'Fake Light', 53, 19], ['light.fake_onoff', 'Fake Switch Light', 1, 37]];
 const design = guard => Object.assign({format: 1, name: 'Guard test', grid: {cols: 64, rows: 48}, start: 'home', rooms: {}, theme: {background: {color: '#1a2038'}, tile: {fill: 'rgba(255,255,255,.16)', radius: 22, gap: 5}},
   pages: [{id: 'home', name: 'Home', tiles: TILES.map(([entity, name, x, y]) => ({type: entity.startsWith('alarm') ? 'alarm' : 'entity', x, y, w: 10, h: 10, entity, name, battery: entity === 'lock.fake_plain' || undefined, style: entity === 'light.fake_full' ? {lightState: true} : {}}))
-    .concat([{type: 'battery', x: 27, y: 19, w: 12, h: 14, entities: ['sensor.fake_bat_full', 'sensor.fake_bat_low', 'binary_sensor.fake_bat_yn']}])}]}, guard === false ? {guard: false} : {});
+    .concat([{type: 'battery', x: 27, y: 19, w: 12, h: 14, entities: ['sensor.fake_bat_full', 'sensor.fake_bat_low', 'binary_sensor.fake_bat_yn']},
+      {type: 'value', x: 14, y: 37, w: 10, h: 10, entity: 'sensor.fake_temp'}, {type: 'gauge', x: 27, y: 37, w: 10, h: 10, entity: 'sensor.fake_temp', min: '10', max: '30'},
+      {type: 'chart', x: 40, y: 19, w: 12, h: 14, entity: 'sensor.fake_temp', name: 'Fake chart'}, {type: 'value', x: 40, y: 37, w: 10, h: 10, entity: 'binary_sensor.fake_door'},
+      {type: 'calendar', x: 14, y: 1, w: 10, h: 10, entities: ['calendar.fake_cal']}, {type: 'todo', x: 40, y: 1, w: 10, h: 10, entity: 'todo.fake_list'}, {type: 'forecast', x: 14, y: 19, w: 12, h: 10, entity: 'weather.fake_sky'}])}]}, guard === false ? {guard: false} : {});
 const STATES = {
   'lock.fake_plain': ['locked', {}], 'lock.fake_code': ['locked', {code_format: '^\\d{4}$'}], 'cover.fake_garage': ['closed', {device_class: 'garage'}],
   'alarm_control_panel.fake_alarm': ['disarmed', {supported_features: 3, code_arm_required: false, code_format: null}],
@@ -54,7 +57,7 @@ const done = async code => { try { await api('DELETE', 'tablets/' + DEV); } catc
   await ev(`window.__calls = []; HP.ctx.service = (d, s, e, data) => { __calls.push([d, s, e, data || {}]); return Promise.resolve(); }; HP.ready = true`);
   for (const e in STATES) await set(e, STATES[e][0], STATES[e][1]);
   const safe = async () => { const s = await js(`{name: HP.design && HP.design.name, stub: /__calls/.test(String(HP.ctx.service)), ents: (HP.design.pages || []).flatMap(p => p.tiles).flatMap(t => [t.entity].concat(t.entities || [])).filter(Boolean)}`);
-    if (s.name !== 'Guard test' || !s.stub || s.ents.length !== TILES.length + 3 || s.ents.some(e => !/\.fake_/.test(e))) throw new Error('not the test panel, nothing pressed: ' + JSON.stringify(s)); };
+    if (s.name !== 'Guard test' || !s.stub || s.ents.length !== TILES.length + 10 || s.ents.some(e => !/\.fake_/.test(e))) throw new Error('not the test panel, nothing pressed: ' + JSON.stringify(s)); };
   await safe();
 
   const calls = () => js('__calls.splice(0)');
@@ -205,6 +208,85 @@ const done = async code => { try { await api('DELETE', 'tablets/' + DEV); } catc
   await tap(tile(4)); await tap('#pop .dd'); const fxMarks = await js(`[...document.querySelectorAll('#pop .dd.open .ddl div')].map(d => d.querySelectorAll('.fm svg').length)`);
   await tap('#pop .dd'); await tap('#pop .px');
   ok('light: effects for sound and for a grid are marked', same(fxMarks, [1, 2, 0]), fxMarks);
+
+  // ---- showing: a value in its own words, a gauge against its range, a chart of what Home Assistant kept (made up here)
+  await ev(`(() => { const real = HP.ha.call.bind(HP.ha), t = Date.now() / 1000; HP.ha.call = m => m.type === 'history/history_during_period' && /fake_/.test(m.entity_ids[0])
+    ? Promise.resolve({[m.entity_ids[0]]: [{s: '20', lu: t - 7200}, {s: 'unavailable', lu: t - 5400}, {s: '24', lu: t - 3600}, {s: '21', lu: t - 60}]}) : real(m); })()`);
+  await set('sensor.fake_temp', '21', {friendly_name: 'Fake Temperature', unit_of_measurement: '°C', device_class: 'temperature'});
+  await set('binary_sensor.fake_door', 'on', {friendly_name: 'Fake Door', device_class: 'door'});
+  await sleep(600);
+  const seen5 = await js(`(() => { const of = type => HP.live.filter(i => i.t.type === type), v = of('value'), g = of('gauge')[0], c = of('chart')[0];
+    return {value: v[0].p.v.textContent, door: v[1].p.v.textContent, doorLit: v[1].el.classList.contains('on'), gauge: +(parseFloat(g.p.arc.style.strokeDashoffset) / g.len).toFixed(2),
+      line: c.p.line.getAttribute('d'), hi: c.p.hi.textContent, lo: c.p.lo.textContent, head: c.p.l.textContent + ' ' + c.p.v.textContent}; })()`);
+  ok('showing: a value, a door in its own words, a gauge against its range, a chart with its highest and lowest',
+    seen5.value === '21°C' && seen5.door === 'Open' && seen5.doorLit && seen5.gauge === 0.45 && /^M[\d.]+ [\d.]+L[\d.]+ [\d.]+L[\d.]+ [\d.]+H100$/.test(seen5.line || '') && seen5.hi === '24' && seen5.lo === '20' && seen5.head === 'Fake chart 21°C', seen5);
+
+  // ---- a thermostat, a blind, a fan and a player open the same popup with what each of them has
+  const lastCall = async () => { const all = await calls(); return all[all.length - 1] || null; };
+  await set('climate.fake_heat', 'heat', {friendly_name: 'Fake Thermostat', temperature: 20, current_temperature: 19.5, min_temp: 10, max_temp: 30, target_temp_step: 0.5, hvac_modes: ['off', 'heat', 'cool'], fan_modes: ['auto', 'low'], fan_mode: 'auto'});
+  await ev(`HP.act('climate.fake_heat', HP.ctx)`); await sleep(300);
+  const heatLine = await ev(`document.querySelector('#pop .ps').textContent`); await calls();
+  p = await mid('#pop .vbar'); await at(p[0], p[1] - p[3] * 0.25); const heatSet = await lastCall();
+  await tap('#pop .dd'); const heatModes = await js(`[...document.querySelectorAll('#pop .dd.open .ddl div')].map(d => d.textContent)`); await tap('#pop .dd.open .ddl div:last-child'); const heatMode = await lastCall();
+  await tap('#pop .px');
+  ok('thermostat: its target is sent when the finger lets go, and its modes are a list', heatLine === 'Heat \u00b7 Now 19.5\u00b0 \u00b7 Set 20\u00b0' && same(heatSet, ['climate', 'set_temperature', 'climate.fake_heat', {temperature: 25}])
+    && same(heatModes, ['Off', 'Heat', 'Cool']) && same(heatMode, ['climate', 'set_hvac_mode', 'climate.fake_heat', {hvac_mode: 'cool'}]), {heatLine, heatSet, heatModes, heatMode});
+
+  await set('cover.fake_blind', 'open', {friendly_name: 'Fake Blind', device_class: 'blind', supported_features: 15, current_position: 40});
+  await ev(`HP.act('cover.fake_blind', HP.ctx)`); await sleep(300);
+  const blindBtns = await js(`[...document.querySelectorAll('#pop .modes .mb')].map(b => b.textContent)`); await calls();
+  await tap('#pop [data-s=stop_cover]'); const blindStop = await lastCall();
+  p = await mid('#pop .vbar'); await at(p[0], p[1]); const blindSet = await lastCall(); await tap('#pop .px');
+  await set('cover.fake_awning', 'closed', {friendly_name: 'Fake Awning', device_class: 'awning', supported_features: 3}); await ev(`HP.act('cover.fake_awning', HP.ctx)`); const awning = await lastCall();
+  ok('blind: open, stop, close and how far; a cover that only opens and closes does that', same(blindBtns, ['Open', 'Stop', 'Close']) && same(blindStop, ['cover', 'stop_cover', 'cover.fake_blind', {}])
+    && same(blindSet, ['cover', 'set_cover_position', 'cover.fake_blind', {position: 50}]) && same(awning, ['cover', 'open_cover', 'cover.fake_awning', {}]) && !(await popOpen()), {blindBtns, blindStop, blindSet, awning});
+
+  await set('fan.fake_fan', 'on', {friendly_name: 'Fake Fan', supported_features: 11, percentage: 33, percentage_step: 33.33, preset_modes: ['auto', 'sleep'], oscillating: false});
+  await ev(`HP.act('fan.fake_fan', HP.ctx)`); await sleep(300); await calls();
+  await tap('#pop .pr > .mb'); const fanOsc = await lastCall(); await tap('#pop .ph .rb'); const fanPower = await lastCall(); await tap('#pop .px');
+  ok('fan: its speed bar, oscillation and power', same(fanOsc, ['fan', 'oscillate', 'fan.fake_fan', {oscillating: true}]) && same(fanPower, ['fan', 'toggle', 'fan.fake_fan', {}]), {fanOsc, fanPower});
+
+  await set('media_player.fake_tv', 'playing', {friendly_name: 'Fake Player', supported_features: 4 | 8 | 16 | 32 | 1 | 16384 | 2048 | 128 | 256, volume_level: 0.3, is_volume_muted: false, source_list: ['TV', 'Radio'], source: 'TV', media_title: 'Song', media_artist: 'Band'});
+  await ev(`HP.act('media_player.fake_tv', HP.ctx)`); await sleep(300);
+  const tvLine = await ev(`document.querySelector('#pop .ps').textContent`); await calls();
+  await tap('#pop [data-b=next]'); const tvNext = await lastCall(); await tap('#pop [data-b=mute]'); const tvMute = await lastCall();
+  await tap('#pop .dd'); await tap('#pop .dd.open .ddl div:last-child'); const tvSrc = await lastCall();
+  p = await mid('#pop .vbar'); await at(p[0], p[1]); const tvVol = await lastCall(); await tap('#pop .px');
+  ok('player: what it plays, next, mute, source and volume', tvLine === 'Song \u00b7 Band' && same(tvNext, ['media_player', 'media_next_track', 'media_player.fake_tv', {}]) && same(tvMute, ['media_player', 'volume_mute', 'media_player.fake_tv', {is_volume_muted: true}])
+    && same(tvSrc, ['media_player', 'select_source', 'media_player.fake_tv', {source: 'Radio'}]) && same(tvVol, ['media_player', 'volume_set', 'media_player.fake_tv', {volume_level: 0.5}]), {tvLine, tvNext, tvMute, tvSrc, tvVol});
+
+  // ---- things set by a value, a choice or a few actions
+  await set('input_number.fake_n', '4', {friendly_name: 'Fake Number', min: 0, max: 10, step: 0.5, unit_of_measurement: 'h'});
+  await ev(`HP.act('input_number.fake_n', HP.ctx)`); await sleep(300); await calls(); p = await mid('#pop .vbar'); await at(p[0], p[1] - p[3] * 0.25); const numSet = await lastCall(); await tap('#pop .px');
+  await set('input_select.fake_s', 'Low', {friendly_name: 'Fake Choice', options: ['Low', 'High']});
+  await ev(`HP.act('input_select.fake_s', HP.ctx, null, document.querySelector(${JSON.stringify(tile(0))}))`); await sleep(300); await tap('#pop .mlist div:last-child'); const selSet = await lastCall();
+  await set('input_text.fake_t', 'old', {friendly_name: 'Fake Text'});
+  await ev(`HP.act('input_text.fake_t', HP.ctx)`); await sleep(200); const textWas = await ev(`document.querySelector('#modal .tin').value`);
+  await ev(`document.querySelector('#modal .tin').value = 'new words'`); await tap('#modal [data-m=yes]'); const textSet = await lastCall();
+  await set('vacuum.fake_v', 'docked', {friendly_name: 'Fake Vacuum', supported_features: 8192 | 4 | 16});
+  await ev(`HP.act('vacuum.fake_v', HP.ctx)`); await sleep(300); const vacBtns = await js(`[...document.querySelectorAll('#pop .modes .mb')].map(b => b.textContent)`);
+  await tap('#pop [data-s=return_to_base]'); const vacDock = await lastCall(); await tap('#pop .px');
+  ok('a number is a bar, a choice a list from its button, a text is typed, a vacuum has its actions',
+    same(numSet, ['input_number', 'set_value', 'input_number.fake_n', {value: 7.5}]) && same(selSet, ['input_select', 'select_option', 'input_select.fake_s', {option: 'High'}])
+    && textWas === 'old' && same(textSet, ['input_text', 'set_value', 'input_text.fake_t', {value: 'new words'}]) && same(vacBtns, ['Start', 'Pause', 'Dock']) && same(vacDock, ['vacuum', 'return_to_base', 'vacuum.fake_v', {}]),
+    {numSet, selSet, textWas, textSet, vacBtns, vacDock});
+
+  await set('siren.fake_siren', 'off', {friendly_name: 'Fake Siren'}); await ev(`HP.act('siren.fake_siren', HP.ctx)`); const sirenQ = await q(); await tap('#modal [data-m=no]'); const sirenNo = await calls();
+  await set('update.fake_up', 'on', {friendly_name: 'Fake Firmware'}); await ev(`HP.act('update.fake_up', HP.ctx)`); const upQ = await q(); await tap('#modal [data-m=yes]'); const upYes = await lastCall();
+  ok('a siren and an update ask first', sirenQ === 'This will sound Fake Siren. Are you sure?' && !sirenNo.length && upQ === 'This will install the update for Fake Firmware. Are you sure?' && same(upYes, ['update', 'install', 'update.fake_up', {}]), {sirenQ, sirenNo, upQ, upYes});
+
+  // ---- lists Home Assistant answers with (the answers are made up here): a calendar, a to-do list, the weather ahead
+  await ev(`(() => { const real = HP.ha.call.bind(HP.ha), at = (days, h) => { const d = new Date(); d.setDate(d.getDate() + days); d.setHours(h, 0, 0, 0); return d; }, day = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    HP.ha.call = m => m.type !== 'call_service' || !m.return_response ? real(m) : Promise.resolve({response: m.service === 'get_events' ? {'calendar.fake_cal': {events: [{start: at(1, 15).toISOString(), summary: 'Dentist'}, {start: day(at(0, 0)), summary: 'Bin day'}]}}
+      : m.service === 'get_items' ? {'todo.fake_list': {items: [{summary: 'Milk', uid: 'u1', status: 'needs_action'}]}}
+      : {'weather.fake_sky': {forecast: [0, 1, 2].map(n => ({datetime: at(n, 12).toISOString(), condition: n ? 'rainy' : 'sunny', temperature: 20 + n, templow: 10 + n}))}}}); })()`);
+  await set('calendar.fake_cal', 'off', {friendly_name: 'Fake Calendar'}); await set('todo.fake_list', '1', {friendly_name: 'Fake List'}); await set('weather.fake_sky', 'sunny', {friendly_name: 'Fake Sky', temperature: 20});
+  await ev(`HP.live.filter(i => i.load && ['calendar', 'todo', 'forecast'].includes(i.t.type)).forEach(i => { i.fail = 0; i.busy = false; i.load(); })`); await sleep(700);
+  const lists = await js(`{cal: [...document.querySelectorAll('#grid .t-calendar .ag')].map(r => r.querySelector('.ad').textContent.split(' ')[0] + ': ' + r.querySelector('.as').textContent),
+    todo: [...document.querySelectorAll('#grid .t-todo .ag')].map(r => r.textContent), fc: [...document.querySelectorAll('#grid .t-forecast .fc')].map(c => c.querySelector('.fh').textContent + '/' + c.querySelector('.fl').textContent)}`);
+  await calls(); await tap('#grid .t-todo [data-u]'); const ticked = await lastCall();
+  ok('lists: a calendar soonest first, a to-do list that ticks off, the weather ahead', same(lists.cal, ['Today: Bin day', 'Tomorrow: Dentist']) && same(lists.todo, ['Add', 'Milk']) && same(lists.fc, ['20\u00b0/10\u00b0', '21\u00b0/11\u00b0', '22\u00b0/12\u00b0'])
+    && same(ticked, ['todo', 'update_item', 'todo.fake_list', {item: 'u1', status: 'completed'}]), {lists, ticked});
 
   // ---- the panel's switch: no questions
   await api('PUT', 'designs/' + id, {name: 'Guard test', design: design(false)}); await sleep(6000);

@@ -68,7 +68,7 @@
   const withCode = code => code ? {code} : {};
   const DOORS = ['garage', 'door', 'gate'];
   /** Used by the single button and by each thing on a button that holds several. name is the button's own name for it. */
-  HP.act = (e, ctx, name) => {
+  HP.act = (e, ctx, name, el) => {
     const dom = e.split('.')[0], s = st(e), a = s ? s.attributes : {}, nm = name || U.fname(e);
     if (dom === 'light') return lightCan(e).dim ? lightPop(e, ctx, nm) : ctx.service('light', 'toggle', e);  // nothing to set on an on/off light: it switches
     if (dom === 'lock') {
@@ -80,10 +80,39 @@
       return guard(nm, `This will ${open ? 'open' : 'close'} ${nm}. Are you sure?`, false, () => ctx.service('cover', open ? 'open_cover' : 'close_cover', e));
     }
     if (dom === 'alarm_control_panel') return alarmPop(e, ctx, nm);
+    if (dom === 'climate') return climatePop(e, ctx, nm);
+    if (dom === 'media_player') return mediaPop(e, ctx, nm);
+    // a blind or a fan with something to set opens its controls; one that only opens and closes, or switches, does that
+    if (dom === 'cover') return (a.supported_features || 0) & 140 ? coverPop(e, ctx, nm) : ctx.service('cover', s.state === 'open' || s.state === 'opening' ? 'close_cover' : 'open_cover', e);
+    if (dom === 'fan' && (a.supported_features || 0) & 15) return fanPop(e, ctx, nm);
+    const f = a.supported_features || 0, has = list => list.filter(x => f & x[0]).map(x => x.slice(1));
+    if (dom === 'valve') return f & 12 ? coverPop(e, ctx, nm, 'valve') : ctx.service('valve', s.state === 'open' || s.state === 'opening' ? 'close_valve' : 'open_valve', e);
+    if (dom === 'number' || dom === 'input_number') return numberPop(e, ctx, nm, dom);
+    // a choice drops its list from the button that was touched
+    if (dom === 'select' || dom === 'input_select') return el ? HP.pop.menu(el, (a.options || []).map(o => [o, o]), s.state, o => ctx.service(dom, 'select_option', e, {option: o})) : null;
+    if (dom === 'text' || dom === 'input_text') return HP.textBox(nm, s.state, 'text', v => ctx.service(dom, 'set_value', e, {value: v}));
+    if (dom === 'time') return HP.textBox(nm, s.state.slice(0, 5), 'time', v => v && ctx.service('time', 'set_value', e, {time: v}));
+    if (dom === 'date') return HP.textBox(nm, s.state, 'date', v => v && ctx.service('date', 'set_value', e, {date: v}));
+    if (dom === 'datetime') return HP.textBox(nm, s.state.slice(0, 16), 'datetime-local', v => v && ctx.service('datetime', 'set_value', e, {datetime: v}));
+    if (dom === 'input_datetime') {
+      const kind = a.has_date && a.has_time ? 'datetime' : a.has_date ? 'date' : 'time';
+      return HP.textBox(nm, kind === 'time' ? s.state.slice(0, 5) : kind === 'date' ? s.state : s.state.replace(' ', 'T').slice(0, 16), kind === 'datetime' ? 'datetime-local' : kind,
+        v => v && ctx.service('input_datetime', 'set_datetime', e, {[kind]: v.replace('T', ' ')}));
+    }
+    if (dom === 'counter') return listPop(e, ctx, nm, dom, [['increment', 'Increment'], ['decrement', 'Decrement'], ['reset', 'Reset']]);
+    if (dom === 'timer') return listPop(e, ctx, nm, dom, [['start', 'Start'], ['pause', 'Pause'], ['cancel', 'Cancel'], ['finish', 'Finish']]);
+    if (dom === 'lawn_mower') return listPop(e, ctx, nm, dom, has([[1, 'start_mowing', 'Start'], [2, 'pause', 'Pause'], [4, 'dock', 'Dock']]));
+    if (dom === 'vacuum') return listPop(e, ctx, nm, dom, has([[8192, 'start', 'Start'], [4, 'pause', 'Pause'], [8, 'stop', 'Stop'], [16, 'return_to_base', 'Dock'], [512, 'locate', 'Locate']]),
+      f & 32 && (a.fan_speed_list || []).length ? body => { const d = dropdown(part(body, 'pr'), () => [attr(e, 'fan_speed_list') || [], attr(e, 'fan_speed')], x => ctx.service('vacuum', 'set_fan_speed', e, {fan_speed: x}), null, U.cap);
+        return () => { d.firstChild.textContent = attr(e, 'fan_speed') ? U.cap(String(attr(e, 'fan_speed'))) : 'Fan speed'; }; } : null);
+    if (dom === 'humidifier') return levelPop(e, ctx, nm, dom, 'humidity', 'min_humidity', 'max_humidity', 0, 100, 'set_humidity', '%', 'available_modes', 'mode', 'set_mode', 'mode', true);
+    if (dom === 'water_heater') return levelPop(e, ctx, nm, dom, 'temperature', 'min_temp', 'max_temp', 30, 60, 'set_temperature', '\u00b0', 'operation_list', 'operation_mode', 'set_operation_mode', 'operation_mode', false);
+    // loud, or not undone with a second touch: these ask whatever the panel's lock setting says
+    if (dom === 'siren' && s.state !== 'on') return HP.confirm(`This will sound ${nm}. Are you sure?`, () => ctx.service('siren', 'turn_on', e), 'No');
+    if (dom === 'update') return s.state === 'on' ? HP.confirm(`This will install the update for ${nm}. Are you sure?`, () => ctx.service('update', 'install', e), 'No') : null;
     if (dom === 'scene') HP.sceneMark(e);
     if (dom === 'scene' || dom === 'script') return ctx.service(dom, 'turn_on', e);
     if (dom === 'button' || dom === 'input_button') return ctx.service(dom, 'press', e);
-    if (dom === 'media_player') return ctx.service('media_player', 'media_play_pause', e);
     return ctx.service('homeassistant', 'toggle', e);
   };
 
@@ -125,19 +154,19 @@
   /** A finger moves a control, or the remote does while it holds it. move(x, y): the place inside it, 0 to 1.
    *  nudge(dx, dy): one arrow press. The house is told a few times a second on the way and once more at the end;
    *  for two seconds after, the control keeps the finger's value and not the house's, which is still catching up. */
-  function drag(el, move, nudge, send) {
+  function drag(el, move, nudge, send, live) {
     let last = 0, timer = 0;
     const tell = now => { clearTimeout(timer); if (now || performance.now() - last > 300) { last = performance.now(); send(); } else timer = setTimeout(() => tell(true), 300); };
     const hold = () => { el.hpHold = performance.now() + 2000; };
     const at = e => { const r = el.getBoundingClientRect(); hold(); move(Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)), Math.max(0, Math.min(1, (e.clientY - r.top) / r.height))); };
-    el.addEventListener('pointerdown', e => { try { el.setPointerCapture(e.pointerId); } catch (x) {} at(e); tell(); });
-    el.addEventListener('pointermove', e => { if (e.buttons) { at(e); tell(); } });
+    el.addEventListener('pointerdown', e => { try { el.setPointerCapture(e.pointerId); } catch (x) {} at(e); if (live !== false) tell(); });
+    el.addEventListener('pointermove', e => { if (e.buttons) { at(e); if (live !== false) tell(); } });
     el.addEventListener('pointerup', () => tell(true));
     el.addEventListener('hp-nudge', e => { hold(); nudge(e.detail.dx, e.detail.dy); tell(true); });
   }
   /** A list that opens upward from its well: a light's effects, or a choice kept on the light's own device (a WLED
    *  preset). options() gives [the list, the one in use]. */
-  function dropdown(parent, options, pick, mark) {
+  function dropdown(parent, options, pick, mark, show) {
     const d = part(parent, 'dd', '1', '<div class="ddv"></div><div class="ddl"></div>');
     d.onclick = ev => {
       const o = ev.target.closest('.ddl div'), open = d.classList.contains('open');
@@ -145,7 +174,7 @@
       if (o) return pick(o.dataset.v);
       if (open) return;
       const [list, now] = options();
-      d.lastChild.innerHTML = list.map(x => `<div data-r="1" data-v="${U.esc(x)}"${x === now ? ' class="cur"' : ''}><span class="dn">${U.esc(x)}</span>${mark ? mark(x) : ''}</div>`).join('');
+      d.lastChild.innerHTML = list.map(x => `<div data-r="1" data-v="${U.esc(x)}"${x === now ? ' class="cur"' : ''}><span class="dn">${U.esc(show ? show(x) : x)}</span>${mark ? mark(x) : ''}</div>`).join('');
       d.classList.add('open');
     };
     return d;
@@ -219,6 +248,149 @@
     });
   }
 
+  // ---------- other things with settings: the same popup, the same controls ----------
+  /** A tall bar for one number from lo to hi. get() reads it from the house; set(v) sends it when the finger lets go
+   *  (a thermostat or a blind is not sent every value on the way). Returns a function that redraws it and gives its value. */
+  function slider(parent, cls, lo, hi, step, get, set) {
+    const el = part(parent, 'vbar ' + cls, 'adj', '<div class="mark"></div>'), snap = x => +clamp(Math.round(x / step) * step, lo, hi).toFixed(2);
+    let v = null;
+    const place = () => { el.firstChild.hidden = v == null; if (v != null) el.firstChild.style.top = 4 + (1 - (v - lo) / (hi - lo)) * 92 + '%'; };
+    const moved = () => { place(); HP.pop.update(); };
+    drag(el, (x, y) => { v = snap(lo + (1 - y) * (hi - lo)); moved(); }, (dx, dy) => { v = snap((v == null ? lo : v) - dy * step); moved(); },
+      () => { el.hpHold = performance.now() + 5000; set(v); }, false);  // slow things take a few seconds to say they have arrived
+    return () => { if (!(el.hpHold > performance.now())) { const g = get(); v = g == null || isNaN(g) ? null : clamp(+g, lo, hi); place(); } return v; };
+  }
+  const powerBtn = (head, press) => { const b = part(head, 'rb', '1', U.icon('power')); head.insertBefore(b, head.querySelector('.px')); b.onclick = press; return b; };
+  const attr = (e, k) => st(e) ? st(e).attributes[k] : null;
+
+  /** A thermostat: the temperature it aims for (two bars where it keeps a room between two), and its modes. */
+  function climatePop(e, ctx, name) {
+    const call = (svc, data) => ctx.service('climate', svc, e, data);
+    HP.pop.open(name, body => {
+      const a = st(e).attributes, lo = a.min_temp == null ? 7 : a.min_temp, hi = a.max_temp == null ? 35 : a.max_temp, step = a.target_temp_step || 1;
+      const both = a.temperature == null && a.target_temp_low != null;
+      const bars = both
+        ? [slider(body, 'tmp', lo, hi, step, () => attr(e, 'target_temp_low'), v => call('set_temperature', {target_temp_low: v, target_temp_high: attr(e, 'target_temp_high')})),
+          slider(body, 'tmp', lo, hi, step, () => attr(e, 'target_temp_high'), v => call('set_temperature', {target_temp_low: attr(e, 'target_temp_low'), target_temp_high: v}))]
+        : [slider(body, 'tmp', lo, hi, step, () => attr(e, 'temperature'), v => call('set_temperature', {temperature: v}))];
+      const side = part(body, 'pr'), lists = [];
+      const list = (label, key, now, svc, field) => { if ((a[key] || []).length) lists.push([label, now, dropdown(side, () => [attr(e, key) || [], now()], x => call(svc, {[field]: x}), null, U.cap)]); };
+      list('Mode', 'hvac_modes', () => st(e) && st(e).state, 'set_hvac_mode', 'hvac_mode');
+      list('Fan', 'fan_modes', () => attr(e, 'fan_mode'), 'set_fan_mode', 'fan_mode');
+      list('Preset', 'preset_modes', () => attr(e, 'preset_mode'), 'set_preset_mode', 'preset_mode');
+      if (!lists.length) side.remove();
+      return () => {
+        const s = st(e); if (!s) return 'Not found';
+        const set = bars.map(b => b()).filter(v => v != null).map(v => v + '\u00b0').join(' \u2013 '), is = s.attributes.current_temperature;
+        lists.forEach(([label, now, d]) => { d.firstChild.textContent = now() ? label + ': ' + U.cap(String(now())) : label; });
+        return [U.cap(s.state), is != null ? 'Now ' + is + '\u00b0' : '', set ? 'Set ' + set : ''].filter(Boolean).join(' \u00b7 ');
+      };
+    });
+  }
+
+  /** A blind, shade or awning: how far open (and how far tilted) where it can be set, and open, stop, close. */
+  function coverPop(e, ctx, name, dom) {
+    dom = dom || 'cover';
+    const call = (svc, data) => ctx.service(dom, svc, e, data);
+    HP.pop.open(name, body => {
+      const f = st(e).attributes.supported_features || 0, bars = [];
+      if (f & 4) bars.push(slider(body, 'lvl', 0, 100, 1, () => attr(e, 'current_position'), v => call('set_' + dom + '_position', {position: v})));
+      if (f & 128) bars.push(slider(body, 'lvl', 0, 100, 1, () => attr(e, 'current_tilt_position'), v => call('set_cover_tilt_position', {tilt_position: v})));
+      const col = part(body, 'modes side');
+      col.innerHTML = [[1, 'open_' + dom, 'Open'], [8, 'stop_' + dom, 'Stop'], [2, 'close_' + dom, 'Close']].filter(b => f & b[0]).map(b => `<div class="mb" data-r="1" data-s="${b[1]}">${b[2]}</div>`).join('');
+      col.onclick = ev => { const b = ev.target.closest('[data-s]'); if (b) call(b.dataset.s); };
+      return () => { if (!st(e)) return 'Not found'; const v = bars.map(b => b()); return [U.stateLabel(e), v[0] != null ? v[0] + '%' : ''].filter(Boolean).join(' \u00b7 '); };
+    });
+  }
+
+  /** A fan: its speed, and what else it has of presets, turning from side to side and direction. */
+  function fanPop(e, ctx, name) {
+    const call = (svc, data) => ctx.service('fan', svc, e, data);
+    HP.pop.open(name, (body, head) => {
+      const a = st(e).attributes, f = a.supported_features || 0, power = powerBtn(head, () => call('toggle'));
+      const speed = f & 1 ? slider(body, 'lvl', 0, 100, a.percentage_step || 1, () => st(e) && st(e).state === 'on' ? attr(e, 'percentage') : 0, v => v > 0 ? call('set_percentage', {percentage: v}) : call('turn_off')) : null;
+      const side = f & 14 ? part(body, 'pr') : null;
+      const preset = f & 8 && (a.preset_modes || []).length ? dropdown(side, () => [attr(e, 'preset_modes') || [], attr(e, 'preset_mode')], x => call('set_preset_mode', {preset_mode: x}), null, U.cap) : null;
+      const osc = f & 2 ? part(side, 'mb', '1', 'Oscillate') : null, dir = f & 4 ? part(side, 'mb', '1') : null;
+      if (osc) osc.onclick = () => call('oscillate', {oscillating: !attr(e, 'oscillating')});
+      if (dir) dir.onclick = () => call('set_direction', {direction: attr(e, 'direction') === 'reverse' ? 'forward' : 'reverse'});
+      return () => {
+        const s = st(e); if (!s) return 'Not found';
+        const v = speed ? speed() : null, on = s.state === 'on';
+        power.classList.toggle('lit', on);
+        if (preset) preset.firstChild.textContent = s.attributes.preset_mode ? U.cap(s.attributes.preset_mode) : 'Preset';
+        if (osc) osc.classList.toggle('go', !!s.attributes.oscillating);
+        if (dir) dir.textContent = s.attributes.direction === 'reverse' ? 'Reverse' : 'Forward';
+        return on && v != null ? Math.round(v) + '%' : U.stateLabel(e);
+      };
+    });
+  }
+
+  const PREV = '<svg viewBox="0 0 24 24"><path d="M18 5l-9 7 9 7zM6 5h2v14H6z"/></svg>', NEXT = '<svg viewBox="0 0 24 24"><path d="M6 5l9 7-9 7zM16 5h2v14h-2z"/></svg>',
+    MUTE = '<svg viewBox="0 0 24 24"><path d="M4 9h4l5-4v14l-5-4H4zM16 9l5 6M21 9l-5 6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
+  /** A player: what it plays, its volume, back, play or pause, on, mute, and where it plays from. Only what it has. */
+  function mediaPop(e, ctx, name) {
+    const call = (svc, data) => ctx.service('media_player', svc, e, data);
+    HP.pop.open(name, (body, head) => {
+      const a = st(e).attributes, f = a.supported_features || 0, power = f & 384 ? powerBtn(head, () => call('toggle')) : null;
+      const vol = f & 4 ? slider(body, 'lvl', 0, 100, 1, () => { const v = attr(e, 'volume_level'); return v == null ? null : Math.round(v * 100); }, v => call('volume_set', {volume_level: v / 100})) : null;
+      const side = part(body, 'pr'), art = part(side, 'art'), row = part(side, 'trow');
+      row.innerHTML = (f & 16 ? `<div class="rb" data-r="1" data-b="prev">${PREV}</div>` : '') + (f & 16385 ? '<div class="rb" data-r="1" data-b="play"></div>' : '')
+        + (f & 32 ? `<div class="rb" data-r="1" data-b="next">${NEXT}</div>` : '') + (f & 8 ? `<div class="rb" data-r="1" data-b="mute">${MUTE}</div>` : '');
+      row.onclick = ev => { const b = (ev.target.closest('[data-b]') || {dataset: {}}).dataset.b;
+        if (b === 'mute') call('volume_mute', {is_volume_muted: !attr(e, 'is_volume_muted')}); else if (b) call({prev: 'media_previous_track', play: 'media_play_pause', next: 'media_next_track'}[b]); };
+      const play = row.querySelector('[data-b=play]'), mute = row.querySelector('[data-b=mute]');
+      const src = f & 2048 && (a.source_list || []).length ? dropdown(side, () => [attr(e, 'source_list') || [], attr(e, 'source')], x => call('select_source', {source: x})) : null;
+      const mode = f & 65536 && (a.sound_mode_list || []).length ? dropdown(side, () => [attr(e, 'sound_mode_list') || [], attr(e, 'sound_mode')], x => call('select_sound_mode', {sound_mode: x})) : null;
+      return () => {
+        const s = st(e); if (!s) return 'Not found';
+        const x = s.attributes, pic = x.entity_picture ? (/^https?:/.test(x.entity_picture) ? x.entity_picture : HP.asset(x.entity_picture)) : '';
+        if (vol) vol();
+        if (art.dataset.pic !== pic) { art.dataset.pic = pic; art.hidden = !pic; art.style.backgroundImage = pic ? `url("${pic}")` : ''; }
+        if (power) power.classList.toggle('lit', s.state !== 'off' && s.state !== 'standby');
+        if (play) { const ic = U.icon(s.state === 'playing' ? 'pause' : 'play'); if (play.innerHTML !== ic) play.innerHTML = ic; }
+        if (mute) mute.classList.toggle('lit', !!x.is_volume_muted);
+        if (src) src.firstChild.textContent = x.source || 'Source';
+        if (mode) mode.firstChild.textContent = x.sound_mode || 'Sound mode';
+        return [x.media_title, x.media_artist].filter(Boolean).join(' \u00b7 ') || U.cap(s.state);
+      };
+    });
+  }
+
+  /** A number that can be set: one bar over its range. */
+  function numberPop(e, ctx, name, dom) {
+    HP.pop.open(name, body => {
+      const a = st(e).attributes, lo = a.min == null ? 0 : a.min, hi = a.max == null ? 100 : a.max;
+      const bar = slider(body, 'lvl', lo, hi, a.step || 1, () => st(e) ? parseFloat(st(e).state) : null, v => ctx.service(dom, 'set_value', e, {value: v}));
+      return () => { if (!st(e)) return 'Not found'; const v = bar(), u = st(e).attributes.unit_of_measurement; return v == null ? U.stateLabel(e) : v + (u ? (u.length > 2 ? ' ' : '') + u : ''); };
+    });
+  }
+  /** Something whose controls are a few plain actions: a robot vacuum, a mower, a timer, a counter. build(body) may add more. */
+  function listPop(e, ctx, name, dom, acts, build) {
+    HP.pop.open(name, body => {
+      const col = part(body, 'modes');
+      col.innerHTML = acts.map(a => `<div class="mb" data-r="1" data-s="${a[0]}">${a[1]}</div>`).join('');
+      col.onclick = ev => { const b = ev.target.closest('[data-s]'); if (b) ctx.service(dom, b.dataset.s, e); };
+      const more = build ? build(body) : null;
+      return () => { if (!st(e)) return 'Not found'; if (more) more(); return U.stateLabel(e); };
+    });
+  }
+  /** One level and a list of modes, with or without a power button: a humidifier, a water heater. */
+  function levelPop(e, ctx, name, dom, key, loKey, hiKey, lo0, hi0, setSvc, unit, listKey, modeKey, modeSvc, modeField, power) {
+    const call = (svc, data) => ctx.service(dom, svc, e, data);
+    HP.pop.open(name, (body, head) => {
+      const a = st(e).attributes, btn = power ? powerBtn(head, () => call('toggle')) : null;
+      const bar = slider(body, key === 'temperature' ? 'tmp' : 'lvl', a[loKey] == null ? lo0 : a[loKey], a[hiKey] == null ? hi0 : a[hiKey], a.target_temp_step || 1, () => attr(e, key), v => call(setSvc, {[key]: v}));
+      const modes = (a[listKey] || []).length ? dropdown(part(body, 'pr'), () => [attr(e, listKey) || [], attr(e, modeKey)], x => call(modeSvc, {[modeField]: x}), null, U.cap) : null;
+      return () => {
+        const s = st(e); if (!s) return 'Not found'; const v = bar();
+        if (btn) btn.classList.toggle('lit', s.state === 'on');
+        if (modes) modes.firstChild.textContent = s.attributes[modeKey] ? U.cap(String(s.attributes[modeKey])) : 'Mode';
+        return [U.cap(s.state), v != null ? v + unit : ''].filter(Boolean).join(' \u00b7 ');
+      };
+    });
+  }
+
   // Feature bit, service, label, the state it leads to. Home Assistant's own names for the modes.
   const ARM = [[2, 'arm_away', 'Arm away', 'armed_away'], [1, 'arm_home', 'Arm home', 'armed_home'], [4, 'arm_night', 'Arm night', 'armed_night'],
     [32, 'arm_vacation', 'Arm vacation', 'armed_vacation'], [16, 'arm_custom_bypass', 'Custom bypass', 'armed_custom_bypass'], [0, 'disarm', 'Disarm', 'disarmed']];
@@ -256,9 +428,147 @@
         if (!isNaN(v)) { const text = Math.round(v) + '%'; if (i.bat.textContent !== text) i.bat.textContent = text; i.bat.classList.toggle('low', v <= 20); }
       }
     },
-    tap: (t, ctx) => U.avail(t.entity) ? () => HP.act(t.entity, ctx, t.name) : null,
+    tap: (t, ctx, i) => U.avail(t.entity) ? () => HP.act(t.entity, ctx, t.name, i.el) : null,
   });
   HP.tile('alarm', HP.tiles.entity);
+
+  // ---------- showing: a value, a gauge, a chart ----------
+  /** One thing's state, large: a temperature, a power reading, whether a door is open. Lit while a yes-or-no sensor says yes. */
+  HP.tile('value', {
+    create(t, body, ctx, i) {
+      body.classList.add('val');
+      body.innerHTML = `<div class="ic">${U.icon(t.icon || '')}</div><div class="tx"><div class="vv"></div><div class="l"></div></div>`;
+      i.p = {v: body.querySelector('.vv'), l: body.querySelector('.l')};
+    },
+    update(t, body, ctx, i) {
+      U.set(i.p.v, U.stateLabel(t.entity)); U.set(i.p.l, t.name || U.fname(t.entity));
+      i.el.classList.toggle('on', (t.entity || '').startsWith('binary_sensor.') && U.active(t.entity)); i.el.classList.toggle('off', !U.avail(t.entity));
+    },
+  });
+
+  /** A number against its range, as an arc from the lowest to the highest (0 to 100 unless the Studio says otherwise). */
+  HP.tile('gauge', {
+    create(t, body, ctx, i) {
+      const ARC = 'M8 52a42 42 0 0 1 84 0';
+      body.classList.add('gau');
+      body.innerHTML = `<svg viewBox="0 0 100 58"><path class="ga" d="${ARC}"/><path class="gv" d="${ARC}"/></svg><div class="gt"><div class="vv"></div><div class="l"></div></div>`;
+      i.p = {v: body.querySelector('.vv'), l: body.querySelector('.l'), arc: body.querySelector('.gv')};
+      i.len = Math.PI * 42; i.p.arc.style.strokeDasharray = i.len;
+    },
+    update(t, body, ctx, i) {
+      const s = st(t.entity), v = s ? parseFloat(s.state) : NaN, lo = parseFloat(t.min) || 0, hi = isNaN(parseFloat(t.max)) ? 100 : parseFloat(t.max);
+      i.p.arc.style.strokeDashoffset = (i.len * (1 - (isNaN(v) || hi <= lo ? 0 : clamp((v - lo) / (hi - lo), 0, 1)))).toFixed(1);
+      U.set(i.p.v, U.stateLabel(t.entity)); U.set(i.p.l, t.name || U.fname(t.entity)); i.el.classList.toggle('off', !U.avail(t.entity));
+    },
+  });
+
+  /** What Home Assistant has kept of one thing over the last hours: [[time in ms, state]]. Up to a day it is every
+   *  change; for days it is the hourly means Home Assistant keeps, where it keeps them for that thing. */
+  function history(e, hours) {
+    const end = new Date(), start = new Date(end - hours * 36e5), span = {start_time: start.toISOString(), end_time: end.toISOString()};
+    const raw = () => HP.ha.call(Object.assign({type: 'history/history_during_period', entity_ids: [e], minimal_response: true, no_attributes: true}, span))
+      .then(r => ((r || {})[e] || []).map(p => [(p.lu || p.lc) * 1000, p.s]));
+    if (hours <= 24) return raw();
+    return HP.ha.call(Object.assign({type: 'recorder/statistics_during_period', statistic_ids: [e], period: 'hour', types: ['mean', 'state']}, span))
+      .then(r => { const a = (r || {})[e] || []; return a.length ? a.map(p => [p.start, String(p.mean != null ? p.mean : p.state)]) : raw(); }, raw);
+  }
+  const YES = ['on', 'open', 'opening', 'playing', 'home', 'unlocked', 'heating', 'cooling', 'cleaning', 'mowing'];
+  /** The chart's line, on a box 100 wide and 40 high: a line through numbers, steps for something that is on or off. */
+  function chartPath(pts, from, now) {
+    const good = pts.filter(p => p[1] !== 'unavailable' && p[1] !== 'unknown' && p[1] != null);
+    const numeric = good.filter(p => !isNaN(parseFloat(p[1]))).length * 2 >= good.length;
+    let P = good.map(p => [Math.max(p[0], from), numeric ? parseFloat(p[1]) : YES.includes(p[1]) ? 1 : 0]).filter(p => !isNaN(p[1]) && p[0] <= now);
+    if (P.length > 500) { const k = Math.ceil(P.length / 500); P = P.filter((p, n) => n % k === 0 || n === P.length - 1); }  // more points than the tile has pixels
+    if (!P.length) return null;
+    let lo = numeric ? Math.min(...P.map(p => p[1])) : 0, hi = numeric ? Math.max(...P.map(p => p[1])) : 1;
+    if (hi === lo) { hi += 1; lo -= 1; }
+    const x = v => ((v - from) / (now - from) * 100).toFixed(2), y = v => (38 - (v - lo) / (hi - lo) * 36).toFixed(2);
+    let d = `M${x(P[0][0])} ${y(P[0][1])}`;
+    for (let n = 1; n < P.length; n++) d += numeric ? `L${x(P[n][0])} ${y(P[n][1])}` : `H${x(P[n][0])}V${y(P[n][1])}`;
+    d += 'H100';  // it has stayed there until now
+    return {line: d, area: d + `V40H${x(P[0][0])}Z`, lo, hi, numeric};
+  }
+  /** One thing over the last hours (24 unless the Studio says otherwise). The history is read through the same
+   *  connection as everything else, again every five minutes; a change in between is added the moment it happens. */
+  HP.tile('chart', {
+    create(t, body, ctx, i) {
+      body.classList.add('cht');
+      body.innerHTML = '<div class="ch"><div class="l"></div><div class="vv"></div></div><div class="cw"><svg viewBox="0 0 100 40" preserveAspectRatio="none"><path class="ca"/><path class="cl"/></svg><span class="chi"></span><span class="clo"></span></div>';
+      i.p = {v: body.querySelector('.vv'), l: body.querySelector('.l'), line: body.querySelector('.cl'), area: body.querySelector('.ca'), hi: body.querySelector('.chi'), lo: body.querySelector('.clo')};
+      i.pts = []; i.hours = +t.hours || 24;
+      i.load = () => { if (i.busy || !HP.ha || !HP.ready || !st(t.entity)) return; i.busy = true;
+        // nothing kept for the period means nothing changed in it: the value it has now, all the way across
+        history(t.entity, i.hours).then(p => { i.pts = p.length || !st(t.entity) ? p : [[Date.now() - i.hours * 36e5, st(t.entity).state]]; i.got = true; i.sig = ''; }).catch(() => {}).then(() => { i.busy = false; HP.tiles.chart.update(t, body, ctx, i); }); };
+      const timer = setInterval(i.load, 300000);
+      return {destroy: () => clearInterval(timer)};
+    },
+    update(t, body, ctx, i) {
+      const s = st(t.entity), now = Date.now();
+      if (!i.got) i.load();
+      else if (s && i.seen !== s.state) i.pts.push([now, s.state]);
+      if (s) i.seen = s.state;
+      U.set(i.p.v, U.stateLabel(t.entity)); U.set(i.p.l, t.name || U.fname(t.entity)); i.el.classList.toggle('off', !U.avail(t.entity));
+      const sig = i.pts.length + '/' + Math.floor(now / 60000);
+      if (sig === i.sig) return;  // drawn again when a point arrives, and once a minute so the line keeps moving left
+      i.sig = sig;
+      const c = chartPath(i.pts, now - i.hours * 36e5, now), r = v => String(Math.round(v * 10) / 10);
+      i.p.line.setAttribute('d', c ? c.line : ''); i.p.area.setAttribute('d', c ? c.area : '');
+      i.p.hi.textContent = c && c.numeric ? r(c.hi) : ''; i.p.lo.textContent = c && c.numeric ? r(c.lo) : '';
+    },
+  });
+
+  // ---------- lists Home Assistant answers with: what is coming up, what is to do, the weather ahead ----------
+  /** A service that answers: Home Assistant's reply for those entities. */
+  const respond = (domain, service, ents, data) => HP.ha.call({type: 'call_service', domain, service, target: {entity_id: ents}, service_data: data || {}, return_response: true}).then(r => (r && r.response) || {});
+  /** Reads a list for a tile now and then (every `mins`), and again half a minute after a failure. */
+  function listed(i, mins, ask, draw) {
+    i.load = () => { if (i.busy || !HP.ha || !HP.ready) return; i.busy = true;
+      ask().then(r => { i.rows = r; i.fail = 0; draw(r); }, () => { i.fail = Date.now(); }).then(() => { i.busy = false; }); };
+    i.due = () => { if (!i.rows && Date.now() - (i.fail || 0) > 30000) i.load(); };
+    const timer = setInterval(i.load, mins * 60000);
+    return {destroy: () => clearInterval(timer)};
+  }
+  const dayName = d => { const today = new Date(); today.setHours(0, 0, 0, 0); const n = Math.round((new Date(d).setHours(0, 0, 0, 0) - today) / 864e5); return n === 0 ? 'Today' : n === 1 ? 'Tomorrow' : new Date(d).toLocaleDateString([], {weekday: 'long'}); };
+  const title = t => t.name ? `<div class="bh">${U.esc(t.name)}</div>` : '';
+
+  /** What is on one or more calendars in the next seven days, soonest first. */
+  HP.tile('calendar', {
+    create(t, body, ctx, i) {
+      body.classList.add('agn');
+      return listed(i, 10, () => { const ents = (t.entities || []).filter(st), from = new Date();
+        return respond('calendar', 'get_events', ents, {start_date_time: from.toISOString(), end_date_time: new Date(+from + 7 * 864e5).toISOString()})
+          .then(r => [].concat(...ents.map(e => (r[e] || {}).events || [])).sort((a, b) => Date.parse(a.start) - Date.parse(b.start))); },
+        rows => { body.innerHTML = title(t) + rows.map(ev => { const allDay = String(ev.start).length <= 10, d = allDay ? ev.start + 'T00:00' : ev.start;
+          return `<div class="ag"><div class="ad">${dayName(d)}${allDay ? '' : ' ' + new Date(d).toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'})}</div><div class="as">${U.esc(ev.summary || '')}</div></div>`; }).join(''); });
+    },
+    update(t, body, ctx, i) { i.due(); },
+  });
+
+  /** A to-do list: what is still to do. A touch on one ticks it off; the first row adds one, typed on the device's keyboard. */
+  HP.tile('todo', {
+    create(t, body, ctx, i) {
+      body.classList.add('agn');
+      body.addEventListener('click', ev => { const r = ev.target.closest('[data-u], [data-add]'); if (!r) return;
+        const then = () => setTimeout(i.load, 600);
+        if (r.dataset.u) ctx.service('todo', 'update_item', t.entity, {item: r.dataset.u, status: 'completed'}).then(then);
+        else HP.textBox('Add', '', 'text', v => v.trim() && ctx.service('todo', 'add_item', t.entity, {item: v.trim()}).then(then)); });
+      return listed(i, 10, () => respond('todo', 'get_items', [t.entity], {status: ['needs_action']}).then(r => (r[t.entity] || {}).items || []),
+        rows => { body.innerHTML = title(t) + '<div class="ag tap" data-add="1"><div class="as">Add</div></div>' + rows.map(x => `<div class="ag tap" data-u="${U.esc(x.uid || x.summary)}"><div class="as">${U.esc(x.summary || '')}</div></div>`).join(''); });
+    },
+    update(t, body, ctx, i) { const s = st(t.entity); if (s && i.count !== s.state) { i.count = s.state; if (i.rows) i.load(); } i.due(); },
+  });
+
+  /** The weather ahead, by day or by hour: as many as fit across the tile. */
+  HP.tile('forecast', {
+    create(t, body, ctx, i) {
+      body.classList.add('fct');
+      return listed(i, 30, () => respond('weather', 'get_forecasts', [t.entity], {type: t.hourly ? 'hourly' : 'daily'}).then(r => (r[t.entity] || {}).forecast || []),
+        rows => { const n = Math.max(3, Math.min(8, Math.floor(i.w / 84))), deg = v => v == null ? '' : Math.round(v) + '\u00b0';
+          body.innerHTML = rows.slice(0, n).map(f => `<div class="fc"><div class="fd">${t.hourly ? new Date(f.datetime).toLocaleTimeString([], {hour: 'numeric'}) : new Date(f.datetime).toLocaleDateString([], {weekday: 'short'})}</div>`
+            + `<div class="ic">${U.icon(SKY[f.condition] || 'weather-cloudy')}</div><div class="fh">${deg(f.temperature)}</div><div class="fl">${deg(f.templow)}</div></div>`).join(''); });
+    },
+    update(t, body, ctx, i) { i.due(); },
+  });
 
   /** The batteries of things around the house on one button, the lowest first: what needs changing is on top, and
    *  what does not fit is the least urgent. A battery that only says "low" or not (a binary sensor) counts as empty or full. */
@@ -327,7 +637,7 @@
       U.set(i.p.n, a.media_title || t.name || a.friendly_name); U.set(i.p.l, a.media_artist || a.app_name || U.cap(s.state));
       i.el.classList.toggle('on', playing);
     },
-    tap: (t, ctx) => () => ctx.service('media_player', 'media_play_pause', t.entity),
+    tap: (t, ctx) => U.avail(t.entity) ? () => HP.act(t.entity, ctx, t.name) : null,
   });
 
   // Still picture at once, live video takes over where the tablet can decode it. Tap opens the camera's page.
@@ -351,7 +661,7 @@
   // A button that holds several things from the house, each on the button's own small grid. Items are either
   // placed by hand in the Studio (x, y, w, h on t.grid) or, while t.auto is not false, arranged to suit the
   // button's shape, so stretching the button in the editor reshuffles what is on it.
-  const READ_ONLY = ['sensor', 'binary_sensor', 'weather', 'person', 'sun', 'device_tracker', 'camera', 'update', 'event', 'zone'];
+  const READ_ONLY = ['sensor', 'binary_sensor', 'weather', 'person', 'sun', 'device_tracker', 'camera', 'event', 'zone'];
   HP.tile('button', {
     create(t, body, ctx, i) {
       const items = (t.items || []).filter(it => it && it.entity);
@@ -370,7 +680,7 @@
         el.className = 'it' + (w / h > 2.4 ? ' wide' : '') + (n === 1 ? ' only' : '') + (readOnly ? '' : ' tap');
         el.style.cssText = `left:${p.x / cols * 100}%;top:${p.y / rows * 100}%;width:${p.w / cols * 100}%;height:${p.h / rows * 100}%;--iu:${U.unit(w, h).toFixed(1)}px`;
         el.innerHTML = '<div class="ic"></div><div class="tx"><div class="n"></div><div class="l"></div></div>';
-        if (!readOnly) el.addEventListener('click', () => { if (U.avail(it.entity)) HP.act(it.entity, ctx, it.label); });
+        if (!readOnly) el.addEventListener('click', () => { if (U.avail(it.entity)) HP.act(it.entity, ctx, it.label, el); });
         box.append(el);
         return {it, el, ic: el.firstChild, n: el.querySelector('.n'), l: el.querySelector('.l')};
       });

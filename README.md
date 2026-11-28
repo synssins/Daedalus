@@ -49,6 +49,22 @@ it is kept across restarts and remains editable in Home Assistant. Only lights a
 Locks, garage doors and alarm panels ask for confirmation before acting. Where Home Assistant requires a code for
 the entity, a PIN pad is shown and Home Assistant checks the code. The confirmation is a panel setting.
 
+Thermostats, blinds and other covers, fans and media players open the same popup with the controls each one
+reports: target temperature and modes; position, tilt, open, stop and close; speed, preset, oscillation and
+direction; volume, transport, mute, source and sound mode with the current artwork.
+
+Numbers open a bar over their range. Selects drop their options from the button. Text, time and date entities open
+an entry field that uses the device's keyboard and pickers. Counters, timers, robot vacuums and lawn mowers open
+their actions. Valves, humidifiers and water heaters open their level and modes. A siren and an update ask for
+confirmation.
+
+**Calendar**, **To-do list** and **Forecast** tiles show upcoming events of one or more calendars, the open items
+of a to-do list with check-off and add, and the daily or hourly forecast of a weather entity.
+
+**Value**, **Gauge** and **Chart** tiles show an entity: its state in large type, a number against a range, or its
+history over 1 hour to 7 days. Binary sensors are shown in the words of their device class, such as Open and
+Closed for a door.
+
 The **Battery** button lists battery sensors with the lowest first. A light or switch button can show the
 battery level of its device where the device reports one.
 
@@ -60,8 +76,8 @@ The alarm panel button opens the arming modes that the Home Assistant alarm enti
 
 - Snap-grid layout with drag and resize.
 - Live preview that uses the tablet renderer and current Home Assistant state.
-- Tile types: clock, weather, people, alerts, light or switch, scene, room, media, camera, page link, text, picture,
-  multi-device button, alarm panel, scenes, save scene, battery, voice assistant.
+- Tile types: clock, weather, people, alerts, entity, scene, room, media, camera, page link, text, picture,
+  multi-device button, alarm panel, scenes, save scene, battery, value, gauge, chart, calendar, to-do list, forecast, voice assistant.
 - Theme settings: background image, tile fill, corner radius, glass effect.
 - Designs can be fitted to other screen sizes and orientations.
 - Saved changes are pushed to tablets within a few seconds.

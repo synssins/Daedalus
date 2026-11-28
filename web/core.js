@@ -10,6 +10,11 @@ HP.asset = p => !p || /^(https?:|data:)/.test(p) || !HP.server ? p : HP.server +
 
 const $ = id => document.getElementById(id);
 const S = HP.S;
+const BINARY = {door: ['Open', 'Closed'], garage_door: ['Open', 'Closed'], window: ['Open', 'Closed'], opening: ['Open', 'Closed'], lock: ['Unlocked', 'Locked'],
+  motion: ['Detected', 'Clear'], occupancy: ['Detected', 'Clear'], presence: ['Home', 'Away'], vibration: ['Detected', 'Clear'], sound: ['Detected', 'Clear'], moving: ['Moving', 'Stopped'],
+  moisture: ['Wet', 'Dry'], smoke: ['Detected', 'Clear'], gas: ['Detected', 'Clear'], carbon_monoxide: ['Detected', 'Clear'], tamper: ['Tampering detected', 'Clear'],
+  problem: ['Problem', 'OK'], safety: ['Unsafe', 'Safe'], battery: ['Low', 'Normal'], battery_charging: ['Charging', 'Not charging'], connectivity: ['Connected', 'Disconnected'],
+  plug: ['Plugged in', 'Unplugged'], power: ['Power', 'No power'], running: ['Running', 'Not running'], heat: ['Hot', 'Normal'], cold: ['Cold', 'Normal'], light: ['Light', 'No light'], update: ['Update available', 'Up-to-date']};
 const U = HP.util = {
   esc: s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c])),
   st: e => S.states[e],
@@ -21,6 +26,10 @@ const U = HP.util = {
     const s = S.states[e];
     if (!s) return HP.ready ? 'Not found' : '';
     if (s.state === 'unavailable') return 'Offline';
+    // a yes-or-no sensor says what it watches: a door is open or closed, not on or off (Home Assistant's own words)
+    if (e.startsWith('binary_sensor.') && (s.state === 'on' || s.state === 'off')) { const w = BINARY[s.attributes.device_class]; if (w) return w[s.state === 'on' ? 0 : 1]; }
+    if (e.startsWith('update.') && (s.state === 'on' || s.state === 'off')) return s.state === 'on' ? 'Update available' : 'Up-to-date';
+    if (e.startsWith('event.') && s.attributes.event_type) return U.cap(String(s.attributes.event_type));
     if (s.state === 'on' && s.attributes.brightness) return Math.round(s.attributes.brightness / 2.55) + '%';
     const unit = s.attributes.unit_of_measurement;
     if (unit && !isNaN(parseFloat(s.state))) return (Math.round(parseFloat(s.state) * 10) / 10) + (unit.length > 2 ? ' ' : '') + unit;
@@ -494,6 +503,21 @@ HP.saveScene = scope => {
     m.className = '';
     if (what === 'yes') send({name: inp.value.trim()});
     else if (what === 'rep') confirmBox(`This will replace ${U.fname(b.dataset.e)}. Are you sure?`, () => send({replace: b.dataset.e}), 'No');
+  };
+};
+
+/** One value typed on the device's own keyboard, or picked with its own time and date pickers (type: text, time,
+ *  date, datetime-local). */
+HP.textBox = (title, value, type, ok) => {
+  const m = $('modal');
+  m.innerHTML = `<div class="box"><div class="q">${U.esc(title)}</div><input class="tin" data-r="1" type="${type}" autocomplete="off"><div class="row"><div class="mb" data-m="no">Cancel</div><div class="mb go" data-m="yes">OK</div></div></div>`;
+  const inp = m.querySelector('.tin'); inp.value = value == null || value === 'unknown' ? '' : value;
+  m.className = 'open';
+  m.onclick = e => {
+    const b = e.target.closest('[data-m]');
+    if (e.target === inp) return inp.focus();
+    if (!b && e.target !== m) return;
+    m.className = ''; if (b && b.dataset.m === 'yes') ok(inp.value);
   };
 };
 

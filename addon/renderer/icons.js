@@ -2,6 +2,7 @@
 // Same names Home Assistant uses ("mdi:lightbulb" -> "lightbulb"), so imported dashboards map straight across.
 // The add-on will later serve the full set; this is the handful the demo design needs.
 window.HP_ICONS = {
+  'chart-line': 'M3 3v18h18v-2H5V3z M7.2 15.6l3.9-5 3 3 4.6-6.4 1.6 1.2-6 8.3-3-3-2.5 3.2z',
   battery: 'M10 3h4v3h3v15H7V6h3z',
   'lightbulb': 'M12,2A7,7 0 0,0 5,9C5,11.38 6.19,13.47 8,14.74V17A1,1 0 0,0 9,18H15A1,1 0 0,0 16,17V14.74C17.81,13.47 19,11.38 19,9A7,7 0 0,0 12,2M9,21A1,1 0 0,0 10,22H14A1,1 0 0,0 15,21V20H9V21Z',
   'lightbulb-group': 'M12,2A7,7 0 0,0 5,9C5,11.38 6.19,13.47 8,14.74V17A1,1 0 0,0 9,18H15A1,1 0 0,0 16,17V14.74C17.81,13.47 19,11.38 19,9A7,7 0 0,0 12,2M9,21A1,1 0 0,0 10,22H14A1,1 0 0,0 15,21V20H9V21Z',
