@@ -25,6 +25,7 @@ from aiohttp import ClientSession, WSMsgType, web
 
 from .scenes import capture, lights_of
 from .store import Store
+from .wled import effect_marks
 
 log = logging.getLogger("daedalus")
 ROOT = Path(__file__).resolve().parents[1]
@@ -401,6 +402,8 @@ async def admin_entities(request: web.Request):
             continue
         ent = {"id": st["entity_id"], "name": st["attributes"].get("friendly_name") or st["entity_id"],
                "area": e.get("area_id") or dev_area.get(e.get("device_id")), "state": st["state"]}
+        if st["attributes"].get("device_class"):
+            ent["dc"] = st["attributes"]["device_class"]
         if e.get("device_id"):
             ent["device"] = e["device_id"]
             by_dev.setdefault(e["device_id"], []).append((e, ent))
@@ -546,6 +549,31 @@ async def tablet_scenes(request: web.Request):
     return web.json_response(dict(await asyncio.gather(*(one(e, i) for e, i in ids.items()))))
 
 
+async def tablet_fxmeta(request: web.Request):
+    """Which of a light's effects answer to sound or are made for a grid, for the marks in a panel's effects list.
+    Only a WLED light has an answer. It is asked of the device itself, at the address Home Assistant has for that
+    device (never one the panel names), and kept for as long as the server runs."""
+    if not tablet_for(request):
+        raise web.HTTPUnauthorized()
+    eid, app = request.query.get("entity", ""), request.app
+    if eid not in app["fxmeta"]:
+        ents, devices = await ha_call(app, [{"type": "config/entity_registry/list"}, {"type": "config/device_registry/list"}])
+        e = next((x for x in ents if x["entity_id"] == eid), None) or {}
+        url = next((d.get("configuration_url") or "" for d in devices if d["id"] == e.get("device_id")), "") if e.get("platform") == "wled" else ""
+        marks = {}
+        if url.startswith("http://"):
+            try:
+                async with app["http"].get(url.rstrip("/") + "/json/effects", timeout=8) as a:
+                    names = await a.json(content_type=None)
+                async with app["http"].get(url.rstrip("/") + "/json/fxdata", timeout=8) as b:
+                    marks = effect_marks(names, await b.json(content_type=None))
+            except Exception as err:  # the strip is away: ask again the next time
+                log.warning("no effect marks from %s: %r", url, err)
+                return web.json_response({})
+        app["fxmeta"][eid] = marks
+    return web.json_response(app["fxmeta"][eid])
+
+
 async def tablet_llm(request: web.Request):
     """Assistant buttons set to a direct LLM send the heard text here. The server holds the address and key
     (Studio, Assistant settings); the tablet never sees them. Speaks the OpenAI chat-completions format,
@@ -644,6 +672,7 @@ def build_app() -> web.Application:
     app["engine"] = build_engine()
     app["wake_lock"] = asyncio.Lock()
     app["admin_sockets"] = set()
+    app["fxmeta"] = {}
 
     async def http_ctx(app):
         app["http"] = ClientSession()
@@ -665,6 +694,7 @@ def build_app() -> web.Application:
     r.add_post("/api/llm", tablet_llm)
     r.add_post("/api/scene", tablet_scene)
     r.add_get("/api/scenes", tablet_scenes)
+    r.add_get("/api/fxmeta", tablet_fxmeta)
     for p in ("/api/camera_proxy/{t:.*}", "/api/camera_proxy_stream/{t:.*}", "/api/hls/{t:.*}", "/api/tts_proxy/{t:.*}"):
         r.add_get(p, ha_media)
     r.add_route("OPTIONS", "/api/{t:.*}", lambda request: web.Response())

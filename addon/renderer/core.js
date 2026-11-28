@@ -49,6 +49,11 @@ const U = HP.util = {
   },
   /** Type scale for a box of this size: everything inside is sized in multiples of it. */
   unit: (w, h) => Math.max(11, Math.min(h * 0.2, w * 0.11, 64)),
+  /** The battery of the device a thing belongs to, where Home Assistant has one: a battery sensor on the same device. */
+  battery(e) {
+    const d = S.reg[e] && S.reg[e].dev;
+    return d ? Object.keys(S.states).find(id => id.startsWith('sensor.') && S.states[id].attributes.device_class === 'battery' && !!S.reg[id] && S.reg[id].dev === d) || null : null;
+  },
 };
 
 // ---------- theme ----------
@@ -490,6 +495,13 @@ HP.saveScene = scope => {
     if (what === 'yes') send({name: inp.value.trim()});
     else if (what === 'rep') confirmBox(`This will replace ${U.fname(b.dataset.e)}. Are you sure?`, () => send({replace: b.dataset.e}), 'No');
   };
+};
+
+/** Marks for a light's effects: {effect: 's' sound, 'g' grid, or both}. Only a WLED light has any; the Workshop asks the strip. */
+HP.fxmeta = e => {
+  const c = HP.fxmeta.got || (HP.fxmeta.got = {});
+  if (!c[e]) c[e] = !HP.server || !HP.key ? Promise.resolve({}) : fetch(HP.server + '/api/fxmeta?entity=' + encodeURIComponent(e), {headers: {Authorization: 'Bearer ' + HP.key}}).then(r => r.ok ? r.json() : {}).catch(() => ({}));
+  return c[e];
 };
 
 // ---------- scenes ----------

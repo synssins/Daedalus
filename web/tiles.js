@@ -137,15 +137,15 @@
   }
   /** A list that opens upward from its well: a light's effects, or a choice kept on the light's own device (a WLED
    *  preset). options() gives [the list, the one in use]. */
-  function dropdown(parent, options, pick) {
+  function dropdown(parent, options, pick, mark) {
     const d = part(parent, 'dd', '1', '<div class="ddv"></div><div class="ddl"></div>');
     d.onclick = ev => {
       const o = ev.target.closest('.ddl div'), open = d.classList.contains('open');
       parent.querySelectorAll('.dd.open').forEach(x => x.classList.remove('open'));  // one list at a time
-      if (o) return pick(o.textContent);
+      if (o) return pick(o.dataset.v);
       if (open) return;
       const [list, now] = options();
-      d.lastChild.innerHTML = list.map(x => `<div data-r="1"${x === now ? ' class="cur"' : ''}>${U.esc(x)}</div>`).join('');
+      d.lastChild.innerHTML = list.map(x => `<div data-r="1" data-v="${U.esc(x)}"${x === now ? ' class="cur"' : ''}><span class="dn">${U.esc(x)}</span>${mark ? mark(x) : ''}</div>`).join('');
       d.classList.add('open');
     };
     return d;
@@ -177,7 +177,11 @@
       const reg = HP.S.reg, dev = reg[e] && reg[e].dev;
       const picks = dev ? Object.keys(HP.S.states).filter(id => id.startsWith('select.') && reg[id] && reg[id].dev === dev && !reg[id].skip).sort() : [];
       const side = can.colour || can.fx || picks.length ? part(body, 'pr') : null, wheel = can.colour ? part(side, 'wheel', 'adj', MARK) : null;
-      const fx = can.fx ? dropdown(side, () => [st(e).attributes.effect_list || [], st(e).attributes.effect], x => call({effect: x})) : null;
+      // An effect that answers to sound carries a note, one made for a grid of lights a grid (WLED; see HP.fxmeta).
+      let marks = {}; if (can.fx) HP.fxmeta(e).then(m => { marks = m || {}; });
+      const NOTE = '<svg viewBox="0 0 24 24"><path d="M9 4v11.2a3.2 3.2 0 1 0 2 3V8h6V4z"/></svg>', GRID = '<svg viewBox="0 0 24 24"><path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z"/></svg>';
+      const fx = can.fx ? dropdown(side, () => [st(e).attributes.effect_list || [], st(e).attributes.effect], x => call({effect: x}),
+        x => marks[x] ? '<span class="fm">' + (marks[x].includes('s') ? NOTE : '') + (marks[x].includes('g') ? GRID : '') + '</span>' : '') : null;
       const sel = picks.map(id => [id, dropdown(side, () => [(st(id) || {attributes: {}}).attributes.options || [], (st(id) || {}).state], x => ctx.service('select', 'select_option', id, {option: x}))]);
       // A group Home Assistant knows the members of: each one under the controls, to open by itself.
       const mem = (Array.isArray(a0.entity_id) ? a0.entity_id : []).filter(st), chips = mem.length ? part(body.parentNode, 'pmem') : null;
@@ -236,16 +240,40 @@
   }
 
   HP.tile('entity', {
-    create(t, body, ctx, i) { i.p = U.card(body, t.icon || DOMAIN_ICON[(t.entity || '').split('.')[0]] || 'lightbulb'); },
+    create(t, body, ctx, i) {
+      i.p = U.card(body, t.icon || DOMAIN_ICON[(t.entity || '').split('.')[0]] || 'lightbulb');
+      if (t.battery) { i.bat = document.createElement('div'); i.bat.className = 'batt'; i.bat.hidden = true; body.append(i.bat); }  // its device's battery, in the corner
+    },
     update(t, body, ctx, i) {
       U.set(i.p.n, t.name || U.fname(t.entity)); U.set(i.p.l, U.stateLabel(t.entity));
       i.el.classList.toggle('on', U.active(t.entity)); i.el.classList.toggle('off', !U.avail(t.entity));
       i.el.classList.toggle('alert', !!st(t.entity) && st(t.entity).state === 'triggered');
       lit(i.el, t.entity, i.lightState);
+      if (i.bat) {
+        if (!i.batId && (i.batTry = (i.batTry || 0) + 1) < 4) i.batId = U.battery(t.entity);  // looked for a few times: the house's list may still be arriving
+        const v = i.batId && st(i.batId) ? parseFloat(st(i.batId).state) : NaN;
+        i.bat.hidden = isNaN(v);
+        if (!isNaN(v)) { const text = Math.round(v) + '%'; if (i.bat.textContent !== text) i.bat.textContent = text; i.bat.classList.toggle('low', v <= 20); }
+      }
     },
     tap: (t, ctx) => U.avail(t.entity) ? () => HP.act(t.entity, ctx, t.name) : null,
   });
   HP.tile('alarm', HP.tiles.entity);
+
+  /** The batteries of things around the house on one button, the lowest first: what needs changing is on top, and
+   *  what does not fit is the least urgent. A battery that only says "low" or not (a binary sensor) counts as empty or full. */
+  HP.tile('battery', {
+    create(t, body) { body.classList.add('bats'); },
+    update(t, body, ctx, i) {
+      const rows = (t.entities || []).filter(st).map(e => {
+        const s = st(e), yn = e.startsWith('binary_sensor.'), v = yn ? (s.state === 'on' ? 0 : s.state === 'off' ? 100 : NaN) : parseFloat(s.state);
+        return {v, name: U.fname(e).replace(/ battery( level)?$/i, ''), text: isNaN(v) ? 'Offline' : yn ? (v ? 'OK' : 'Low') : Math.round(v) + '%'};
+      }).sort((a, b) => (isNaN(a.v) ? -1 : a.v) - (isNaN(b.v) ? -1 : b.v));
+      const html = (t.name ? `<div class="bh">${U.esc(t.name)}</div>` : '') + rows.map(r =>
+        `<div class="bat${isNaN(r.v) || r.v <= 10 ? ' out' : r.v <= 20 ? ' low' : ''}"><div class="bn">${U.esc(r.name)}</div><div class="bv">${r.text}</div><div class="bb"><i style="width:${isNaN(r.v) ? 0 : Math.max(3, Math.min(100, r.v))}%"></i></div></div>`).join('');
+      if (i.html !== html) { i.html = html; body.innerHTML = html; }
+    },
+  });
   /** Saves the lights of its room or floor, as they are now, as a scene. */
   HP.tile('savescene', {
     create(t, body, ctx, i) { i.p = U.card(body, t.icon || 'star'); U.set(i.p.n, t.name || 'Save scene'); },

@@ -6,11 +6,12 @@
 const ORBS = [['ribbons', 'Orb'], ['ring', 'Ring'], ['veil', 'Veil']];
 const TYPES = {
   button: {label: 'Button', icon: 'gesture-tap', w: 14, h: 10, fields: []},
-  entity: {label: 'Light or switch', icon: 'lightbulb', w: 10, h: 8, fields: [['entity', 'Entity', 'entity', ['light', 'switch']], ['name', 'Name', 'text'], ['icon', 'Icon', 'icon'], ['confirm', 'Confirmation', 'text', 'Question to ask before acting']]},
+  entity: {label: 'Light or switch', icon: 'lightbulb', w: 10, h: 8, fields: [['entity', 'Entity', 'entity', ['light', 'switch']], ['name', 'Name', 'text'], ['battery', 'Battery', 'flag', t => hasBattery(t.entity)], ['icon', 'Icon', 'icon'], ['confirm', 'Confirmation', 'text', 'Question to ask before acting']]},
   action: {label: 'Scene or script', icon: 'star', w: 12, h: 6, fields: [['entity', 'Entity', 'entity', ['scene', 'script', 'button']], ['name', 'Name', 'text'], ['label', 'Subtitle', 'text'], ['icon', 'Icon', 'icon'], ['confirm', 'Confirmation', 'text', 'Question to ask before acting']]},
   alarm: {label: 'Alarm panel', icon: 'lock', w: 10, h: 8, fields: [['entity', 'Entity', 'entity', ['alarm_control_panel']], ['name', 'Name', 'text'], ['icon', 'Icon', 'icon']]},
   scenes: {label: 'Scenes', icon: 'star', w: 12, h: 6, fields: [['scope', 'Room or floor', 'select', () => [['', 'All'], ...A.areas.map(a => ['area:' + a.id, a.name]), ...(A.floors || []).map(f => ['floor:' + f.id, f.name])]], ['name', 'Name', 'text'], ['icon', 'Icon', 'icon']]},
   savescene: {label: 'Save scene', icon: 'star', w: 10, h: 6, fields: [['scope', 'Room or floor', 'select', () => [['', 'Choose'], ...A.areas.map(a => ['area:' + a.id, a.name]), ...(A.floors || []).map(f => ['floor:' + f.id, f.name])]], ['name', 'Name', 'text', 'Save scene'], ['icon', 'Icon', 'icon']]},
+  battery: {label: 'Battery', icon: 'battery', w: 14, h: 12, fields: [['entities', 'Batteries', 'entities', ['sensor:battery', 'binary_sensor:battery']], ['name', 'Name', 'text']]},
   room: {label: 'Room', icon: 'home', w: 12, h: 8, fields: [['area', 'Room', 'area'], ['name', 'Name', 'text', 'Room name'], ['icon', 'Icon', 'icon']]},
   camera: {label: 'Camera', icon: 'video', w: 18, h: 12, fields: [['entity', 'Entity', 'entity', ['camera']], ['name', 'Name', 'text'], ['video', 'Live video', 'bool'], ['page', 'Opens', 'page']]},
   media: {label: 'Media player', icon: 'play', w: 24, h: 8, fields: [['entity', 'Entity', 'entity', ['media_player']], ['name', 'Name', 'text']]},
@@ -29,6 +30,8 @@ const TYPES = {
   image: {label: 'Picture', icon: 'image', w: 12, h: 8, fields: []},
 };
 A.pipelines = []; A.wakewords = [];
+/** Does the device this entity belongs to report a battery? */
+const hasBattery = id => { const d = (A.ents.find(n => n.id === id) || {}).device; return !!d && A.ents.some(n => n.device === d && n.dc === 'battery' && n.id.startsWith('sensor.')); };
 
 async function openDesign(id, at) {
   if (!(A.ed && A.ed.id === id) && unsaved()) return;
@@ -318,7 +321,7 @@ function searchPick(shown, list, onPick, ph, label) {
   return h('div', {class: 'pick'}, input, out);
 }
 const entityPick = (val, set, domains, many) => searchPick(many ? '' : entName(val),
-  () => A.ents.filter(n => domains ? domains.includes(n.id.split('.')[0]) : !n.cat && !HIDDEN_DOMAINS.includes(n.id.split('.')[0])).map(n => ({id: n.id, name: n.name, sub: n.id})),
+  () => A.ents.filter(n => domains ? domains.some(d => { const [dom, dc] = d.split(':'); return n.id.split('.')[0] === dom && (!dc || n.dc === dc); }) : !n.cat && !HIDDEN_DOMAINS.includes(n.id.split('.')[0])).map(n => ({id: n.id, name: n.name, sub: n.id})),
   id => { set(id); settle(); inspector(); }, many ? 'Add' : 'Search by name', 'Entity');
 
 function setAuto(t, on) {
@@ -406,6 +409,7 @@ function tileFields() {
         h('optgroup', {label: 'Panels'}, ...A.state.designs.filter(x => x.id !== e.id).map(x => h('option', {value: 'panel:' + x.id, selected: cur === 'panel:' + x.id}, x.name))))));
     }
     else if (kind === 'select') out.push(row(label, h('select', {'aria-label': label, onchange: ev => { setp(k, ev.target.value, {keepBoxes: true, inspect: true}); settle(); }}, ...opt().map(o => h('option', {value: o[0], selected: (t[k] || '') === o[0]}, o[1])))));
+    else if (kind === 'flag') { if (!opt || opt(t)) out.push(row(label, h('input', {type: 'checkbox', checked: t[k] === true, 'aria-label': label, onchange: ev => { setp(k, ev.target.checked ? true : null, {keepBoxes: true}); settle(); }}))); }  // off unless switched on; shown only where it applies
     else if (kind === 'bool') out.push(row(label, h('input', {type: 'checkbox', checked: t[k] !== false, onchange: ev => { setp(k, ev.target.checked ? null : false, {keepBoxes: true}); settle(); }})));
     else if (kind === 'range') out.push(row(label, h('input', {type: 'range', min: opt[0], max: opt[1], step: opt[2], value: t[k] == null ? 0.5 : t[k], oninput: ev => setp(k, +ev.target.value), onchange: settle})));
     else if (kind === 'icon') out.push(h('h2', null, label), h('div', {class: 'icons'}, ...Object.keys(window.HP_ICONS).filter(n => n !== 'lightbulb-group').map(n =>

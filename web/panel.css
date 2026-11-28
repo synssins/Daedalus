@@ -125,8 +125,23 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #000; color:
 .ddv { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ddl { display: none; position: absolute; z-index: 1; left: 0; right: 0; bottom: 56px; max-height: 240px; overflow-y: auto; touch-action: pan-y; padding: 6px; border-radius: 24px; background: rgb(40,42,58); box-shadow: inset 0 0 0 1px rgba(255,255,255,.28), 0 12px 30px rgba(0,0,0,.5); }
 .dd.open .ddl { display: block; }
-.ddl div { padding: 11px 14px; border-radius: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ddl div { display: flex; align-items: center; padding: 11px 14px; border-radius: 18px; }
+.dn { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fm { flex: none; display: flex; margin-left: 8px; opacity: .8; }
+.fm svg { width: 17px; height: 17px; margin-left: 4px; fill: currentColor; }
 .ddl .cur { background: rgba(255,255,255,.22); }
+/* Batteries: a device's own in the corner of its tile, and a tile that lists several, lowest first. Low is amber, nearly empty or away is red. */
+.batt { position: absolute; top: calc(var(--u) * .5); right: calc(var(--u) * .6); padding: .08em .5em; border-radius: 99px; font-size: calc(var(--u) * .6); font-weight: 600; background: rgba(0,0,0,.3); color: #fff; }
+.batt.low { background: rgba(206,40,58,.92); }
+.batt[hidden] { display: none; }
+.body.bats { justify-content: flex-start; }
+.bh { font-size: calc(var(--u) * .82); font-weight: 600; opacity: .9; margin-bottom: calc(var(--u) * .4); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bat { flex: none; display: grid; grid-template-columns: 1fr auto; column-gap: .7em; margin-bottom: calc(var(--u) * .34); font-size: calc(var(--u) * .7); font-weight: 600; }
+.bn { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bb { grid-column: 1 / 3; height: calc(var(--u) * .16); margin-top: .22em; border-radius: 99px; background: rgba(255,255,255,.2); overflow: hidden; }
+.bb i { display: block; height: 100%; border-radius: 99px; background: currentColor; }
+.bat.low { color: #ffc56e; }
+.bat.out { color: #ff8a7a; }
 /* A tile that is a choice: its words as on any tile, a small arrow after them, and a list that drops from the tile
    on the popup's layer. The list wears the tile's look: its fill over a solid ground, its corners, border and words. */
 .sel { display: flex; align-items: center; min-width: 0; }

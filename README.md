@@ -29,7 +29,7 @@ shadow style.
 A light button follows the light. A light that only switches is toggled by a tap. Any other light opens a popup
 with the controls that Home Assistant reports for it: level, colour temperature, colour, effects. Setting a value
 on a light that is off switches it on at that value. A button design can show the colour and level of a lit light
-on the button. Select entities on the same device as the light, such as WLED presets and playlists, are shown
+on the button. Effects of a WLED light that respond to sound or are made for a 2D matrix are marked in the list. Select entities on the same device as the light, such as WLED presets and playlists, are shown
 as lists in the popup.
 
 A light group whose members Home Assistant reports opens the same popup for the whole group and lists its
@@ -49,6 +49,9 @@ it is kept across restarts and remains editable in Home Assistant. Only lights a
 Locks, garage doors and alarm panels ask for confirmation before acting. Where Home Assistant requires a code for
 the entity, a PIN pad is shown and Home Assistant checks the code. The confirmation is a panel setting.
 
+The **Battery** button lists battery sensors with the lowest first. A light or switch button can show the
+battery level of its device where the device reports one.
+
 The alarm panel button opens the arming modes that the Home Assistant alarm entity supports.
 
 ### Editor
@@ -58,7 +61,7 @@ The alarm panel button opens the arming modes that the Home Assistant alarm enti
 - Snap-grid layout with drag and resize.
 - Live preview that uses the tablet renderer and current Home Assistant state.
 - Tile types: clock, weather, people, alerts, light or switch, scene, room, media, camera, page link, text, picture,
-  multi-device button, alarm panel, scenes, save scene, voice assistant.
+  multi-device button, alarm panel, scenes, save scene, battery, voice assistant.
 - Theme settings: background image, tile fill, corner radius, glass effect.
 - Designs can be fitted to other screen sizes and orientations.
 - Saved changes are pushed to tablets within a few seconds.
@@ -131,6 +134,7 @@ connect to the development instance.
 
 - Store tests: `python addon/tests/test_store.py`
 - Scene capture tests: `python addon/tests/test_scenes.py`
+- WLED effect mark tests: `python addon/tests/test_wled.py`
 - Overlay test page: `web/fx-demo.html?kind=walkers`
 - Popup and confirmation tests: `node tests/guard-test.js`. The test uses a development Workshop on port 8723,
   invented entities, and records service calls without sending them.

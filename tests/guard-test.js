@@ -14,7 +14,8 @@ const api = async (method, p, body) => { const r = await fetch(B + '/admin/api/'
 const TILES = [['lock.fake_plain', 'Fake Lock', 1, 1], ['lock.fake_code', 'Fake Code Lock', 27, 1], ['cover.fake_garage', 'Fake Garage', 53, 1],
   ['alarm_control_panel.fake_alarm', 'Fake Alarm', 1, 19], ['light.fake_full', 'Fake Light', 53, 19], ['light.fake_onoff', 'Fake Switch Light', 1, 37]];
 const design = guard => Object.assign({format: 1, name: 'Guard test', grid: {cols: 64, rows: 48}, start: 'home', rooms: {}, theme: {background: {color: '#1a2038'}, tile: {fill: 'rgba(255,255,255,.16)', radius: 22, gap: 5}},
-  pages: [{id: 'home', name: 'Home', tiles: TILES.map(([entity, name, x, y]) => ({type: entity.startsWith('alarm') ? 'alarm' : 'entity', x, y, w: 10, h: 10, entity, name, style: entity === 'light.fake_full' ? {lightState: true} : {}}))}]}, guard === false ? {guard: false} : {});
+  pages: [{id: 'home', name: 'Home', tiles: TILES.map(([entity, name, x, y]) => ({type: entity.startsWith('alarm') ? 'alarm' : 'entity', x, y, w: 10, h: 10, entity, name, battery: entity === 'lock.fake_plain' || undefined, style: entity === 'light.fake_full' ? {lightState: true} : {}}))
+    .concat([{type: 'battery', x: 27, y: 19, w: 12, h: 14, entities: ['sensor.fake_bat_full', 'sensor.fake_bat_low', 'binary_sensor.fake_bat_yn']}])}]}, guard === false ? {guard: false} : {});
 const STATES = {
   'lock.fake_plain': ['locked', {}], 'lock.fake_code': ['locked', {code_format: '^\\d{4}$'}], 'cover.fake_garage': ['closed', {device_class: 'garage'}],
   'alarm_control_panel.fake_alarm': ['disarmed', {supported_features: 3, code_arm_required: false, code_format: null}],
@@ -52,8 +53,8 @@ const done = async code => { try { await api('DELETE', 'tablets/' + DEV); } catc
   const set = (e, state, attrs) => ev(`(() => { const s = HP.S.states[${JSON.stringify(e)}]; HP.S.states[${JSON.stringify(e)}] = {entity_id: ${JSON.stringify(e)}, state: ${JSON.stringify(state)}, attributes: Object.assign({friendly_name: 'x'}, s ? s.attributes : {}, ${JSON.stringify(attrs || {})})}; update(); })()`);
   await ev(`window.__calls = []; HP.ctx.service = (d, s, e, data) => { __calls.push([d, s, e, data || {}]); return Promise.resolve(); }; HP.ready = true`);
   for (const e in STATES) await set(e, STATES[e][0], STATES[e][1]);
-  const safe = async () => { const s = await js(`{name: HP.design && HP.design.name, stub: /__calls/.test(String(HP.ctx.service)), ents: (HP.design.pages || []).flatMap(p => p.tiles).map(t => t.entity)}`);
-    if (s.name !== 'Guard test' || !s.stub || s.ents.length !== TILES.length || s.ents.some(e => !/\.fake_/.test(e))) throw new Error('not the test panel, nothing pressed: ' + JSON.stringify(s)); };
+  const safe = async () => { const s = await js(`{name: HP.design && HP.design.name, stub: /__calls/.test(String(HP.ctx.service)), ents: (HP.design.pages || []).flatMap(p => p.tiles).flatMap(t => [t.entity].concat(t.entities || [])).filter(Boolean)}`);
+    if (s.name !== 'Guard test' || !s.stub || s.ents.length !== TILES.length + 3 || s.ents.some(e => !/\.fake_/.test(e))) throw new Error('not the test panel, nothing pressed: ' + JSON.stringify(s)); };
   await safe();
 
   const calls = () => js('__calls.splice(0)');
@@ -189,6 +190,21 @@ const done = async code => { try { await api('DELETE', 'tablets/' + DEV); } catc
   ok('scenes: lit in the scene\'s colours while the lights match, and no longer once one light is changed',
     held.name === 'Evening' && /^linear-gradient\(90deg, rgba\(255,0,0,1\.00\), rgba\(0,0,255,0\.55\)\)$/.test(held.fill) && left.name === 'Scenes' && !left.on && !left.fill, {held, left});
   await ev(`HP.theme.tile.lightState = false; HP.ctx.back()`); await sleep(500);
+
+  // ---- batteries: several on one button with the lowest on top, and a device's own in the corner of its button
+  await ev(`HP.S.reg['lock.fake_plain'] = {area: 'elsewhere', dev: 'fake_lockdev', skip: false}; HP.S.reg['sensor.fake_bat_low'] = {area: 'elsewhere', dev: 'fake_lockdev', skip: true}`);
+  await set('sensor.fake_bat_full', '91', {friendly_name: 'Fake Window battery', device_class: 'battery'}); await set('sensor.fake_bat_low', '14.6', {friendly_name: 'Fake Door Battery level', device_class: 'battery'});
+  await set('binary_sensor.fake_bat_yn', 'off', {friendly_name: 'Fake Remote battery', device_class: 'battery'});
+  await ev('show()'); await sleep(400);
+  const bats = await js(`[...document.querySelectorAll('#grid .bats .bat')].map(r => [r.querySelector('.bn').textContent, r.querySelector('.bv').textContent, r.className.replace('bat', '').trim()])`);
+  const badge = await js(`(() => { const b = document.querySelector(${JSON.stringify(tile(0))} + ' .batt'); return b ? [b.textContent, b.hidden, b.classList.contains('low')] : null; })()`);
+  ok('batteries: lowest first on their button, and a device\'s own on its button', same(bats, [['Fake Door', '15%', 'low'], ['Fake Window', '91%', ''], ['Fake Remote', 'OK', '']]) && same(badge, ['15%', false, true]), {bats, badge});
+
+  // ---- an effect that answers to sound or is made for a grid carries its mark
+  await ev(`HP.fxmeta = () => Promise.resolve({Candle: 's', Colorloop: 'sg'})`); await set('light.fake_full', 'on');
+  await tap(tile(4)); await tap('#pop .dd'); const fxMarks = await js(`[...document.querySelectorAll('#pop .dd.open .ddl div')].map(d => d.querySelectorAll('.fm svg').length)`);
+  await tap('#pop .dd'); await tap('#pop .px');
+  ok('light: effects for sound and for a grid are marked', same(fxMarks, [1, 2, 0]), fxMarks);
 
   // ---- the panel's switch: no questions
   await api('PUT', 'designs/' + id, {name: 'Guard test', design: design(false)}); await sleep(6000);
