@@ -191,16 +191,19 @@
     slow = make(); live = make();
     // A tap goes to an overlay first if one claims it (a flower); otherwise to the button as usual.
     // A double tap anywhere is "give me my screen back": every kind that took, hid or cut a real tile undoes it now.
+    // A popup tile or a question is a layer above the overlays: a touch on it is never an overlay's.
+    const above = e => !!(e.target.closest && e.target.closest('#pop, #modal'));
     let lastTap = 0, lastX = 0, lastY = 0;
     document.addEventListener('click', e => {
+      if (above(e)) return;
       const now = performance.now(), twice = now - lastTap < 420 && Math.hypot(e.clientX - lastX, e.clientY - lastY) < 70;
       lastTap = twice ? 0 : now; lastX = e.clientX; lastY = e.clientY;
       if (twice) items.forEach(it => { if (it.def.restore) { try { it.def.restore(it.st, it.ctx); } catch (err) { fail(it.kind, err); } } });
     }, true);
-    document.addEventListener('click', e => { for (let i = items.length - 1; i >= 0; i--) { const it = items[i]; if (it.def.tap && it.def.tap(it.st, e.clientX, e.clientY, it.ctx) === true) { e.stopPropagation(); e.preventDefault(); redraw(); return; } }
+    document.addEventListener('click', e => { if (above(e)) return; for (let i = items.length - 1; i >= 0; i--) { const it = items[i]; if (it.def.tap && it.def.tap(it.st, e.clientX, e.clientY, it.ctx) === true) { e.stopPropagation(); e.preventDefault(); redraw(); return; } }
       if (U.over(rects, e.clientX, e.clientY)) giveWay(); }, true);
     let down = false;
-    document.addEventListener('pointerdown', e => { down = true; items.forEach(it => { if (it.def.touch) it.def.touch(it.st, e.clientX, e.clientY, it.ctx); }); });
+    document.addEventListener('pointerdown', e => { if (above(e)) return; down = true; items.forEach(it => { if (it.def.touch) it.def.touch(it.st, e.clientX, e.clientY, it.ctx); }); });
     document.addEventListener('pointermove', e => { if (down) items.forEach(it => { if (it.def.drag) it.def.drag(it.st, e.clientX, e.clientY, it.ctx); }); });
     document.addEventListener('pointerup', () => { down = false; }); document.addEventListener('pointercancel', () => { down = false; });
     document.addEventListener('visibilitychange', () => { if (!document.hidden) { redraw(); loop(); } });

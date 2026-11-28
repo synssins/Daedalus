@@ -2,7 +2,8 @@
 //   node tests/press-test.js light.one [light.two ...]
 // The page under test is the real engine, in headless Chrome at a television's size, served a panel by a Daedalus
 // Workshop (WORKSHOP, default http://127.0.0.1:8723; a test copy, not the one the house uses). The presses are real:
-// each one toggles its entity in Home Assistant. So the test makes its own panel holding only the entities named on
+// a press on a light that only switches toggles it in Home Assistant, a press on any other light opens its popup
+// tile, and the last step switches the first light with that popup and back. So the test makes its own panel holding only the entities named on
 // the command line, refuses to press when the page shows anything else, and leaves each entity as it found it.
 // Two ways to press: a pointer click at the middle of the button, and the remote's arrows and OK.
 'use strict';
@@ -53,7 +54,9 @@ const done = async code => { try { await api('DELETE', 'tablets/' + DEV); } catc
   const hits = async () => JSON.parse(await ev('JSON.stringify(__hit.splice(0))'));
   const lit = async () => JSON.parse(await ev(`JSON.stringify(${JSON.stringify(ONLY)}.map(e => HP.util.active(e)))`)), found = await lit();  // to leave each as it was found
   const mids = async () => JSON.parse(await ev(`JSON.stringify([...document.querySelectorAll('.tap')].map(el => { const r = el.getBoundingClientRect(); return [Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)]; }))`));
-  const click = async ([x, y]) => { for (const type of ['mousePressed', 'mouseReleased']) await send('Input.dispatchMouseEvent', {type, x, y, button: 'left', clickCount: 1}); await sleep(500); };
+  const tapAt = async ([x, y]) => { for (const type of ['mousePressed', 'mouseReleased']) await send('Input.dispatchMouseEvent', {type, x, y, button: 'left', clickCount: 1}); await sleep(500); };
+  const shut = () => ev('HP.pop.close()');  // a light with something to set opens its popup tile: closed again, so the next press meets the dashboard
+  const click = async p => { await tapAt(p); await shut(); };
   const key = async k => { for (const type of ['keyDown', 'keyUp']) await send('Input.dispatchKeyEvent', {type, key: k, code: k, windowsVirtualKeyCode: {ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40, Enter: 13}[k]}); await sleep(250); };
 
   const kinds = process.env.KINDS ? process.env.KINDS.split(',') : [null, ...JSON.parse(await ev('JSON.stringify(Object.keys(HP.fx.kinds).filter(k => HP.fx.kinds[k].tap))'))];  // KINDS=koi,tanks for a short run
@@ -65,7 +68,7 @@ const done = async code => { try { await api('DELETE', 'tablets/' + DEV); } catc
     const a = await hits();
     // the remote: the ring goes round the eight buttons, OK on each
     let b = [];
-    for (const k of ['ArrowRight', 'ArrowRight', 'ArrowRight', 'ArrowDown', 'ArrowDown', 'ArrowLeft', 'ArrowLeft', 'ArrowUp']) { await key(k); await key('Enter'); await sleep(350); b = b.concat(await hits()); }
+    for (const k of ['ArrowRight', 'ArrowRight', 'ArrowRight', 'ArrowDown', 'ArrowDown', 'ArrowLeft', 'ArrowLeft', 'ArrowUp']) { await key(k); await key('Enter'); await sleep(350); await shut(); b = b.concat(await hits()); }
     const err = JSON.parse(await ev('JSON.stringify(__err.splice(0))')), ok = a.length >= SPOTS.length - (kind === 'tanks') && b.length === 8 && new Set(b).size >= 3 && !err.length;  // tanks: the first tap ends the battle, as meant
     if (!ok) failed++;
     console.log((kind || '(none)').padEnd(14), (a.length + '/' + SPOTS.length).padEnd(7), (b.length + '/8').padEnd(6), ok ? 'ok' : 'FAIL ' + JSON.stringify({pointer: a, remote: b, err}));
@@ -74,6 +77,20 @@ const done = async code => { try { await api('DELETE', 'tablets/' + DEV); } catc
   await api('PUT', 'designs/' + id, {name: 'Press test', design: design(null)}); await sleep(5000); await check();
   await sleep(2000); const at = await mids(), now = await lit();
   for (let i = 0; i < ONLY.length; i++) if (now[i] !== found[i]) await click(at[i]);
+  // The popup tile, against the real light: its power button switches the light and switches it back, and a touch
+  // outside the popup closes it without reaching the button underneath.
+  if (await ev(`(HP.S.states[${JSON.stringify(ONLY[0])}].attributes.supported_color_modes || []).some(m => m !== 'onoff')`)) {
+    const turned = async want => { for (let i = 0; i < 24; i++) { if ((await lit())[0] === want) return true; await sleep(500); } return false; };
+    await hits(); await tapAt(at[0]);
+    const power = JSON.parse(await ev(`JSON.stringify((() => { const b = document.querySelector('#pop.open .ph .rb'); if (!b) return null; const r = b.getBoundingClientRect(); return [Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)]; })())`));
+    const was = (await lit())[0]; let there = false, back = false;
+    if (power) { await tapAt(power); there = await turned(!was); await tapAt(power); back = await turned(was); }
+    await hits(); await tapAt(at[0]);
+    const closed = !(await ev('!!HP.pop.cur')), through = (await hits()).length, good = !!power && there && back && closed && !through;
+    if (!good) failed++;
+    console.log('popup'.padEnd(14), good ? 'ok' : 'FAIL ' + JSON.stringify({opened: !!power, there, back, closed, through}));
+    await shut();
+  }
   console.log(failed ? failed + ' kind(s) failed' : 'all pressed');
   ws.close(); await done(failed ? 1 : 0);
 })().catch(async e => { console.error(String(e.message || e)); await done(1); });

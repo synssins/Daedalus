@@ -18,10 +18,12 @@ import logging
 import os
 import re
 import socket
+import time
 from pathlib import Path
 
 from aiohttp import ClientSession, WSMsgType, web
 
+from .scenes import capture
 from .store import Store
 
 log = logging.getLogger("daedalus")
@@ -387,9 +389,9 @@ async def admin_asset(request: web.Request):
 
 async def admin_entities(request: web.Request):
     """What the Studio's pickers offer: every entity with its name and room, plus the rooms."""
-    areas, devices, ents, states = await ha_call(request.app, [
+    areas, devices, ents, states, floors = await ha_call(request.app, [
         {"type": "config/area_registry/list"}, {"type": "config/device_registry/list"},
-        {"type": "config/entity_registry/list"}, {"type": "get_states"}])
+        {"type": "config/entity_registry/list"}, {"type": "get_states"}, {"type": "config/floor_registry/list"}])
     dev_area = {d["id"]: d.get("area_id") for d in devices}
     reg = {e["entity_id"]: e for e in ents}
     out, by_dev = [], {}
@@ -413,7 +415,8 @@ async def admin_entities(request: web.Request):
         devs.append({"id": d["id"], "name": d.get("name_by_user") or d.get("name") or "Device", "area": d.get("area_id"),
                      "entities": [x["id"] for _, x in mine], "primary": primary_entity(mine)})
     devs.sort(key=lambda d: d["name"].lower())
-    return web.json_response({"entities": out, "devices": devs, "areas": [{"id": a["area_id"], "name": a["name"]} for a in areas]})
+    return web.json_response({"entities": out, "devices": devs, "areas": [{"id": a["area_id"], "name": a["name"]} for a in areas],
+                              "floors": [{"id": f["floor_id"], "name": f["name"]} for f in floors or []]})
 
 
 # Which entity stands for a device when it is added to a button: the one a person would operate.
@@ -476,6 +479,52 @@ async def admin_backup(request: web.Request):
     await push_design(request.app, everyone=True)
     await notify_admins(request.app)
     return web.json_response({"restored": done, "state": state(request.app)})
+
+
+async def tablet_scene(request: web.Request):
+    """Save the lights of a room or a floor, as they are now, as a scene in Home Assistant: a new one by name, or
+    over one that exists. It is written the way Home Assistant's own scene editor writes it, so it is kept across
+    restarts and can be edited there. The server holds the Home Assistant token; the panel only asks."""
+    if not tablet_for(request):
+        raise web.HTTPUnauthorized()
+    body = await request.json()
+    scope, replace, app = str(body.get("scope", "")), body.get("replace"), request.app
+    areas, devices, ents, states = await ha_call(app, [
+        {"type": "config/area_registry/list"}, {"type": "config/device_registry/list"},
+        {"type": "config/entity_registry/list"}, {"type": "get_states"}])
+    entities = capture(scope, areas, devices, ents, states)
+    if not entities:
+        raise web.HTTPBadRequest(text="No lights to save there")
+    headers = {"Authorization": f"Bearer {HA_TOKEN}"}
+    if replace:
+        old = next((s for s in states if s["entity_id"] == replace and str(replace).startswith("scene.")), None)
+        sid = old and old["attributes"].get("id")
+        if not sid:  # a scene written by hand in YAML has no identity the editor's API can save under
+            raise web.HTTPBadRequest(text="That scene cannot be replaced from here")
+        async with app["http"].get(f"{HA_HTTP}/config/scene/config/{sid}", headers=headers) as r:
+            was = await r.json() if r.status == 200 else {}
+        cfg = {"name": was.get("name") or old["attributes"].get("friendly_name") or "Scene"}
+        if was.get("icon"):
+            cfg["icon"] = was["icon"]
+    else:
+        name = str(body.get("name", "")).strip()[:80]
+        if not name:
+            raise web.HTTPBadRequest(text="The scene needs a name")
+        sid, cfg = str(int(time.time() * 1000)), {"name": name}
+    cfg["entities"] = entities
+    async with app["http"].post(f"{HA_HTTP}/config/scene/config/{sid}", json=cfg, headers=headers) as r:
+        if r.status >= 400:
+            raise web.HTTPBadGateway(text=f"Home Assistant refused the scene: {(await r.text())[:200]}")
+    if not replace and scope.startswith("area:"):  # a room's new scene is put in that room, so the room's dashboard lists it
+        for _ in range(10):
+            await asyncio.sleep(0.5)
+            reg = (await ha_call(app, [{"type": "config/entity_registry/list"}]))[0] or []
+            ent = next((e for e in reg if e.get("unique_id") == sid and e["entity_id"].startswith("scene.")), None)
+            if ent:
+                await ha_call(app, [{"type": "config/entity_registry/update", "entity_id": ent["entity_id"], "area_id": scope[5:]}])
+                break
+    log.info("scene %s saved for %s with %d lights", sid, scope, len(entities))
+    return web.json_response({"id": sid, "lights": len(entities)})
 
 
 async def tablet_llm(request: web.Request):
@@ -595,6 +644,7 @@ def build_app() -> web.Application:
     r.add_get("/api/events", tablet_events)
     r.add_get("/api/websocket", ha_socket)
     r.add_post("/api/llm", tablet_llm)
+    r.add_post("/api/scene", tablet_scene)
     for p in ("/api/camera_proxy/{t:.*}", "/api/camera_proxy_stream/{t:.*}", "/api/hls/{t:.*}", "/api/tts_proxy/{t:.*}"):
         r.add_get(p, ha_media)
     r.add_route("OPTIONS", "/api/{t:.*}", lambda request: web.Response())

@@ -24,6 +24,28 @@ shadow style.
 
 ![Dashboard page with a camera tile](docs/img/dash-outside.jpg)
 
+### Controls
+
+A light button follows the light. A light that only switches is toggled by a tap. Any other light opens a popup
+with the controls that Home Assistant reports for it: level, colour temperature, colour, effects. Setting a value
+on a light that is off switches it on at that value. A button design can show the colour and level of a lit light
+on the button. Select entities on the same device as the light, such as WLED presets and playlists, are shown
+as lists in the popup.
+
+A light group whose members Home Assistant reports opens the same popup for the whole group and lists its
+members, each of which opens by itself. On a room page, the group that holds the most lights of the room is shown
+as **All lights**, a smaller group inside the room is shown as one button, and its members are not shown
+separately. A group that does not report its members, such as a Zigbee2MQTT group, is treated as one light.
+
+**Save scene** stores the current state of the lights of a room or a floor as a Home Assistant scene, as a new
+scene or over an existing one. The scene is written through Home Assistant's scene editor API by the Workshop, so
+it is kept across restarts and remains editable in Home Assistant. Only lights are stored.
+
+Locks, garage doors and alarm panels ask for confirmation before acting. Where Home Assistant requires a code for
+the entity, a PIN pad is shown and Home Assistant checks the code. The confirmation is a panel setting.
+
+The alarm panel button opens the arming modes that the Home Assistant alarm entity supports.
+
 ### Editor
 
 ![Dashboard editor](docs/img/editor.jpg)
@@ -31,7 +53,7 @@ shadow style.
 - Snap-grid layout with drag and resize.
 - Live preview that uses the tablet renderer and current Home Assistant state.
 - Tile types: clock, weather, people, alerts, light or switch, scene, room, media, camera, page link, text, picture,
-  multi-device button, voice assistant.
+  multi-device button, alarm panel, save scene, voice assistant.
 - Theme settings: background image, tile fill, corner radius, glass effect.
 - Designs can be fitted to other screen sizes and orientations.
 - Saved changes are pushed to tablets within a few seconds.
@@ -103,7 +125,10 @@ The editor is served at `http://127.0.0.1:8722/`. `DAEDALUS_MDNS=0` disables mDN
 connect to the development instance.
 
 - Store tests: `python addon/tests/test_store.py`
+- Scene capture tests: `python addon/tests/test_scenes.py`
 - Overlay test page: `web/fx-demo.html?kind=walkers`
+- Popup and confirmation tests: `node tests/guard-test.js`. The test uses a development Workshop on port 8723,
+  invented entities, and records service calls without sending them.
 
 ## Repository layout
 

@@ -16,7 +16,7 @@ const U = HP.util = {
   avail: e => !!S.states[e] && S.states[e].state !== 'unavailable',
   fname: e => (S.states[e] && S.states[e].attributes.friendly_name) || e,
   cap: s => (s.charAt(0).toUpperCase() + s.slice(1)).replace(/_/g, ' '),
-  active: e => !!S.states[e] && ['on', 'open', 'opening', 'playing', 'home', 'unlocked'].includes(S.states[e].state),
+  active: e => !!S.states[e] && (['on', 'open', 'opening', 'playing', 'home', 'unlocked', 'triggered'].includes(S.states[e].state) || S.states[e].state.startsWith('armed_')),
   stateLabel(e) {
     const s = S.states[e];
     if (!s) return HP.ready ? 'Not found' : '';
@@ -198,6 +198,29 @@ const ctx = HP.ctx = {
   relayout: () => { clearTimeout(ctx._rl); ctx._rl = setTimeout(layout, 50); },
 };
 
+/** The single lights behind a light: itself, or for a group Home Assistant knows the members of, theirs (a
+ *  Zigbee2MQTT group shows no members, and so counts as one light). */
+function leaves(e, seen) {
+  seen = seen || {}; if (seen[e] || !S.states[e]) return []; seen[e] = 1;
+  const m = S.states[e].attributes.entity_id;
+  return Array.isArray(m) ? [].concat(...m.map(x => leaves(x, seen))) : [e];
+}
+/** A room's lights as its page shows them. A group whose lights are all in the room is either the room's "all
+ *  lights" (the widest one, unless the design names one) or a fixture: one button, and its bulbs get none of their
+ *  own (they are in its popup). A group that holds a smaller group of the room is a collection and is not shown. */
+function roomLights(area, cfg) {
+  const inRoom = e => !!S.reg[e] && S.reg[e].area === area, has = (a, b) => b.m.every(x => a.m.includes(x));
+  const groups = Object.keys(S.states).filter(e => e.startsWith('light.') && Array.isArray(S.states[e].attributes.entity_id) && U.avail(e))
+    .map(e => ({e, m: [...new Set(leaves(e))]})).filter(g => g.m.length && g.m.every(inRoom))
+    .sort((a, b) => b.m.length - a.m.length || (a.e < b.e ? -1 : 1));
+  const all = cfg.group && U.avail(cfg.group) ? cfg.group : groups.length && groups[0].m.length > 1 ? groups[0].e : null;
+  const rest = groups.filter(g => g.e !== all);
+  const fixtures = rest.filter(g => !rest.some(o => o.m.length < g.m.length && has(g, o)))  // holds no smaller group
+    .filter((g, i, l) => l.findIndex(o => o.m.length === g.m.length && has(o, g)) === i);  // two groups of the same lights are one
+  const used = new Set([all].concat(...fixtures.map(g => [g.e].concat(g.m)), rest.map(g => g.e)));
+  return {all, fixtures: fixtures.map(g => g.e), singles: U.inArea(area, 'light').filter(e => !used.has(e))};
+}
+
 /** Room pages are generated from the area's entities, so a new lamp appears without touching the design. */
 function roomPage(area) {
   const d = HP.design, room = S.areas[area] || area, cols = d.grid.cols, cfg = (d.rooms || {})[area] || {};
@@ -205,16 +228,20 @@ function roomPage(area) {
     {type: 'label', text: room, x: 13, y: 2, w: cols - 15, h: 5, flat: true, size: 0.62}];
   let x = 2, y = 9;
   const put = (t, w) => { if (x + w > cols - 2) { x = 2; y += 8; } tiles.push(Object.assign(t, {x, y, w, h: 8})); x += w; };
-  if (cfg.group && U.avail(cfg.group)) put({type: 'entity', entity: cfg.group, name: 'All lights', icon: 'lightbulb-group'}, 12);
-  U.inArea(area, 'light').filter(e => e !== cfg.group).forEach(e => put({type: 'entity', entity: e, name: U.short(U.fname(e), room), icon: 'lightbulb'}, 12));
+  const lights = roomLights(area, cfg);
+  if (lights.all) put({type: 'entity', entity: lights.all, name: 'All lights', icon: 'lightbulb-group'}, 12);
+  lights.fixtures.forEach(e => put({type: 'entity', entity: e, name: U.short(U.fname(e), room), icon: 'lightbulb-group'}, 12));
+  lights.singles.forEach(e => put({type: 'entity', entity: e, name: U.short(U.fname(e), room), icon: 'lightbulb'}, 12));
   U.inArea(area, 'scene').forEach(e => put({type: 'action', service: 'scene.turn_on', entity: e, name: U.short(U.fname(e).split(':').pop().trim(), room), label: 'Scene', icon: 'star'}, 12));
-  U.inArea(area, 'cover').forEach(e => put({type: 'entity', entity: e, icon: 'garage', confirm: 'Move this door?'}, 12));
+  if (HP.server) put({type: 'savescene', scope: 'area:' + area}, 12);
+  U.inArea(area, 'cover').forEach(e => put({type: 'entity', entity: e, icon: 'garage'}, 12));  // doors ask before they move: see HP.act
   U.inArea(area, 'media_player').forEach(e => put({type: 'media', entity: e}, 24));
   return {id: '@room', tiles};
 }
 
 function show() {
   if (HP.assist && HP.assist.busy) HP.assist.close();
+  pop.close();
   const top = HP.stack[HP.stack.length - 1];
   if ((top.panel || 0) !== HP.cur) {  // crossing into another panel: its design and its look take over
     HP.cur = top.panel || 0;
@@ -239,7 +266,8 @@ function show() {
     if (t.demoOn) el.classList.add('on');  // the Studio's sample buttons: show the lit state without a real entity
     el.innerHTML = '<div class="fill"></div>' + (s.image ? `<div class="pic" style="background-image:url('${U.esc(HP.asset(s.image))}')"></div>` : '') + '<div class="body"></div><div class="rim"></div>';
     grid.append(el);
-    const inst = {t, el, def, body: el.querySelector('.body')};
+    // lightState: the button design asks for a lit light's own colour and level instead of its own lit look
+    const inst = {t, el, def, body: el.querySelector('.body'), lightState: (s.lightState != null ? s.lightState : base.lightState) === true};
     const tap = () => { const a = def.tap ? def.tap(t, ctx, inst) : null; HP.fx.press(HP.live.indexOf(inst)); if (a) (t.confirm ? confirmBox(t.confirm, a) : a()); };
     if (def.tap && !t.info) { el.classList.add('tap'); el.addEventListener('click', tap); }
     HP.live.push(inst);
@@ -327,6 +355,7 @@ function update() {
   daylight();
   setTimeout(fxWorld, 0);  // after the buttons below have updated their on and off
   for (const i of HP.live) if (i.def.update) { try { i.def.update(i.t, i.body, ctx, i); } catch (e) { console.error('tile ' + i.t.type + ': ' + e.message); if (!i.bad) { i.bad = 1; HP.report('button ' + i.t.type + ': ' + e.message); } } }
+  pop.update();
 }
 /** State changes arrive in bursts; tiles patch their own text and classes, so this is cheap and never eats a tap. */
 function dirty() { if (!dirty.t) dirty.t = setTimeout(() => { dirty.t = null; update(); }, 250); }
@@ -417,12 +446,70 @@ function swipeSetup() {
 function toast(text) { const b = $('bar'); b.textContent = text; clearTimeout(toast.t); toast.t = setTimeout(() => { b.textContent = ''; }, 5000); }
 HP.toast = toast;
 // Own dialog: the web view has no built-in confirm().
-function confirmBox(text, yes) {
+function confirmBox(text, yes, no) {
   const m = $('modal');
-  m.innerHTML = `<div class="box"><div class="q">${U.esc(text)}</div><div class="row"><div class="mb" data-m="no">Cancel</div><div class="mb go" data-m="yes">Yes</div></div></div>`;
+  m.innerHTML = `<div class="box"><div class="q">${U.esc(text)}</div><div class="row"><div class="mb" data-m="no">${no || 'Cancel'}</div><div class="mb go" data-m="yes">Yes</div></div></div>`;
   m.className = 'open';
   m.onclick = e => { const b = e.target.closest('[data-m]'); if (!b && e.target !== m) return; m.className = ''; if (b && b.dataset.m === 'yes') yes(); };
 }
+HP.confirm = confirmBox;
+/** Asks for the code of a lock or an alarm. Home Assistant checks it: a wrong one comes back as its own message. */
+HP.pin = (name, ok) => {
+  const m = $('modal'), DEL = '<svg viewBox="0 0 24 24"><path d="M9 5h12v14H9l-6-7z M12 9l6 6 M18 9l-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/></svg>';
+  let pin = '';
+  m.innerHTML = `<div class="box"><div class="q">Enter PIN</div><div class="sub">${U.esc(name)}</div><div class="pin"></div><div class="keys">`
+    + [1, 2, 3, 4, 5, 6, 7, 8, 9, '', 0, 'del'].map(k => k === '' ? '<div></div>' : `<div class="key" data-k="${k}">${k === 'del' ? DEL : k}</div>`).join('')
+    + '</div><div class="row"><div class="mb" data-m="no">Cancel</div><div class="mb go" data-m="yes">OK</div></div></div>';
+  m.className = 'open';
+  m.onclick = e => {
+    const k = e.target.closest('[data-k]'), b = e.target.closest('[data-m]');
+    if (k) { pin = k.dataset.k === 'del' ? pin.slice(0, -1) : (pin + k.dataset.k).slice(0, 12); m.querySelector('.pin').textContent = '•'.repeat(pin.length); return; }
+    if ((!b && e.target !== m) || (b && b.dataset.m === 'yes' && !pin)) return;
+    m.className = ''; if (b && b.dataset.m === 'yes') ok(pin);
+  };
+};
+
+/** Save the lights of a room or a floor, as they are now, as a scene in Home Assistant: a new one by the name typed
+ *  on the device's own keyboard, or over one of that place's scenes. The Workshop does the saving (the panel holds
+ *  no Home Assistant token); scope is 'area:<id>' or 'floor:<id>'. */
+HP.saveScene = scope => {
+  const m = $('modal'), key = scope.slice(scope.indexOf(':') + 1), areas = scope.startsWith('floor:') ? Object.keys(S.floor || {}).filter(a => S.floor[a] === key) : [key];
+  // only scenes Home Assistant's editor made can be written over: they carry an id
+  const scenes = Object.keys(S.states).filter(e => e.startsWith('scene.') && S.reg[e] && areas.includes(S.reg[e].area) && S.states[e].attributes.id).sort();
+  m.innerHTML = '<div class="box"><div class="q">Save scene</div><input class="tin" data-r="1" placeholder="Name" maxlength="80" autocomplete="off">'
+    + (scenes.length ? '<div class="sub2">Replace</div><div class="slist">' + scenes.map(e => `<div class="mb" data-m="rep" data-e="${U.esc(e)}">${U.esc(U.fname(e))}</div>`).join('') + '</div>' : '')
+    + '<div class="row"><div class="mb" data-m="no">Cancel</div><div class="mb go" data-m="yes">Save</div></div></div>';
+  m.className = 'open';
+  const send = body => fetch(HP.server + '/api/scene', {method: 'POST', headers: {'Content-Type': 'application/json', Authorization: 'Bearer ' + HP.key}, body: JSON.stringify(Object.assign({scope}, body))})
+    .then(async r => { if (!r.ok) throw new Error(await r.text()); toast('Scene saved'); }).catch(e => toast(e.message));
+  m.onclick = e => {
+    const b = e.target.closest('[data-m]'), inp = m.querySelector('.tin'), what = b && b.dataset.m;
+    if (e.target === inp || (what === 'yes' && !inp.value.trim())) return inp.focus();  // the device's keyboard comes up
+    if (!b && e.target !== m) return;
+    m.className = '';
+    if (what === 'yes') send({name: inp.value.trim()});
+    else if (what === 'rep') confirmBox(`This will replace ${U.fname(b.dataset.e)}. Are you sure?`, () => send({replace: b.dataset.e}), 'No');
+  };
+};
+
+// ---------- popup tile ----------
+/** A button's settings, drawn above the dashboard and its overlays; questions (above) come over it. One at a time.
+ *  It closes by its X, by a touch outside it (which reaches nothing underneath), by Back, or after 30 seconds left alone.
+ *  build(body, head) fills it and returns a function that redraws it from the house's state and gives the line under the name. */
+const pop = HP.pop = {
+  el: null, cur: null, t: 0,
+  open(name, build) {
+    const p = pop.el || (pop.el = $('pop') || document.body.appendChild(Object.assign(document.createElement('div'), {id: 'pop'})));
+    if (!p.onclick) { p.onclick = e => { if (e.target === p || e.target.closest('.px')) pop.close(); }; p.addEventListener('pointerdown', pop.touch); }
+    p.innerHTML = '<div class="box"><div class="ph"><div class="pn"><div></div><div class="ps"></div></div><div class="rb px" data-r="1"><svg viewBox="0 0 24 24"><path d="M19 6.4 17.6 5 12 10.6 6.4 5 5 6.4 10.6 12 5 17.6 6.4 19 12 13.4 17.6 19 19 17.6 13.4 12z"/></svg></div></div><div class="pb"></div></div>';
+    p.querySelector('.pn').firstChild.textContent = name;
+    pop.cur = build(p.querySelector('.pb'), p.querySelector('.ph')) || (() => '');
+    p.className = 'open'; pop.update(); pop.touch();
+  },
+  update() { if (!pop.cur) return; try { pop.el.querySelector('.ps').textContent = pop.cur() || ''; } catch (e) { console.error('popup: ' + e.message); pop.close(); } },
+  touch() { clearTimeout(pop.t); pop.t = setTimeout(pop.close, 30000); },
+  close() { if (!pop.cur) return; pop.cur = null; clearTimeout(pop.t); pop.el.className = ''; pop.el.innerHTML = ''; },
+};
 
 // ---------- boot ----------
 const keep = {  // survives restarts, so the panel still draws its last design when the server is away
@@ -440,10 +527,10 @@ async function loadAll() {
   const ha = HP.ha, [areas, devices, ents, states] = await Promise.all([
     ha.call({type: 'config/area_registry/list'}), ha.call({type: 'config/device_registry/list'}),
     ha.call({type: 'config/entity_registry/list'}), ha.call({type: 'get_states'})]);
-  S.areas = {}; areas.forEach(a => { S.areas[a.area_id] = a.name; });
+  S.areas = {}; S.floor = {}; areas.forEach(a => { S.areas[a.area_id] = a.name; S.floor[a.area_id] = a.floor_id || null; });
   keep.set('areas', S.areas);  // room names for the next start, in case Home Assistant is away then
   const dev = {}; devices.forEach(d => { dev[d.id] = d.area_id; });
-  S.reg = {}; ents.forEach(e => { S.reg[e.entity_id] = {area: e.area_id || dev[e.device_id] || null, skip: !!(e.hidden_by || e.entity_category || e.disabled_by)}; });
+  S.reg = {}; ents.forEach(e => { S.reg[e.entity_id] = {area: e.area_id || dev[e.device_id] || null, dev: e.device_id || null, skip: !!(e.hidden_by || e.entity_category || e.disabled_by)}; });
   S.states = {}; states.forEach(s => { S.states[s.entity_id] = s; });
   await ha.subscribe({type: 'subscribe_events', event_type: 'state_changed'}, ev => {
     const d = ev.data;

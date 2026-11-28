@@ -440,6 +440,8 @@ function lookFields(s, set, o) {
     row('On colour', ...colourIn(rgba(s.fillOn) ? s.fillOn : null, v => set('fillOn', v), 'rgba(255,170,80,.88)', s.fillOn ? {title: 'Reset', fn: () => set('fillOn', null, true)} : null)),
     row('Text colour', h('input', {type: 'color', value: (rgba(s.text) || {hex: '#ffffff'}).hex, 'aria-label': 'Text colour', oninput: ev => set('text', ev.target.value)})),
     row('On text colour', h('input', {type: 'color', value: (rgba(s.textOn) || {hex: '#2b1400'}).hex, 'aria-label': 'Text colour when on', oninput: ev => set('textOn', ev.target.value)})),
+    // a lit light shows its own colour and level in place of the two "on" colours above
+    row('Light status', h('input', {type: 'checkbox', checked: s.lightState === true, 'aria-label': 'Show brightness and colour', onchange: ev => set('lightState', ev.target.checked ? true : (o.clear && o.base && o.base.lightState ? false : null), true)})),
     row('Font', h('select', {'aria-label': 'Font', onchange: ev => set('font', ev.target.value || null, true)}, ...FONTS.map(f => h('option', {value: f[0], selected: (s.font || '') === f[0]}, f[1])))),
     h('h2', null, 'Shape'),
     row('Shape', h('select', {'aria-label': 'Shape', onchange: ev => set('shape', ev.target.value || null, true)}, h('option', {value: '', selected: s.shape !== 'tab'}, 'Tile'), h('option', {value: 'tab', selected: s.shape === 'tab'}, 'Tab'))),
@@ -564,7 +566,7 @@ async function viewSettings() {
 function loadHouse() {
   if (A.ents.length || loadHouse.busy) return;
   loadHouse.busy = true;
-  api('entities').then(r => { A.ents = r.entities; A.devs = r.devices || []; A.areas = r.areas; if (A.view === 'editor') inspector(); }, fail).then(() => { loadHouse.busy = false; });
+  api('entities').then(r => { A.ents = r.entities; A.devs = r.devices || []; A.areas = r.areas; A.floors = r.floors || []; if (A.view === 'editor') inspector(); }, fail).then(() => { loadHouse.busy = false; });
 }
 
 // ---------- start ----------

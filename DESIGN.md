@@ -340,7 +340,7 @@ Not variables, but part of the theme:
 - `theme.tile.glass === false` adds `noglass` to the body and removes the frosted layer.
 - `theme.tile.rim === false` adds `norim` and replaces the lit edge with the plain outline.
 
-Per-tile overrides (`tile.style`): `fill`, `fillOn`, `text`, `radius`, `border` set the same variables on that one tile; `opacity` and `image` (a cover picture inside the tile) are tile-only. `tile.flat` removes fill, rim and shadow.
+Per-tile overrides (`tile.style`): `fill`, `fillOn`, `text`, `radius`, `border` set the same variables on that one tile; `opacity` and `image` (a cover picture inside the tile) are tile-only. `lightState: true` replaces the lit fill and glow of a light's button with the light's own colour at its own level. `tile.flat` removes fill, rim and shadow.
 
 The Studio's Look tab exposes backdrop image, colour and darken; fill, lit fill, corners (0 to 60), spacing (0 to 16), border, lit edge and frosted. A new design starts with the `dusk.svg` backdrop over `#141a5c`, dim 0.04, fill `rgba(255,255,255,.15)`, radius 22, gap 5, glass on.
 
@@ -364,6 +364,16 @@ Tiles sit on a CSS grid whose column and row counts come from the design. Each t
 ### Fixed pieces
 
 Camera tiles (`#06080a` ground, cover-fit picture or video, 15px/600 label over a black gradient), the status bar pill at the top (`rgba(30,10,10,.82)`, `#ffd3cd` text), the confirm dialog (460px, 24px radius, `rgba(28,30,44,.96)`, buttons 14px radius with the confirm button in `--fill-on`), and the waiting splash (radial gradient `#3f2a96`, `#141a5c`, `#0b0e33`).
+
+### Layers
+
+From the back: backdrop, tiles, overlays, popup tile, question or PIN pad, status bar, remote ring. A touch on a layer
+does not reach the layers under it.
+
+The popup tile uses the confirm dialog's surface. Its controls share one look: a well with a 1px inset outline at 28%
+white, the value range painted in the well, and a white mark with a dark ring at the current value. Level and colour
+temperature are vertical bars (92 by 280px), colour is a wheel (220px), effects and device choices are lists that open upward. The members of a group are a wrapped row of buttons under the controls. The save scene dialog is the confirm dialog with a 52px text field in the same well and outline. The PIN
+pad is a three-column grid of 58px keys in the confirm dialog.
 
 ### Rules
 

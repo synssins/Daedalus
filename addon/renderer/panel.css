@@ -84,6 +84,62 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #000; color:
 #modal .row { display: flex; justify-content: flex-end; gap: 12px; }
 .mb { padding: 14px 30px; font-size: 19px; font-weight: 600; border-radius: 14px; background: rgba(255,255,255,.14); box-shadow: inset 0 1px 0 rgba(255,255,255,.4); }
 .mb.go { background: var(--fill-on); color: var(--text-on); }
+#modal .box, #pop .box { max-width: 94%; box-sizing: border-box; }
+/* The code pad, in the same box as a question. */
+#modal .sub { font-size: 18px; opacity: .75; margin: -18px 0 22px; }
+.pin { height: 30px; margin-bottom: 20px; text-align: center; font-size: 34px; letter-spacing: .35em; }
+.keys { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 22px; }
+.key { display: flex; align-items: center; justify-content: center; height: 58px; font-size: 24px; font-weight: 600; border-radius: 14px; background: rgba(255,255,255,.14); box-shadow: inset 0 1px 0 rgba(255,255,255,.4); }
+.key svg { width: 28px; height: 28px; }
+.mb:active, .key:active, .rb:active, .dd:active { filter: brightness(.8); }
+
+/* Popup tile: a button's settings, above the dashboard and its overlays and below a question. The dark sheet behind
+   it takes the touch that closes it, so nothing underneath hears that touch. Sizes are fixed, as for the question box. */
+#pop { display: none; position: fixed; left: 0; top: 0; right: 0; bottom: 0; z-index: 8; background: rgba(0,0,0,.35); align-items: center; justify-content: center; }
+#pop.open { display: flex; }
+#pop .box { min-width: 300px; padding: 26px 28px 30px; border-radius: 24px; background: rgba(28,30,44,.96); box-shadow: inset 0 1.5px 0 rgba(255,255,255,.35), 0 24px 60px rgba(0,0,0,.5); }
+.ph { display: flex; align-items: center; margin-bottom: 22px; }
+.pn { flex: 1; min-width: 0; font-size: 24px; font-weight: 600; }
+.pn div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ps { font-size: 17px; font-weight: 500; opacity: .75; margin-top: 2px; }
+.rb { flex: none; width: 52px; height: 52px; margin-left: 12px; border-radius: 50%; background: rgba(255,255,255,.14); box-shadow: inset 0 1px 0 rgba(255,255,255,.4); display: flex; align-items: center; justify-content: center; }
+.rb svg { width: 26px; height: 26px; fill: currentColor; }
+.rb.lit { background: var(--fill-on); color: var(--text-on); }
+.pb { display: flex; align-items: center; justify-content: center; }
+/* Every control is the same well with the same outline; what it sets is painted in it, and a white mark with a dark ring shows where it is. */
+.vbar, .wheel, .dd { box-shadow: inset 0 0 0 1px rgba(255,255,255,.28); touch-action: none; }
+.mark { position: absolute; background: #fff; box-shadow: 0 0 0 2px rgba(28,30,44,.9), 0 2px 8px rgba(0,0,0,.6); pointer-events: none; }
+.mark[hidden] { display: none; }
+.vbar { position: relative; flex: none; width: 92px; height: 280px; border-radius: 24px; }
+.vbar + .vbar { margin-left: 18px; }
+.vbar.bri { background: linear-gradient(180deg, #fff3c4, #2b2a33); }
+.vbar.ct { background: linear-gradient(180deg, #bcd8ff, #fff, #ffb060); }
+.vbar .mark { left: 7px; right: 7px; height: 10px; margin-top: -5px; border-radius: 5px; }
+.pr { flex: none; width: 220px; margin-left: 24px; }
+.wheel { position: relative; width: 220px; height: 220px; border-radius: 50%;
+  background: radial-gradient(circle closest-side, #fff, rgba(255,255,255,0)), conic-gradient(#f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00); }
+.wheel .mark { width: 26px; height: 26px; margin: -13px 0 0 -13px; border-radius: 50%; }
+.dd { position: relative; display: flex; align-items: center; height: 48px; padding: 0 44px 0 18px; border-radius: 24px; background: rgba(255,255,255,.12); font-size: 18px; font-weight: 600; }
+.pr > * + * { margin-top: 14px; }
+.dd::after { content: ''; position: absolute; right: 18px; top: 21px; border: 7px solid transparent; border-top-color: currentColor; }
+.ddv { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ddl { display: none; position: absolute; z-index: 1; left: 0; right: 0; bottom: 56px; max-height: 240px; overflow-y: auto; touch-action: pan-y; padding: 6px; border-radius: 24px; background: rgb(40,42,58); box-shadow: inset 0 0 0 1px rgba(255,255,255,.28), 0 12px 30px rgba(0,0,0,.5); }
+.dd.open .ddl { display: block; }
+.ddl div { padding: 11px 14px; border-radius: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ddl .cur { background: rgba(255,255,255,.22); }
+/* A group's lights, under its controls. */
+.pmem { display: flex; flex-wrap: wrap; gap: 10px; max-width: 470px; margin-top: 20px; }
+.pmem .mb { padding: 10px 18px; font-size: 16px; }
+.pmem .mb.off { opacity: .5; }
+/* A name typed on the device's own keyboard, and the list of what can be replaced. */
+.tin { display: block; width: 100%; box-sizing: border-box; height: 52px; margin: 0 0 18px; padding: 0 16px; border: 0; outline: none; border-radius: 14px; font: 600 20px var(--font); color: #fff;
+  background: rgba(255,255,255,.12); box-shadow: inset 0 0 0 1px rgba(255,255,255,.28); -webkit-user-select: text; user-select: text; }
+.tin::placeholder { color: rgba(255,255,255,.5); }
+.sub2 { font-size: 16px; opacity: .75; margin-bottom: 8px; }
+.slist { display: grid; gap: 8px; max-height: 190px; overflow-y: auto; margin-bottom: 22px; touch-action: pan-y; }
+.slist .mb { padding: 11px 18px; font-size: 17px; }
+.modes { display: grid; gap: 10px; min-width: 280px; }
+.modes .mb { text-align: center; }
 #build { position: fixed; right: 6px; bottom: 2px; z-index: 3; font-size: 9px; color: rgba(255,255,255,.25); }
 
 #splash { display: none; position: fixed; left: 0; top: 0; right: 0; bottom: 0; z-index: 7; align-items: center; justify-content: center; text-align: center;

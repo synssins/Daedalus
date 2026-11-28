@@ -8,6 +8,8 @@ const TYPES = {
   button: {label: 'Button', icon: 'gesture-tap', w: 14, h: 10, fields: []},
   entity: {label: 'Light or switch', icon: 'lightbulb', w: 10, h: 8, fields: [['entity', 'Entity', 'entity', ['light', 'switch']], ['name', 'Name', 'text'], ['icon', 'Icon', 'icon'], ['confirm', 'Confirmation', 'text', 'Question to ask before acting']]},
   action: {label: 'Scene or script', icon: 'star', w: 12, h: 6, fields: [['entity', 'Entity', 'entity', ['scene', 'script', 'button']], ['name', 'Name', 'text'], ['label', 'Subtitle', 'text'], ['icon', 'Icon', 'icon'], ['confirm', 'Confirmation', 'text', 'Question to ask before acting']]},
+  alarm: {label: 'Alarm panel', icon: 'lock', w: 10, h: 8, fields: [['entity', 'Entity', 'entity', ['alarm_control_panel']], ['name', 'Name', 'text'], ['icon', 'Icon', 'icon']]},
+  savescene: {label: 'Save scene', icon: 'star', w: 10, h: 6, fields: [['scope', 'Room or floor', 'select', () => [['', 'Choose'], ...A.areas.map(a => ['area:' + a.id, a.name]), ...(A.floors || []).map(f => ['floor:' + f.id, f.name])]], ['name', 'Name', 'text', 'Save scene'], ['icon', 'Icon', 'icon']]},
   room: {label: 'Room', icon: 'home', w: 12, h: 8, fields: [['area', 'Room', 'area'], ['name', 'Name', 'text', 'Room name'], ['icon', 'Icon', 'icon']]},
   camera: {label: 'Camera', icon: 'video', w: 18, h: 12, fields: [['entity', 'Entity', 'entity', ['camera']], ['name', 'Name', 'text'], ['video', 'Live video', 'bool'], ['page', 'Opens', 'page']]},
   media: {label: 'Media player', icon: 'play', w: 24, h: 8, fields: [['entity', 'Entity', 'entity', ['media_player']], ['name', 'Name', 'text']]},
@@ -550,7 +552,10 @@ function pageFields() {
       btn('Delete', 'trash', () => {
         if (!confirm('Delete the dashboard "' + (p.name || p.id) + '" and its tiles?')) return;
         change(() => { d.pages = d.pages.filter(x => x !== p); if (d.start === p.id) d.start = d.pages[0].id; }); e.page = d.pages[0].id; e.sel = -1; viewEditor(true);
-      }, 'stop')) : null];
+      }, 'stop')) : null,
+    // For the whole panel: locks, garage doors and alarms ask for their code, or yes or no, before they act.
+    h('h2', null, 'Panel'),
+    row('Lock confirmation', h('input', {type: 'checkbox', checked: d.guard !== false, 'aria-label': 'Lock confirmation', onchange: ev => { change(() => { if (ev.target.checked) delete d.guard; else d.guard = false; }, {inspect: true}); settle(); }}))];
 }
 
 // ---------- keyboard ----------
