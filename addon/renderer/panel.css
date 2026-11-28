@@ -127,6 +127,18 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #000; color:
 .dd.open .ddl { display: block; }
 .ddl div { padding: 11px 14px; border-radius: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ddl .cur { background: rgba(255,255,255,.22); }
+/* A tile that is a choice: its words as on any tile, a small arrow after them, and a list that drops from the tile
+   on the popup's layer. The list wears the tile's look: its fill over a solid ground, its corners, border and words. */
+.sel { display: flex; align-items: center; min-width: 0; }
+.sel .n { min-width: 0; }
+.arr { flex: none; margin-left: calc(var(--u) * .34); border: calc(var(--u) * .26) solid transparent; border-bottom-width: 0; border-top-color: currentColor; opacity: .85; }
+#pop.menu { display: block; background: rgba(0,0,0,.2); }
+.mlist { position: absolute; box-sizing: border-box; overflow-y: auto; padding: 6px; border-radius: var(--radius); color: var(--text); font-family: var(--font); touch-action: pan-y;
+  background: linear-gradient(var(--fill-base), var(--fill-base)), rgb(28,30,44); box-shadow: inset 0 0 0 var(--bw) var(--border), 0 18px 44px rgba(0,0,0,.5); }
+.mlist div { padding: 13px 16px; font-size: 19px; font-weight: 600; border-radius: calc(var(--radius) * .6); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mlist .cur { background: var(--fill-on); color: var(--text-on); }
+.mlist::-webkit-scrollbar { width: 8px; }
+.mlist::-webkit-scrollbar-thumb { border-radius: 4px; background: var(--border); }
 /* A group's lights, under its controls. */
 .pmem { display: flex; flex-wrap: wrap; gap: 10px; max-width: 470px; margin-top: 20px; }
 .pmem .mb { padding: 10px 18px; font-size: 16px; }

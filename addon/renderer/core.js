@@ -232,7 +232,7 @@ function roomPage(area) {
   if (lights.all) put({type: 'entity', entity: lights.all, name: 'All lights', icon: 'lightbulb-group'}, 12);
   lights.fixtures.forEach(e => put({type: 'entity', entity: e, name: U.short(U.fname(e), room), icon: 'lightbulb-group'}, 12));
   lights.singles.forEach(e => put({type: 'entity', entity: e, name: U.short(U.fname(e), room), icon: 'lightbulb'}, 12));
-  U.inArea(area, 'scene').forEach(e => put({type: 'action', service: 'scene.turn_on', entity: e, name: U.short(U.fname(e).split(':').pop().trim(), room), label: 'Scene', icon: 'star'}, 12));
+  if (U.inArea(area, 'scene').length) put({type: 'scenes', scope: 'area:' + area}, 12);
   if (HP.server) put({type: 'savescene', scope: 'area:' + area}, 12);
   U.inArea(area, 'cover').forEach(e => put({type: 'entity', entity: e, icon: 'garage'}, 12));  // doors ask before they move: see HP.act
   U.inArea(area, 'media_player').forEach(e => put({type: 'media', entity: e}, 24));
@@ -481,7 +481,7 @@ HP.saveScene = scope => {
     + '<div class="row"><div class="mb" data-m="no">Cancel</div><div class="mb go" data-m="yes">Save</div></div></div>';
   m.className = 'open';
   const send = body => fetch(HP.server + '/api/scene', {method: 'POST', headers: {'Content-Type': 'application/json', Authorization: 'Bearer ' + HP.key}, body: JSON.stringify(Object.assign({scope}, body))})
-    .then(async r => { if (!r.ok) throw new Error(await r.text()); toast('Scene saved'); }).catch(e => toast(e.message));
+    .then(async r => { if (!r.ok) throw new Error(await r.text()); toast('Scene saved'); HP.loadScenes(); }).catch(e => toast(e.message));
   m.onclick = e => {
     const b = e.target.closest('[data-m]'), inp = m.querySelector('.tin'), what = b && b.dataset.m;
     if (e.target === inp || (what === 'yes' && !inp.value.trim())) return inp.focus();  // the device's keyboard comes up
@@ -492,21 +492,70 @@ HP.saveScene = scope => {
   };
 };
 
+// ---------- scenes ----------
+/** Home Assistant keeps no "scene in use": a scene only knows when it was last set. So a scene counts as in use
+ *  while the lights are as it sets them, and stops the moment one of them is changed. What each scene sets comes
+ *  from the Workshop (HP.scenes: {scene: [{e, on, bri, mode, k, hs, rgb}]}), read again when scenes come or go. */
+HP.scenes = {};
+HP.loadScenes = () => {
+  clearTimeout(HP.loadScenes.t);
+  HP.loadScenes.t = setTimeout(() => { if (!HP.server || !HP.key) return;
+    fetch(HP.server + '/api/scenes', {headers: {Authorization: 'Bearer ' + HP.key}}).then(r => r.ok ? r.json() : null).then(j => { if (j) { HP.scenes = j; dirty(); } }).catch(() => {}); }, 1500);
+};
+/** A scene set from this panel shows at once; the lights get a few seconds to arrive there before they are compared. */
+HP.sceneMark = id => { HP.sceneSet = {id, until: Date.now() + 8000}; dirty(); setTimeout(dirty, 8300); };
+HP.sceneActive = id => {
+  if (HP.sceneSet && HP.sceneSet.id === id && Date.now() < HP.sceneSet.until) return true;
+  const near = (a, b, by) => Math.abs(a - b) <= by;
+  let seen = 0;
+  for (const l of HP.scenes[id] || []) {
+    const s = S.states[l.e]; if (!s || s.state === 'unavailable') continue;  // a light that is away does not decide
+    const a = s.attributes; seen++;
+    if ((s.state === 'on') !== l.on) return false;
+    if (!l.on) continue;
+    // lights answer with values a little off what they were sent, so near is enough
+    if (l.bri != null && a.brightness != null && !near(a.brightness, l.bri, 10)) return false;
+    if (l.mode === 'color_temp') { if (a.color_mode !== 'color_temp' || (l.k && a.color_temp_kelvin && !near(a.color_temp_kelvin, l.k, 150))) return false; }
+    else if (l.hs && a.hs_color) {
+      const turn = Math.abs(a.hs_color[0] - l.hs[0]);
+      if (a.color_mode === 'color_temp' || !near(a.hs_color[1], l.hs[1], 8) || (l.hs[1] > 5 && Math.min(turn, 360 - turn) > 8)) return false;
+    }
+  }
+  return seen > 0;
+};
+
 // ---------- popup tile ----------
 /** A button's settings, drawn above the dashboard and its overlays; questions (above) come over it. One at a time.
  *  It closes by its X, by a touch outside it (which reaches nothing underneath), by Back, or after 30 seconds left alone.
  *  build(body, head) fills it and returns a function that redraws it from the house's state and gives the line under the name. */
 const pop = HP.pop = {
   el: null, cur: null, t: 0,
-  open(name, build) {
+  layer() {
     const p = pop.el || (pop.el = $('pop') || document.body.appendChild(Object.assign(document.createElement('div'), {id: 'pop'})));
     if (!p.onclick) { p.onclick = e => { if (e.target === p || e.target.closest('.px')) pop.close(); }; p.addEventListener('pointerdown', pop.touch); }
+    return p;
+  },
+  /** A list that drops from a tile, for a tile that is a choice and not a switch. It is on the popup's layer and
+   *  closes the same ways, and it wears the tile's own look. items: [[id, text]]; now: the id in use. */
+  menu(anchor, items, now, pick) {
+    const p = pop.layer(), r = anchor.getBoundingClientRect(), up = r.top + r.height / 2 > innerHeight / 2, cs = getComputedStyle(anchor), w = Math.max(r.width, 240);
+    p.innerHTML = '<div class="mlist">' + items.map(([id, text]) => `<div data-r="1" data-id="${U.esc(id)}"${id === now ? ' class="cur"' : ''}>${U.esc(text)}</div>`).join('') + '</div>';
+    const l = p.firstChild;
+    LOOK_VARS.forEach(k => { const v = cs.getPropertyValue(k); if (v) l.style.setProperty(k, v); });
+    l.style.left = Math.max(8, Math.min(r.left, innerWidth - w - 8)) + 'px'; l.style.width = w + 'px';
+    // towards the middle of the screen, so a tile at the bottom opens upward
+    if (up) { l.style.bottom = innerHeight - r.top + 6 + 'px'; l.style.maxHeight = r.top - 14 + 'px'; } else { l.style.top = r.bottom + 6 + 'px'; l.style.maxHeight = innerHeight - r.bottom - 14 + 'px'; }
+    l.onclick = e => { const o = e.target.closest('[data-id]'); if (o) { pop.close(); pick(o.dataset.id); } };
+    pop.cur = () => ''; p.className = 'open menu'; pop.touch();
+  },
+  open(name, build) {
+    const p = pop.layer();
     p.innerHTML = '<div class="box"><div class="ph"><div class="pn"><div></div><div class="ps"></div></div><div class="rb px" data-r="1"><svg viewBox="0 0 24 24"><path d="M19 6.4 17.6 5 12 10.6 6.4 5 5 6.4 10.6 12 5 17.6 6.4 19 12 13.4 17.6 19 19 17.6 13.4 12z"/></svg></div></div><div class="pb"></div></div>';
     p.querySelector('.pn').firstChild.textContent = name;
     pop.cur = build(p.querySelector('.pb'), p.querySelector('.ph')) || (() => '');
     p.className = 'open'; pop.update(); pop.touch();
   },
-  update() { if (!pop.cur) return; try { pop.el.querySelector('.ps').textContent = pop.cur() || ''; } catch (e) { console.error('popup: ' + e.message); pop.close(); } },
+  update() { if (!pop.cur) return; try { const text = pop.cur() || '', line = pop.el.querySelector('.ps'); if (line) line.textContent = text; } catch (e) { console.error('popup: ' + e.message); pop.close(); } },
   touch() { clearTimeout(pop.t); pop.t = setTimeout(pop.close, 30000); },
   close() { if (!pop.cur) return; pop.cur = null; clearTimeout(pop.t); pop.el.className = ''; pop.el.innerHTML = ''; },
 };
@@ -535,9 +584,11 @@ async function loadAll() {
   await ha.subscribe({type: 'subscribe_events', event_type: 'state_changed'}, ev => {
     const d = ev.data;
     if (d.new_state) S.states[d.entity_id] = d.new_state; else delete S.states[d.entity_id];
+    if (d.entity_id.startsWith('scene.') && (!d.new_state || !d.old_state)) HP.loadScenes();  // a scene was made, changed or removed
     dirty();
   });
   HP.ready = true;
+  HP.loadScenes();
   if (HP.design) show();
 }
 

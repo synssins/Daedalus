@@ -157,11 +157,12 @@ const done = async code => { try { await api('DELETE', 'tablets/' + DEV); } catc
   const byName = async name => tile(await ev(`[...document.querySelectorAll('#grid .tile')].findIndex(t => (t.querySelector('.n') || {}).textContent === ${JSON.stringify(name)})`));
   await tap(await byName('Fan')); const chips = await js(`[...document.querySelectorAll('#pop .pmem .mb')].map(b => b.textContent)`);
   await tap('#pop .pmem .mb'); const one = await ev(`document.querySelector('#pop .pn div').textContent`);
-  ok('room: all lights, one button for a fixture, its bulbs in its popup', same(names, ['Back', 'All lights', 'Fan', 'Lamp', 'Evening', 'Save scene']) && same(chips, ['One', 'Two']) && one === 'Fake Room Fan One', {names, chips, one});
+  ok('room: all lights, one button for a fixture, its bulbs in its popup', same(names, ['Back', 'All lights', 'Fan', 'Lamp', 'Scenes', 'Save scene']) && same(chips, ['One', 'Two']) && one === 'Fake Room Fan One', {names, chips, one});
   await tap('#pop .px'); await calls();
 
   // ---- save scene: a new one needs a name; one that exists is replaced after a question. The request is caught, not sent.
-  await ev(`window.__sent = []; const realFetch = window.fetch; window.fetch = (u, o) => /\\/api\\/scene$/.test(String(u)) ? (__sent.push(JSON.parse(o.body)), Promise.resolve(new Response('{}'))) : realFetch(u, o)`);
+  await ev(`window.__sent = []; const realFetch = window.fetch; window.fetch = (u, o) => /\\/api\\/scene$/.test(String(u)) ? (__sent.push(JSON.parse(o.body)), Promise.resolve(new Response('{}')))
+    : /\\/api\\/scenes$/.test(String(u)) ? Promise.resolve(new Response(JSON.stringify(HP.scenes))) : realFetch(u, o)`);  // a save makes the page read the scenes again: it gets back what it has
   await tap(await byName('Save scene')); const rep = await js(`[...document.querySelectorAll('#modal .slist .mb')].map(b => b.textContent)`);
   await tap('#modal [data-m=yes]'); const needsName = await ev(`document.getElementById('modal').className === 'open'`);
   await ev(`document.querySelector('#modal .tin').value = ' Evening two '`); await tap('#modal [data-m=yes]');
@@ -169,7 +170,25 @@ const done = async code => { try { await api('DELETE', 'tablets/' + DEV); } catc
   const asked = await js('__sent');
   ok('save scene: a name for a new one, a question before replacing one', same(rep, ['Fake Room Evening']) && needsName && text === 'This will replace Fake Room Evening. Are you sure?'
     && same(asked, [{scope: 'area:fake_room', name: 'Evening two'}, {scope: 'area:fake_room', replace: 'scene.fake_one'}]), {rep, needsName, text, asked});
-  await ev(`HP.ctx.back()`); await sleep(500);
+
+  // ---- the room's scenes in one button: the list drops from it, a choice sets the scene, and the button is lit
+  //      while the lights are as the scene sets them: in the scene's colours where the button design asks for that
+  await ev(`HP.scenes = {'scene.fake_one': [{e: 'light.fake_a', on: true, bri: 255, mode: 'hs', k: null, hs: [0, 100], rgb: [255, 0, 0]}, {e: 'light.fake_b', on: true, bri: 128, mode: 'hs', k: null, hs: [240, 100], rgb: [0, 0, 255]}, {e: 'light.fake_c', on: false, bri: null, mode: null, k: null, hs: null, rgb: null}]}; HP.theme.tile.lightState = true; show()`);
+  await sleep(500); const scenesTile = await byName('Scenes');
+  const idle = await js(`{on: document.querySelector(${JSON.stringify(scenesTile)}).classList.contains('on'), arrow: !!document.querySelector(${JSON.stringify(scenesTile)} + ' .arr')}`);
+  await tap(scenesTile); const menu = await js(`[...document.querySelectorAll('#pop.menu .mlist div')].map(d => d.textContent)`);
+  await tap('#pop .mlist div'); c = await calls();
+  const picked = await js(`{name: document.querySelector(${JSON.stringify(scenesTile)} + ' .n').textContent, on: document.querySelector(${JSON.stringify(scenesTile)}).classList.contains('on'), menu: !!HP.pop.cur}`);
+  ok('scenes: the list drops from the button, a choice sets the scene and shows at once', !idle.on && idle.arrow && same(menu, ['Evening']) && same(c, [['scene', 'turn_on', 'scene.fake_one', {}]]) && picked.name === 'Evening' && picked.on && !picked.menu, {idle, menu, c, picked});
+  // the lights arrive where the scene puts them (a little off, as real lights answer), and the head start is over
+  await set('light.fake_a', 'on', {brightness: 252, color_mode: 'hs', hs_color: [2, 97]}); await set('light.fake_b', 'on', {brightness: 131, color_mode: 'hs', hs_color: [238, 100]}); await set('light.fake_c', 'off');
+  await ev('HP.sceneSet = null; update()');
+  const held = await js(`{name: document.querySelector(${JSON.stringify(scenesTile)} + ' .n').textContent, fill: document.querySelector(${JSON.stringify(scenesTile)}).style.getPropertyValue('--fill-on')}`);
+  await set('light.fake_b', 'on', {brightness: 30});
+  const left = await js(`{name: document.querySelector(${JSON.stringify(scenesTile)} + ' .n').textContent, on: document.querySelector(${JSON.stringify(scenesTile)}).classList.contains('on'), fill: document.querySelector(${JSON.stringify(scenesTile)}).style.getPropertyValue('--fill-on')}`);
+  ok('scenes: lit in the scene\'s colours while the lights match, and no longer once one light is changed',
+    held.name === 'Evening' && /^linear-gradient\(90deg, rgba\(255,0,0,1\.00\), rgba\(0,0,255,0\.55\)\)$/.test(held.fill) && left.name === 'Scenes' && !left.on && !left.fill, {held, left});
+  await ev(`HP.theme.tile.lightState = false; HP.ctx.back()`); await sleep(500);
 
   // ---- the panel's switch: no questions
   await api('PUT', 'designs/' + id, {name: 'Guard test', design: design(false)}); await sleep(6000);

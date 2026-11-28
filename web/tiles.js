@@ -80,6 +80,7 @@
       return guard(nm, `This will ${open ? 'open' : 'close'} ${nm}. Are you sure?`, false, () => ctx.service('cover', open ? 'open_cover' : 'close_cover', e));
     }
     if (dom === 'alarm_control_panel') return alarmPop(e, ctx, nm);
+    if (dom === 'scene') HP.sceneMark(e);
     if (dom === 'scene' || dom === 'script') return ctx.service(dom, 'turn_on', e);
     if (dom === 'button' || dom === 'input_button') return ctx.service(dom, 'press', e);
     if (dom === 'media_player') return ctx.service('media_player', 'media_play_pause', e);
@@ -89,15 +90,36 @@
   /** A lit light's own colour at its own level as the button's lit fill, where the button design asks for it
    *  (lightState). Off, not a light, or not asked for: the design's own look. */
   function lit(el, e, want) {
-    const s = st(e), on = want && s && s.state === 'on' && e.startsWith('light.'), c = on && (s.attributes.rgb_color || [255, 196, 110]);
-    const lvl = on && (s.attributes.brightness == null ? 1 : 0.1 + 0.9 * s.attributes.brightness / 255), sig = on ? c + '/' + lvl.toFixed(2) : '';
+    const s = st(e), on = want && s && s.state === 'on' && e.startsWith('light.');
+    paint(el, on ? [[s.attributes.rgb_color || WARM, level(s.attributes.brightness)]] : null);
+  }
+  const WARM = [255, 196, 110], level = b => b == null ? 1 : 0.1 + 0.9 * b / 255;
+  /** A button's lit fill from light: stops of [[r, g, b], level 0 to 1]. One stop is a plain fill; several fade into
+   *  each other from left to right. null gives the button its design's own look back. */
+  function paint(el, stops) {
+    const sig = stops ? JSON.stringify(stops) : '';
     if ((el.hpLit || '') === sig) return;
     el.hpLit = sig;
-    if (!on) { ['--fill-on', '--glow-on'].forEach(k => el.style.removeProperty(k)); el.style.color = ''; return; }
-    el.style.setProperty('--fill-on', `linear-gradient(155deg, rgba(${c},${lvl.toFixed(2)}), rgba(${c},${(lvl * 0.86).toFixed(2)}))`);
-    el.style.setProperty('--glow-on', `rgba(${c},${(lvl * 0.5).toFixed(2)})`);
-    el.style.color = (0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]) / 255 * lvl < 0.55 ? '#fff' : '#1c1408';  // words stay readable on a dim or dark fill
+    if (!stops) { ['--fill-on', '--glow-on'].forEach(k => el.style.removeProperty(k)); el.style.color = ''; return; }
+    const css = (s, k) => `rgba(${s[0].slice(0, 3).map(Math.round)},${(s[1] * k).toFixed(2)})`;
+    el.style.setProperty('--fill-on', stops.length === 1 ? `linear-gradient(155deg, ${css(stops[0], 1)}, ${css(stops[0], 0.86)})` : `linear-gradient(90deg, ${stops.map(s => css(s, 1)).join(', ')})`);
+    el.style.setProperty('--glow-on', css(stops[0], 0.5));
+    const lum = stops.reduce((n, s) => n + (0.299 * s[0][0] + 0.587 * s[0][1] + 0.114 * s[0][2]) / 255 * s[1], 0) / stops.length;
+    el.style.color = lum < 0.55 ? '#fff' : '#1c1408';  // words stay readable on a dim or dark fill
   }
+  /** A scene's button is lit while the lights are as the scene sets them (HP.sceneActive). Where the button design
+   *  asks for light status, it is lit in the scene's own colours: its lights that are on, one fading into the next. */
+  function sceneLook(el, id, want) {
+    const on = !!id && HP.sceneActive(id), ls = on && want ? (HP.scenes[id] || []).filter(l => l.on) : [];
+    el.classList.toggle('on', on);
+    paint(el, ls.length ? ls.map(l => [l.rgb || WARM, level(l.bri)]) : null);
+  }
+  /** The scenes of a place: all of them, or those of a room ('area:<id>') or of a floor's rooms ('floor:<id>'). */
+  const scenesIn = scope => {
+    const S = HP.S, key = (scope || '').slice((scope || '').indexOf(':') + 1), areas = !scope ? null : scope.startsWith('floor:') ? Object.keys(S.floor || {}).filter(a => S.floor[a] === key) : [key];
+    return Object.keys(S.states).filter(e => e.startsWith('scene.') && U.avail(e) && (!areas || (!!S.reg[e] && areas.includes(S.reg[e].area)))).sort((a, b) => U.fname(a).localeCompare(U.fname(b)));
+  };
+  const sceneName = (e, scope) => U.short(U.fname(e).split(':').pop().trim(), (scope || '').startsWith('area:') ? HP.S.areas[scope.slice(5)] : '');
 
   // ---------- controls on a popup tile ----------
   /** A finger moves a control, or the remote does while it holds it. move(x, y): the place inside it, 0 to 1.
@@ -232,7 +254,23 @@
 
   HP.tile('action', {
     create(t, body, ctx, i) { i.p = U.card(body, t.icon || 'star'); U.set(i.p.n, t.name || ''); U.set(i.p.l, t.label || ''); },
-    tap: (t, ctx) => () => { const [d, s] = t.service.split('.'); ctx.service(d, s, t.entity, t.data); },
+    update(t, body, ctx, i) { if ((t.entity || '').startsWith('scene.')) sceneLook(i.el, t.entity, i.lightState); },
+    tap: (t, ctx) => () => { const [d, s] = t.service.split('.'); if (d === 'scene') HP.sceneMark(t.entity); ctx.service(d, s, t.entity, t.data); },
+  });
+
+  /** The scenes of a place in one button: it shows the scene in use, and a touch drops the list to set another.
+   *  The button itself sets nothing. A scene saved later is in the list by itself. */
+  HP.tile('scenes', {
+    create(t, body, ctx, i) {
+      body.innerHTML = `<div class="ic">${U.icon(t.icon || 'star')}</div><div class="tx"><div class="sel"><div class="n"></div><div class="arr"></div></div><div class="l"></div></div>`;
+      i.p = {n: body.querySelector('.n'), l: body.querySelector('.l')};
+    },
+    update(t, body, ctx, i) {
+      i.now = scenesIn(t.scope).find(HP.sceneActive) || null;
+      U.set(i.p.n, i.now ? sceneName(i.now, t.scope) : 'Scenes'); U.set(i.p.l, t.name || '');
+      sceneLook(i.el, i.now, i.lightState);
+    },
+    tap: (t, ctx, i) => () => HP.pop.menu(i.el, scenesIn(t.scope).map(e => [e, sceneName(e, t.scope)]), i.now, e => { HP.sceneMark(e); ctx.service('scene', 'turn_on', e); }),
   });
 
   HP.tile('nav', {

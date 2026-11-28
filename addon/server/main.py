@@ -23,7 +23,7 @@ from pathlib import Path
 
 from aiohttp import ClientSession, WSMsgType, web
 
-from .scenes import capture
+from .scenes import capture, lights_of
 from .store import Store
 
 log = logging.getLogger("daedalus")
@@ -527,6 +527,25 @@ async def tablet_scene(request: web.Request):
     return web.json_response({"id": sid, "lights": len(entities)})
 
 
+async def tablet_scenes(request: web.Request):
+    """What each scene made in Home Assistant's editor sets its lights to. A panel uses it to light a scene's button
+    while the lights are as the scene left them, and to draw the scene's colours on it."""
+    if not tablet_for(request):
+        raise web.HTTPUnauthorized()
+    app, headers = request.app, {"Authorization": f"Bearer {HA_TOKEN}"}
+    states = (await ha_call(app, [{"type": "get_states"}]))[0] or []
+    ids = {s["entity_id"]: s["attributes"]["id"] for s in states if s["entity_id"].startswith("scene.") and s["attributes"].get("id")}
+
+    async def one(eid: str, sid: str):
+        try:
+            async with app["http"].get(f"{HA_HTTP}/config/scene/config/{sid}", headers=headers) as r:
+                return eid, lights_of(await r.json()) if r.status == 200 else []
+        except Exception:
+            return eid, []
+
+    return web.json_response(dict(await asyncio.gather(*(one(e, i) for e, i in ids.items()))))
+
+
 async def tablet_llm(request: web.Request):
     """Assistant buttons set to a direct LLM send the heard text here. The server holds the address and key
     (Studio, Assistant settings); the tablet never sees them. Speaks the OpenAI chat-completions format,
@@ -645,6 +664,7 @@ def build_app() -> web.Application:
     r.add_get("/api/websocket", ha_socket)
     r.add_post("/api/llm", tablet_llm)
     r.add_post("/api/scene", tablet_scene)
+    r.add_get("/api/scenes", tablet_scenes)
     for p in ("/api/camera_proxy/{t:.*}", "/api/camera_proxy_stream/{t:.*}", "/api/hls/{t:.*}", "/api/tts_proxy/{t:.*}"):
         r.add_get(p, ha_media)
     r.add_route("OPTIONS", "/api/{t:.*}", lambda request: web.Response())

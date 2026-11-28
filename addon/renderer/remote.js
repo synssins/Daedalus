@@ -21,7 +21,7 @@
       document.body.append(ring);
     }
     if (!el) { ring.style.opacity = 0; return; }
-    if (el.closest('.ddl, .slist')) el.scrollIntoView({block: 'nearest'});  // a long list follows the ring
+    if (el.closest('.ddl, .slist, .mlist')) el.scrollIntoView({block: 'nearest'});  // a long list follows the ring
     const r = el.getBoundingClientRect(); at = mid(el);
     Object.assign(ring.style, {opacity: 1, borderColor: '#fff', left: r.left - 5 + 'px', top: r.top - 5 + 'px', width: r.width + 10 + 'px', height: r.height + 10 + 'px',
       borderRadius: (parseFloat(getComputedStyle(el).borderTopLeftRadius) || 0) + 5 + 'px'});

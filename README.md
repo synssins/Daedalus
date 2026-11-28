@@ -37,6 +37,11 @@ members, each of which opens by itself. On a room page, the group that holds the
 as **All lights**, a smaller group inside the room is shown as one button, and its members are not shown
 separately. A group that does not report its members, such as a Zigbee2MQTT group, is treated as one light.
 
+The **Scenes** button holds the scenes of a room, a floor, or the whole house. A tap drops a list from the button
+and choosing a scene sets it. A scene button is lit while the lights are in the state the scene stores, and no
+longer when one of them is changed. Where the button design shows light status, the lit button shows the scene's
+lights from left to right in their stored colours. Room pages show one Scenes button for the room.
+
 **Save scene** stores the current state of the lights of a room or a floor as a Home Assistant scene, as a new
 scene or over an existing one. The scene is written through Home Assistant's scene editor API by the Workshop, so
 it is kept across restarts and remains editable in Home Assistant. Only lights are stored.
@@ -53,7 +58,7 @@ The alarm panel button opens the arming modes that the Home Assistant alarm enti
 - Snap-grid layout with drag and resize.
 - Live preview that uses the tablet renderer and current Home Assistant state.
 - Tile types: clock, weather, people, alerts, light or switch, scene, room, media, camera, page link, text, picture,
-  multi-device button, alarm panel, save scene, voice assistant.
+  multi-device button, alarm panel, scenes, save scene, voice assistant.
 - Theme settings: background image, tile fill, corner radius, glass effect.
 - Designs can be fitted to other screen sizes and orientations.
 - Saved changes are pushed to tablets within a few seconds.

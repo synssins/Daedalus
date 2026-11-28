@@ -372,7 +372,7 @@ does not reach the layers under it.
 
 The popup tile uses the confirm dialog's surface. Its controls share one look: a well with a 1px inset outline at 28%
 white, the value range painted in the well, and a white mark with a dark ring at the current value. Level and colour
-temperature are vertical bars (92 by 280px), colour is a wheel (220px), effects and device choices are lists that open upward. The members of a group are a wrapped row of buttons under the controls. The save scene dialog is the confirm dialog with a 52px text field in the same well and outline. The PIN
+temperature are vertical bars (92 by 280px), colour is a wheel (220px), effects and device choices are lists that open upward. The members of a group are a wrapped row of buttons under the controls. A tile that is a choice shows its value as tile text with a small arrow after it; its list drops from the tile on the popup layer and takes the tile's fill, radius, border and text colour, with the current item in the lit fill. The save scene dialog is the confirm dialog with a 52px text field in the same well and outline. The PIN
 pad is a three-column grid of 58px keys in the confirm dialog.
 
 ### Rules
