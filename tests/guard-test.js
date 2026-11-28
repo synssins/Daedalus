@@ -18,7 +18,7 @@ const design = guard => Object.assign({format: 1, name: 'Guard test', grid: {col
     .concat([{type: 'battery', x: 27, y: 19, w: 12, h: 14, entities: ['sensor.fake_bat_full', 'sensor.fake_bat_low', 'binary_sensor.fake_bat_yn']},
       {type: 'value', x: 14, y: 37, w: 10, h: 10, entity: 'sensor.fake_temp'}, {type: 'gauge', x: 27, y: 37, w: 10, h: 10, entity: 'sensor.fake_temp', min: '10', max: '30'},
       {type: 'chart', x: 40, y: 19, w: 12, h: 14, entity: 'sensor.fake_temp', name: 'Fake chart'}, {type: 'value', x: 40, y: 37, w: 10, h: 10, entity: 'binary_sensor.fake_door'},
-      {type: 'calendar', x: 14, y: 1, w: 10, h: 10, entities: ['calendar.fake_cal']}, {type: 'todo', x: 40, y: 1, w: 10, h: 10, entity: 'todo.fake_list'}, {type: 'forecast', x: 14, y: 19, w: 12, h: 10, entity: 'weather.fake_sky'}])}]}, guard === false ? {guard: false} : {});
+      {type: 'calendar', x: 14, y: 1, w: 10, h: 10, entities: ['calendar.fake_cal']}, {type: 'todo', x: 40, y: 1, w: 10, h: 10, entity: 'todo.fake_list'}, {type: 'forecast', x: 14, y: 19, w: 12, h: 10, entity: 'weather.fake_sky'}, {type: 'media', x: 53, y: 31, w: 10, h: 16, entity: 'media_player.fake_hifi'}])}]}, guard === false ? {guard: false} : {});
 const STATES = {
   'lock.fake_plain': ['locked', {}], 'lock.fake_code': ['locked', {code_format: '^\\d{4}$'}], 'cover.fake_garage': ['closed', {device_class: 'garage'}],
   'alarm_control_panel.fake_alarm': ['disarmed', {supported_features: 3, code_arm_required: false, code_format: null}],
@@ -57,7 +57,7 @@ const done = async code => { try { await api('DELETE', 'tablets/' + DEV); } catc
   await ev(`window.__calls = []; HP.ctx.service = (d, s, e, data) => { __calls.push([d, s, e, data || {}]); return Promise.resolve(); }; HP.ready = true`);
   for (const e in STATES) await set(e, STATES[e][0], STATES[e][1]);
   const safe = async () => { const s = await js(`{name: HP.design && HP.design.name, stub: /__calls/.test(String(HP.ctx.service)), ents: (HP.design.pages || []).flatMap(p => p.tiles).flatMap(t => [t.entity].concat(t.entities || [])).filter(Boolean)}`);
-    if (s.name !== 'Guard test' || !s.stub || s.ents.length !== TILES.length + 10 || s.ents.some(e => !/\.fake_/.test(e))) throw new Error('not the test panel, nothing pressed: ' + JSON.stringify(s)); };
+    if (s.name !== 'Guard test' || !s.stub || s.ents.length !== TILES.length + 11 || s.ents.some(e => !/\.fake_/.test(e))) throw new Error('not the test panel, nothing pressed: ' + JSON.stringify(s)); };
   await safe();
 
   const calls = () => js('__calls.splice(0)');
@@ -161,7 +161,8 @@ const done = async code => { try { await api('DELETE', 'tablets/' + DEV); } catc
   const byName = async name => tile(await ev(`[...document.querySelectorAll('#grid .tile')].findIndex(t => (t.querySelector('.n') || {}).textContent === ${JSON.stringify(name)})`));
   await tap(await byName('Fan')); const chips = await js(`[...document.querySelectorAll('#pop .pmem .mb')].map(b => b.textContent)`);
   await tap('#pop .pmem .mb'); const one = await ev(`document.querySelector('#pop .pn div').textContent`);
-  ok('room: all lights, one button for a fixture, its bulbs in its popup', same(names, ['Back', 'All lights', 'Fan', 'Lamp', 'Scenes', 'Save scene']) && same(chips, ['One', 'Two']) && one === 'Fake Room Fan One', {names, chips, one});
+  await tap('#pop .ph .rb'); const backTo = await ev(`document.querySelector('#pop .pn div').textContent + '/' + document.querySelectorAll('#pop .pmem .mb').length`);
+  ok('room: all lights, one button for a fixture, its bulbs in its popup with a way back to it', same(names, ['Back', 'All lights', 'Fan', 'Lamp', 'Scenes', 'Save scene']) && same(chips, ['One', 'Two']) && one === 'Fake Room Fan One' && backTo === 'Fan/2', {names, chips, one, backTo});
   await tap('#pop .px'); await calls();
 
   // ---- save scene: a new one needs a name; one that exists is replaced after a question. The request is caught, not sent.
@@ -310,6 +311,27 @@ const done = async code => { try { await api('DELETE', 'tablets/' + DEV); } catc
   const odd = await js(`{buttons: document.querySelectorAll('#pop [data-b]').length, power: !!document.querySelector('#pop .ph .rb')}`); await tap('#pop .px');
   ok('remote: without a player its own volume word is sent; a remote of an unknown kind has power only', same(samVol, just('remote', 'send_command', 'remote.fake_sam', {command: 'KEY_VOLUP'}))
     && same(samSrc, just('remote', 'send_command', 'remote.fake_sam', {command: 'KEY_SOURCE'})) && odd.buttons === 0 && odd.power, {samVol, samSrc, odd});
+
+  // ---- a player's tile: its picture, what plays, its buttons; the picture opens what it can play (the library is made up here)
+  await ev(`(() => { const real = HP.ha.call.bind(HP.ha); HP.ha.call = m => m.type !== 'media_player/browse_media' ? real(m) : Promise.resolve(m.media_content_id === 'albums'
+    ? {title: 'Albums', children: [{title: 'Night Drive', can_expand: true, can_play: true, media_content_id: 'al1', media_content_type: 'album', thumbnail: '/api/media_player_proxy/x.jpg'}]}
+    : {title: 'Media', children: [{title: 'Albums', can_expand: true, can_play: false, media_content_id: 'albums', media_content_type: 'albums', thumbnail: null}, {title: 'Radio One', can_expand: false, can_play: true, media_content_id: 'r1', media_content_type: 'music', thumbnail: null}]}); })()`);
+  await set('media_player.fake_hifi', 'playing', {friendly_name: 'Fake Hifi', supported_features: 1 | 16 | 32 | 4 | 16384 | 131072, media_title: 'Night Drive', media_artist: 'The Made Ups', entity_picture: '/api/media_player_proxy/now.jpg', volume_level: 0.4});
+  const mt = await js(`(() => { const el = document.querySelector('#grid .t-media'); return {title: el.querySelector('.n').textContent, line: el.querySelector('.l').textContent, lit: el.classList.contains('on'),
+    art: /\\/api\\/media_player_proxy\\/now\\.jpg/.test(el.querySelector('.mart').style.backgroundImage), btns: [...el.querySelectorAll('.mbtn [data-b]')].map(b => b.dataset.b)}; })()`);
+  await calls(); await tap('#grid .t-media [data-b=next]'); const mNext = await calls(); await tap('#grid .t-media [data-b=play]'); const mPlay = await calls();
+  await tap('#grid .t-media .mart'); await sleep(300);
+  const b1 = await js(`{items: [...document.querySelectorAll('#pop .bi .bnm')].map(n => n.textContent), back: !document.querySelector('#pop .ph .rb').hidden}`);
+  await tap('#pop .bi'); await sleep(300);
+  const b2 = await js(`{items: [...document.querySelectorAll('#pop .bi .bnm')].map(n => n.textContent), trail: document.querySelector('#pop .ps').textContent, play: !!document.querySelector('#pop .bplay'), pic: /x\\.jpg/.test(document.querySelector('#pop .bth').style.backgroundImage)}`);
+  await tap('#pop .ph .rb'); await sleep(200); const b3 = await js(`[...document.querySelectorAll('#pop .bi .bnm')].map(n => n.textContent)`);
+  await calls(); await tap('#pop .bi:last-child'); const bPlay = await calls(); const bClosed = !(await popOpen());
+  await tap('#grid .t-media .mtx'); await sleep(200); const mMore = await js(`{open: !!HP.pop.cur, vol: !!document.querySelector('#pop .vbar')}`); await tap('#pop .px');
+  ok('player: picture, title and buttons on its tile; the picture opens its library, the words its controls',
+    mt.title === 'Night Drive' && mt.line === 'The Made Ups \u00b7 Fake Hifi' && mt.lit && mt.art && same(mt.btns, ['prev', 'play', 'next'])
+    && same(mNext, [['media_player', 'media_next_track', 'media_player.fake_hifi', {}]]) && same(mPlay, [['media_player', 'media_play_pause', 'media_player.fake_hifi', {}]])
+    && same(b1, {items: ['Albums', 'Radio One'], back: false}) && same(b2, {items: ['Night Drive'], trail: 'Media \u203a Albums', play: true, pic: true}) && same(b3, ['Albums', 'Radio One'])
+    && same(bPlay, [['media_player', 'play_media', 'media_player.fake_hifi', {media_content_id: 'r1', media_content_type: 'music'}]]) && bClosed && mMore.open && mMore.vol, {mt, mNext, mPlay, b1, b2, b3, bPlay, bClosed, mMore});
 
   // ---- the panel's switch: no questions
   await api('PUT', 'designs/' + id, {name: 'Guard test', design: design(false)}); await sleep(6000);

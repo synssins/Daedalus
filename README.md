@@ -62,6 +62,10 @@ confirmation.
 **Calendar**, **To-do list** and **Forecast** tiles show upcoming events of one or more calendars, the open items
 of a to-do list with check-off and add, and the daily or hourly forecast of a weather entity.
 
+The **Media player** tile shows the picture and title of what is playing with previous, play or pause, and next.
+The picture opens the media browser of that player, as Home Assistant provides it: folders open, items play. The
+title opens the player's controls.
+
 The **Remote** tile opens a remote control for a `remote` entity: power, volume, channels, the four directions with
 OK, back, home, menu, play, sources and activities. Button commands are mapped for the Android TV Remote, Samsung
 TV, Roku, Apple TV, Bravia and webOS integrations; other remotes show power and activities. Volume and source use
@@ -82,6 +86,7 @@ The alarm panel button opens the arming modes that the Home Assistant alarm enti
 ![Dashboard editor](docs/img/editor.jpg)
 
 - Snap-grid layout with drag and resize.
+- Tiles are added by device type (light, switch, lock, media player and others) or, under **Advanced**, by tile type.
 - Live preview that uses the tablet renderer and current Home Assistant state.
 - Tile types: clock, weather, people, alerts, entity, scene, room, media, camera, page link, text, picture,
   multi-device button, alarm panel, scenes, save scene, battery, value, gauge, chart, calendar, to-do list, forecast, remote, voice assistant.

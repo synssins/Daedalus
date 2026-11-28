@@ -189,7 +189,7 @@
     return {dim: m.some(x => x !== 'onoff'), ct: m.includes('color_temp') || m.includes('rgbww'), colour: m.some(x => COLOUR.includes(x)), fx: (a.effect_list || []).length > 0}; };
   /** Left to right: level, warm to cool white, colour, with the light's effects under the colour. Only what the light has.
    *  Setting any of them switches an off light on at that value. */
-  function lightPop(e, ctx, name) {
+  function lightPop(e, ctx, name, up) {
     const can = lightCan(e), a0 = st(e).attributes, lo = a0.min_color_temp_kelvin || 2000, hi = a0.max_color_temp_kelvin || 6500;
     const call = data => ctx.service('light', 'turn_on', e, data);
     // Each step fades into the next, so a drag reads as one smooth change and not as a row of jumps.
@@ -200,6 +200,8 @@
     HP.pop.open(name, (body, head) => {
       const v = {on: false, bri: 0, k: lo, h: 0, s: 0, white: true};  // what the controls show
       const power = part(head, 'rb', '1', U.icon('power')); head.insertBefore(power, head.querySelector('.px'));
+      // opened from a group's popup: a way back to the group
+      if (up) { const back = part(head, 'rb', '1', FACE.back); head.insertBefore(back, power); back.onclick = up; }
       power.onclick = () => ctx.service('light', 'toggle', e);
       const MARK = '<div class="mark"></div>', y = p => 4 + (100 - p) * 0.92 + '%';  // keeps the mark inside the bar at both ends
       const bri = part(body, 'vbar bri', 'adj', MARK), ct = can.ct ? part(body, 'vbar ct', 'adj', MARK) : null;
@@ -215,7 +217,9 @@
       const sel = picks.map(id => [id, dropdown(side, () => [(st(id) || {attributes: {}}).attributes.options || [], (st(id) || {}).state], x => ctx.service('select', 'select_option', id, {option: x}))]);
       // A group Home Assistant knows the members of: each one under the controls, to open by itself.
       const mem = (Array.isArray(a0.entity_id) ? a0.entity_id : []).filter(st), chips = mem.length ? part(body.parentNode, 'pmem') : null;
-      if (chips) { chips.innerHTML = mem.map(() => '<div class="mb" data-r="1"></div>').join(''); chips.onclick = ev => { const k = [...chips.children].indexOf(ev.target.closest('.mb')); if (k >= 0 && U.avail(mem[k])) HP.act(mem[k], ctx); }; }
+      if (chips) { chips.innerHTML = mem.map(() => '<div class="mb" data-r="1"></div>').join(''); chips.onclick = ev => { const k = [...chips.children].indexOf(ev.target.closest('.mb')); if (k < 0 || !U.avail(mem[k])) return;
+        // one of the group's lights by itself, with a way back here; a light that only switches, switches
+        if (mem[k].startsWith('light.') && lightCan(mem[k]).dim) lightPop(mem[k], ctx, U.fname(mem[k]), () => lightPop(e, ctx, name, up)); else HP.act(mem[k], ctx); }; }
       const place = () => {
         bri.firstChild.style.top = y(v.on ? v.bri : 0);
         // the mark sits on whichever of the two the light is using: the white bar or the colour wheel
@@ -335,7 +339,8 @@
     HP.pop.open(name, (body, head) => {
       const a = st(e).attributes, f = a.supported_features || 0, power = f & 384 ? powerBtn(head, () => call('toggle')) : null;
       const vol = f & 4 ? slider(body, 'lvl', 0, 100, 1, () => { const v = attr(e, 'volume_level'); return v == null ? null : Math.round(v * 100); }, v => call('volume_set', {volume_level: v / 100})) : null;
-      const side = part(body, 'pr'), art = part(side, 'art'), row = part(side, 'trow');
+      const side = part(body, 'pr'), art = part(side, 'art', '1'), row = part(side, 'trow');
+      art.onclick = () => { if (f & 131072) browse(e, ctx, name); };
       row.innerHTML = (f & 16 ? `<div class="rb" data-r="1" data-b="prev">${PREV}</div>` : '') + (f & 16385 ? '<div class="rb" data-r="1" data-b="play"></div>' : '')
         + (f & 32 ? `<div class="rb" data-r="1" data-b="next">${NEXT}</div>` : '') + (f & 8 ? `<div class="rb" data-r="1" data-b="mute">${MUTE}</div>` : '');
       row.onclick = ev => { const b = (ev.target.closest('[data-b]') || {dataset: {}}).dataset.b;
@@ -452,6 +457,38 @@
       };
     });
   }
+
+  /** A picture Home Assistant names: one of its own paths (fetched through the Workshop), or an address elsewhere. */
+  const picture = p => !p ? '' : /^https?:/.test(p) ? p : HP.asset(p);
+  /** What a player can play, as Home Assistant lists it for that player: folders that open, and things that play.
+   *  A folder that can also be played whole (an album, a playlist) carries a play button of its own. Playing closes it. */
+  function browse(e, ctx, name) {
+    HP.pop.open(name, (body, head) => {
+      const back = part(head, 'rb', '1', FACE.back), trail = [];
+      head.insertBefore(back, head.querySelector('.px')); body.parentNode.classList.add('wide'); body.className = 'pb bgrid';
+      const show = () => {
+        const kids = trail[trail.length - 1].children || [];
+        back.hidden = trail.length < 2;
+        body.innerHTML = kids.map((c, k) => `<div class="bi" data-r="1" data-n="${k}"><div class="bth">${c.can_expand ? FOLDER : U.icon('play')}</div><div class="bnm">${U.esc(c.title || '')}</div>`
+          + (c.can_expand && c.can_play ? `<div class="rb bplay" data-r="1">${U.icon('play')}</div>` : '') + '</div>').join('');
+        kids.forEach((c, k) => { const pic = picture(c.thumbnail); if (pic) { const th = body.children[k].firstChild; th.style.backgroundImage = `url("${pic.replace(/"/g, '%22')}")`; th.innerHTML = ''; } });
+        body.scrollTop = 0; HP.pop.update();
+      };
+      const open = c => { body.innerHTML = '';
+        HP.ha.call(Object.assign({type: 'media_player/browse_media', entity_id: e}, c ? {media_content_id: c.media_content_id, media_content_type: c.media_content_type} : {}))
+          .then(node => { trail.push(node); show(); }, err => { HP.toast(err.message); if (!trail.length) HP.pop.close(); else show(); }); };
+      body.onclick = ev => {
+        const it = ev.target.closest('.bi'); if (!it) return;
+        const c = trail[trail.length - 1].children[+it.dataset.n];
+        if (c.can_expand && !ev.target.closest('.bplay')) return open(c);
+        if (c.can_play) { ctx.service('media_player', 'play_media', e, {media_content_id: c.media_content_id, media_content_type: c.media_content_type}); HP.pop.close(); }
+      };
+      back.onclick = () => { if (trail.length > 1) { trail.pop(); show(); } };
+      open();
+      return () => trail.map(n => n.title).filter(Boolean).join(' \u203a ');
+    });
+  }
+  const FOLDER = '<svg viewBox="0 0 24 24"><path d="M3 5h7l2 2.5h9V19H3z"/></svg>';
 
   // Feature bit, service, label, the state it leads to. Home Assistant's own names for the modes.
   const ARM = [[2, 'arm_away', 'Arm away', 'armed_away'], [1, 'arm_home', 'Arm home', 'armed_home'], [4, 'arm_night', 'Arm night', 'armed_night'],
@@ -700,16 +737,34 @@
     tap: (t, ctx) => () => ctx.go('@room', t.area),
   });
 
+  /** A player on the dashboard, as Home Assistant shows one: the picture of what plays, its title, and back, play
+   *  or pause, forward. Three places to touch: the picture opens what the player can play (or its controls, where it
+   *  has no library), the words open its controls (volume, source), and each button does its own thing. */
   HP.tile('media', {
-    create(t, body, ctx, i) { i.p = U.card(body, 'play'); },
-    update(t, body, ctx, i) {
-      const s = st(t.entity); if (!s) return;
-      const a = s.attributes, playing = s.state === 'playing', ic = U.icon(playing ? 'pause' : 'play');
-      if (i.p.ic.innerHTML !== ic) i.p.ic.innerHTML = ic;
-      U.set(i.p.n, a.media_title || t.name || a.friendly_name); U.set(i.p.l, a.media_artist || a.app_name || U.cap(s.state));
-      i.el.classList.toggle('on', playing);
+    create(t, body, ctx, i) {
+      body.classList.add('mtile');
+      body.innerHTML = '<div class="mart tap" data-b="art"></div><div class="mmain"><div class="mtx tap" data-b="more"><div class="n"></div><div class="l"></div></div><div class="mbtn"></div></div>';
+      i.p = {art: body.firstChild, n: body.querySelector('.n'), l: body.querySelector('.l'), btn: body.querySelector('.mbtn')};
+      body.addEventListener('click', ev => {
+        const b = ev.target.closest('[data-b]'); if (!b || !U.avail(t.entity)) return;
+        const k = b.dataset.b, name = t.name || U.fname(t.entity);
+        if (k === 'art' && (attr(t.entity, 'supported_features') || 0) & 131072) return browse(t.entity, ctx, name);
+        if (k === 'art' || k === 'more') return HP.act(t.entity, ctx, name);
+        ctx.service('media_player', {prev: 'media_previous_track', play: 'media_play_pause', next: 'media_next_track'}[k], t.entity);
+      });
     },
-    tap: (t, ctx) => U.avail(t.entity) ? () => HP.act(t.entity, ctx, t.name) : null,
+    update(t, body, ctx, i) {
+      const s = st(t.entity), name = t.name || U.fname(t.entity);
+      // the picture sits beside the words only on a tile wide enough to leave them room; otherwise it goes on top
+      i.el.classList.toggle('tall', i.w < i.h * 1.8); i.el.classList.toggle('off', !U.avail(t.entity));
+      if (!s) { U.set(i.p.n, name); U.set(i.p.l, U.stateLabel(t.entity)); return; }
+      const a = s.attributes, f = a.supported_features || 0, playing = s.state === 'playing', pic = picture(a.entity_picture), sig = f + '/' + playing;
+      U.set(i.p.n, a.media_title || name); U.set(i.p.l, a.media_title ? [a.media_artist, name].filter(Boolean).join(' \u00b7 ') : U.cap(s.state));
+      i.el.classList.toggle('on', playing);
+      if (i.pic !== pic) { i.pic = pic; i.p.art.style.backgroundImage = pic ? `url("${pic.replace(/"/g, '%22')}")` : ''; i.p.art.innerHTML = pic ? '' : U.icon('play'); }
+      if (i.sig !== sig) { i.sig = sig; i.p.btn.innerHTML = (f & 16 ? `<div class="tap" data-b="prev">${PREV}</div>` : '') + (f & 16385 ? `<div class="tap" data-b="play">${U.icon(playing ? 'pause' : 'play')}</div>` : '')
+        + (f & 32 ? `<div class="tap" data-b="next">${NEXT}</div>` : ''); }
+    },
   });
 
   // Still picture at once, live video takes over where the tablet can decode it. Tap opens the camera's page.

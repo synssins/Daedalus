@@ -37,6 +37,13 @@ const TYPES = {
   label: {label: 'Text', icon: 'text', w: 20, h: 5, flat: true, fields: [['text', 'Text', 'text'], ['size', 'Size', 'range', [0.2, 1, 0.02]]]},
   image: {label: 'Picture', icon: 'image', w: 12, h: 8, fields: []},
 };
+// What can be added by what it is in the house: [label, icon, tile type, the entity domains its picker offers].
+// Each is one of the tile types above with its picker narrowed; the full list of tile types is under Advanced.
+const KINDS = [['Light', 'lightbulb', 'entity', ['light']], ['Switch', 'power', 'entity', ['switch', 'input_boolean']], ['Fan', 'power', 'entity', ['fan']],
+  ['Cover', 'garage', 'entity', ['cover', 'valve']], ['Lock', 'lock', 'entity', ['lock']], ['Climate', 'thermometer', 'entity', ['climate', 'humidifier', 'water_heater']],
+  ['Media player', 'play', 'media', ['media_player']], ['Remote', 'television', 'remote', ['remote', 'media_player']], ['Camera', 'video', 'camera', ['camera']],
+  ['Sensor', 'thermometer', 'value', null], ['Vacuum', 'power', 'entity', ['vacuum', 'lawn_mower']], ['Scenes', 'star', 'scenes', null], ['Alarm panel', 'lock', 'alarm', null]];
+const kindOf = t => (t && t.kind && KINDS.find(k => k[0] === t.kind)) || null;
 A.pipelines = []; A.wakewords = [];
 /** Does the device this entity belongs to report a battery? */
 const hasBattery = id => { const d = (A.ents.find(n => n.id === id) || {}).device; return !!d && A.ents.some(n => n.device === d && n.dc === 'battery' && n.id.startsWith('sensor.')); };
@@ -126,7 +133,9 @@ function viewEditor(keepFrame) {
   const palette = h('div', {class: 'palette'},
     ...(th ? [h('h2', null, 'Designs'), ...th.buttons.map(b => h('button', {type: 'button', title: 'Add a Button tile with the design "' + b.name + '"', onclick: () => addTile('button', null, b.name), html: icon('gesture-tap') + `<span>${esc(b.name)}</span>`}))] : []),
     h('h2', null, 'Add'),
-    ...Object.keys(TYPES).map(k => h('button', {type: 'button', title: 'Add: ' + TYPES[k].label, onclick: () => addTile(k), html: icon(TYPES[k].icon) + `<span>${esc(TYPES[k].label)}</span>`})));
+    ...KINDS.map(k => h('button', {type: 'button', title: 'Add: ' + k[0], onclick: () => addTile(k[2], null, null, k[0]), html: icon(k[1]) + `<span>${esc(k[0])}</span>`})),
+    h('details', {open: !!e.advOpen, ontoggle: ev => { e.advOpen = ev.target.open; }}, h('summary', null, 'Advanced'),
+      ...Object.keys(TYPES).map(k => h('button', {type: 'button', title: 'Add: ' + TYPES[k].label, onclick: () => addTile(k), html: icon(TYPES[k].icon) + `<span>${esc(TYPES[k].label)}</span>`}))));
 
   if (keepFrame && $('.ed')) {
     // Same panel, same sheet: swap the toolbar and redraw the edit layer only. Re-inserting the preview
@@ -246,13 +255,13 @@ function drag(ev, i, b) {
   });
 }
 
-function addTile(type, at, look) {
+function addTile(type, at, look, kind) {
   const e = ed(), def = TYPES[type], g = e.design.grid, ts = page().tiles;
   const free = (x, y) => !ts.some(t => x < t.x + t.w && x + def.w > t.x && y < t.y + t.h && y + def.h > t.y);
   let pos = {x: 2, y: 2};
   if (at) pos = {x: Math.max(0, Math.min(g.cols - def.w, at.x)), y: Math.max(0, Math.min(g.rows - def.h, at.y))};
   else search: for (let y = 2; y + def.h <= g.rows - 1; y++) for (let x = 2; x + def.w <= g.cols - 1; x++) if (free(x, y)) { pos = {x, y}; break search; }
-  const t = Object.assign({type, w: def.w, h: def.h}, pos, def.flat ? {flat: true} : {}, look ? {look} : {});
+  const t = Object.assign({type, w: def.w, h: def.h}, pos, def.flat ? {flat: true} : {}, look ? {look} : {}, kind ? {kind} : {});
   if (type === 'label') t.text = 'Text';
   if (type === 'button') t.items = [];
   change(() => ts.push(t)); e.sel = ts.length - 1; e.tab = 'tile'; boxes(); inspector();
@@ -285,7 +294,7 @@ function itemMenu(ev, t, k) {
 function sheetMenu(ev) {
   const e = ed(), r = $('.over').getBoundingClientRect(), at = {x: Math.floor((ev.clientX - r.left) / e.cw), y: Math.floor((ev.clientY - r.top) / e.ch)}, th = edTheme();
   menu(ev, [
-    ['Add here', [...(th ? th.buttons.map(b => ['Button: ' + b.name, () => addTile('button', at, b.name)]) : []), ...Object.keys(TYPES).map(k => [TYPES[k].label, () => addTile(k, at)])]],
+    ['Add here', [...(th ? th.buttons.map(b => ['Button: ' + b.name, () => addTile('button', at, b.name)]) : []), ...KINDS.map(k => [k[0], () => addTile(k[2], at, null, k[0])]), ...Object.keys(TYPES).map(k => [TYPES[k].label, () => addTile(k, at)])]],
     null, ['Dashboard settings', () => { e.tab = 'page'; inspector(); }], ['Look and theme', () => { e.tab = 'look'; inspector(); }],
     ['Add a dashboard', () => $('.bar .btn.icon').click()]]);
 }
@@ -394,14 +403,15 @@ function tileFields() {
   const setp = (k, v, o) => change(() => { if (v == null || v === '') delete t[k]; else t[k] = v; }, o || live);
   const num = (k, min, max) => h('div', null, h('label', null, k.toUpperCase()), h('input', {type: 'number', min, max, value: t[k], 'aria-label': k,
     onchange: ev => { const v = Math.max(min, Math.min(max, Math.round(+ev.target.value || 0))); change(() => { t[k] = v; }, {inspect: true}); settle(); }}));
-  const out = [h('h2', null, def.label),
+  const kd = kindOf(t);  // added as a light, a lock, a speaker: its name, and its picker offers only those
+  const out = [h('h2', null, kd ? kd[0] : def.label),
     h('div', {class: 'f4'}, num('x', 0, d.grid.cols - t.w), num('y', 0, d.grid.rows - t.h), num('w', 2, d.grid.cols - t.x), num('h', 2, d.grid.rows - t.y))];
   if (t.type === 'button') out.push(...buttonFields(t));
   for (const [k, label, kind, opt] of def.fields) {
     if (kind === 'text') out.push(row(label, textIn(t[k], v => setp(k, v), opt)));
     else if (kind === 'entity') out.push(row(label, entityPick(t[k], v => change(() => {
       t[k] = v; if (t.type === 'action') { const dom = v.split('.')[0]; t.service = dom === 'button' ? 'button.press' : dom + '.turn_on'; }
-    }, {keepBoxes: true}), opt)));
+    }, {keepBoxes: true}), (k === 'entity' && kd && kd[3]) || opt)));
     else if (kind === 'entities') out.push(row(label, entityPick(null, v => change(() => { t[k] = [...new Set([...(t[k] || []), v])]; }, {keepBoxes: true}), opt, true)),
       ...(t[k] || []).map(id => row('', h('span', {style: 'flex:1;overflow:hidden;text-overflow:ellipsis'}, entName(id)),
         btn('', 'trash', () => { change(() => { t[k] = t[k].filter(x => x !== id); }, {inspect: true}); settle(); }, 'icon mini'))));
