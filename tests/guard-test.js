@@ -288,6 +288,29 @@ const done = async code => { try { await api('DELETE', 'tablets/' + DEV); } catc
   ok('lists: a calendar soonest first, a to-do list that ticks off, the weather ahead', same(lists.cal, ['Today: Bin day', 'Tomorrow: Dentist']) && same(lists.todo, ['Add', 'Milk']) && same(lists.fc, ['20\u00b0/10\u00b0', '21\u00b0/11\u00b0', '22\u00b0/12\u00b0'])
     && same(ticked, ['todo', 'update_item', 'todo.fake_list', {item: 'u1', status: 'completed'}]), {lists, ticked});
 
+  // ---- a remote control: buttons in its integration's words, volume to the player on the same device, a remote of an unknown kind
+  await ev(`HP.S.reg['remote.fake_tv'] = {area: 'elsewhere', dev: 'fake_tvdev', plat: 'androidtv_remote', skip: false}; HP.S.reg['media_player.fake_tvmp'] = {area: 'elsewhere', dev: 'fake_tvdev', plat: 'androidtv_remote', skip: false};
+    HP.S.reg['remote.fake_sam'] = {area: 'elsewhere', dev: 'fake_samdev', plat: 'samsungtv', skip: false}; HP.S.reg['remote.fake_odd'] = {area: 'elsewhere', dev: 'fake_odddev', plat: 'some_other', skip: false}`);
+  await set('remote.fake_tv', 'on', {friendly_name: 'Fake TV', activity_list: ['Films', 'Music'], current_activity: 'Films'});
+  await set('media_player.fake_tvmp', 'on', {friendly_name: 'Fake TV player', supported_features: 4 | 8 | 1024 | 2048, is_volume_muted: false, source_list: ['HDMI 1', 'HDMI 2'], source: 'HDMI 1'});
+  await ev(`HP.act('remote.fake_tv', HP.ctx)`); await sleep(300); await calls();
+  const rc = [];
+  for (const b of ['up', 'ok', 'home', 'volup', 'mute', 'chdown']) { await tap(`#pop [data-b=${b}]`); rc.push(await calls()); }
+  await tap('#pop .ph .rb'); rc.push(await calls());
+  await tap('#pop .rlists .dd'); await tap('#pop .rlists .dd.open .ddl div:last-child'); rc.push(await calls());
+  const rcLine = await ev(`document.querySelector('#pop .ps').textContent`); await tap('#pop .px');
+  const just = (d, s, e2, data) => [[d, s, e2, data]];
+  ok('remote: each button is one press in its integration\'s words; volume and source go to the player on its device',
+    same(rc, [just('remote', 'send_command', 'remote.fake_tv', {command: 'DPAD_UP'}), just('remote', 'send_command', 'remote.fake_tv', {command: 'DPAD_CENTER'}), just('remote', 'send_command', 'remote.fake_tv', {command: 'HOME'}),
+      just('media_player', 'volume_up', 'media_player.fake_tvmp', {}), just('media_player', 'volume_mute', 'media_player.fake_tvmp', {is_volume_muted: true}), just('remote', 'send_command', 'remote.fake_tv', {command: 'CHANNEL_DOWN'}),
+      just('remote', 'toggle', 'remote.fake_tv', {}), just('media_player', 'select_source', 'media_player.fake_tvmp', {source: 'HDMI 2'})]) && rcLine === 'On \u00b7 HDMI 1', {rc, rcLine});
+  await set('remote.fake_sam', 'on', {friendly_name: 'Fake Other TV'}); await ev(`HP.act('remote.fake_sam', HP.ctx)`); await sleep(300); await calls();
+  await tap('#pop [data-b=volup]'); const samVol = await calls(); await tap('#pop .rlists .mb'); const samSrc = await calls(); await tap('#pop .px');
+  await set('remote.fake_odd', 'off', {friendly_name: 'Fake Odd Remote'}); await ev(`HP.act('remote.fake_odd', HP.ctx)`); await sleep(300);
+  const odd = await js(`{buttons: document.querySelectorAll('#pop [data-b]').length, power: !!document.querySelector('#pop .ph .rb')}`); await tap('#pop .px');
+  ok('remote: without a player its own volume word is sent; a remote of an unknown kind has power only', same(samVol, just('remote', 'send_command', 'remote.fake_sam', {command: 'KEY_VOLUP'}))
+    && same(samSrc, just('remote', 'send_command', 'remote.fake_sam', {command: 'KEY_SOURCE'})) && odd.buttons === 0 && odd.power, {samVol, samSrc, odd});
+
   // ---- the panel's switch: no questions
   await api('PUT', 'designs/' + id, {name: 'Guard test', design: design(false)}); await sleep(6000);
   await tap(tile(0)); text = await q(); c = await calls();

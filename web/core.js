@@ -615,7 +615,7 @@ async function loadAll() {
   S.areas = {}; S.floor = {}; areas.forEach(a => { S.areas[a.area_id] = a.name; S.floor[a.area_id] = a.floor_id || null; });
   keep.set('areas', S.areas);  // room names for the next start, in case Home Assistant is away then
   const dev = {}; devices.forEach(d => { dev[d.id] = d.area_id; });
-  S.reg = {}; ents.forEach(e => { S.reg[e.entity_id] = {area: e.area_id || dev[e.device_id] || null, dev: e.device_id || null, skip: !!(e.hidden_by || e.entity_category || e.disabled_by)}; });
+  S.reg = {}; ents.forEach(e => { S.reg[e.entity_id] = {area: e.area_id || dev[e.device_id] || null, dev: e.device_id || null, plat: e.platform || null, skip: !!(e.hidden_by || e.entity_category || e.disabled_by)}; });
   S.states = {}; states.forEach(s => { S.states[s.entity_id] = s; });
   await ha.subscribe({type: 'subscribe_events', event_type: 'state_changed'}, ev => {
     const d = ev.data;

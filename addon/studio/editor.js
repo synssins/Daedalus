@@ -18,6 +18,7 @@ const TYPES = {
   calendar: {label: 'Calendar', icon: 'clock', w: 18, h: 12, fields: [['entities', 'Calendars', 'entities', ['calendar']], ['name', 'Name', 'text']]},
   todo: {label: 'To-do list', icon: 'text', w: 14, h: 12, fields: [['entity', 'Entity', 'entity', ['todo']], ['name', 'Name', 'text']]},
   forecast: {label: 'Forecast', icon: 'weather-cloudy', w: 24, h: 8, fields: [['entity', 'Entity', 'entity', ['weather']], ['hourly', 'Hourly', 'flag']]},
+  remote: {label: 'Remote', icon: 'television', w: 10, h: 8, fields: [['entity', 'Entity', 'entity', ['remote', 'media_player']], ['volume', 'Volume', 'entity', ['media_player']], ['name', 'Name', 'text'], ['icon', 'Icon', 'icon']]},
   battery: {label: 'Battery', icon: 'battery', w: 14, h: 12, fields: [['entities', 'Batteries', 'entities', ['sensor:battery', 'binary_sensor:battery']], ['name', 'Name', 'text']]},
   room: {label: 'Room', icon: 'home', w: 12, h: 8, fields: [['area', 'Room', 'area'], ['name', 'Name', 'text', 'Room name'], ['icon', 'Icon', 'icon']]},
   camera: {label: 'Camera', icon: 'video', w: 18, h: 12, fields: [['entity', 'Entity', 'entity', ['camera']], ['name', 'Name', 'text'], ['video', 'Live video', 'bool'], ['page', 'Opens', 'page']]},

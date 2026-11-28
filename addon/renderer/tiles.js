@@ -110,6 +110,7 @@
     // loud, or not undone with a second touch: these ask whatever the panel's lock setting says
     if (dom === 'siren' && s.state !== 'on') return HP.confirm(`This will sound ${nm}. Are you sure?`, () => ctx.service('siren', 'turn_on', e), 'No');
     if (dom === 'update') return s.state === 'on' ? HP.confirm(`This will install the update for ${nm}. Are you sure?`, () => ctx.service('update', 'install', e), 'No') : null;
+    if (dom === 'remote') return remotePop(e, ctx, nm);
     if (dom === 'scene') HP.sceneMark(e);
     if (dom === 'scene' || dom === 'script') return ctx.service(dom, 'turn_on', e);
     if (dom === 'button' || dom === 'input_button') return ctx.service(dom, 'press', e);
@@ -391,6 +392,67 @@
     });
   }
 
+  // ---------- remote controls ----------
+  // Home Assistant passes a remote's buttons on as words each integration has its own spelling for, and does not say
+  // which words a remote knows. So the usual buttons are spelt out here for the usual integrations, from each one's
+  // documentation. A remote of another kind shows what Home Assistant does know: power, its activities, and the
+  // volume and source of the player on the same device. Add a kind by adding its line.
+  const KEYS = {
+    androidtv_remote: {up: 'DPAD_UP', down: 'DPAD_DOWN', left: 'DPAD_LEFT', right: 'DPAD_RIGHT', ok: 'DPAD_CENTER', back: 'BACK', home: 'HOME', menu: 'MENU', volup: 'VOLUME_UP', voldown: 'VOLUME_DOWN', mute: 'VOLUME_MUTE', chup: 'CHANNEL_UP', chdown: 'CHANNEL_DOWN', play: 'MEDIA_PLAY_PAUSE'},
+    samsungtv: {up: 'KEY_UP', down: 'KEY_DOWN', left: 'KEY_LEFT', right: 'KEY_RIGHT', ok: 'KEY_ENTER', back: 'KEY_RETURN', home: 'KEY_HOME', menu: 'KEY_MENU', volup: 'KEY_VOLUP', voldown: 'KEY_VOLDOWN', mute: 'KEY_MUTE', chup: 'KEY_CHUP', chdown: 'KEY_CHDOWN', play: 'KEY_PLAY', source: 'KEY_SOURCE'},
+    roku: {up: 'up', down: 'down', left: 'left', right: 'right', ok: 'select', back: 'back', home: 'home', menu: 'info', volup: 'volume_up', voldown: 'volume_down', mute: 'volume_mute', chup: 'channel_up', chdown: 'channel_down', play: 'play'},
+    apple_tv: {up: 'up', down: 'down', left: 'left', right: 'right', ok: 'select', back: 'menu', home: 'home', menu: 'top_menu', volup: 'volume_up', voldown: 'volume_down', play: 'play_pause'},
+    braviatv: {up: 'Up', down: 'Down', left: 'Left', right: 'Right', ok: 'Confirm', back: 'Return', home: 'Home', menu: 'Options', volup: 'VolumeUp', voldown: 'VolumeDown', mute: 'Mute', chup: 'ChannelUp', chdown: 'ChannelDown', play: 'Play', source: 'Input'},
+    webostv: {up: 'UP', down: 'DOWN', left: 'LEFT', right: 'RIGHT', ok: 'ENTER', back: 'BACK', home: 'HOME', menu: 'MENU', volup: 'VOLUMEUP', voldown: 'VOLUMEDOWN', mute: 'MUTE', chup: 'CHANNELUP', chdown: 'CHANNELDOWN', play: 'PLAY'},
+  };
+  const ARROW = turn => `<svg viewBox="0 0 24 24" style="transform:rotate(${turn}deg)"><path d="M7.4 15.4 12 10.8l4.6 4.6L18 14l-6-6-6 6z"/></svg>`;
+  const FACE = {up: ARROW(0), right: ARROW(90), down: ARROW(180), left: ARROW(270), ok: 'OK', volup: '+', voldown: '\u2212', chup: '+', chdown: '\u2212', mute: MUTE,
+    back: '<svg viewBox="0 0 24 24"><path d="M11 5 4 12l7 7v-4.5h9v-5h-9z"/></svg>', menu: '<svg viewBox="0 0 24 24"><path d="M4 6h16v2.4H4zM4 10.8h16v2.4H4zM4 15.6h16V18H4z"/></svg>'};
+  /** A remote control drawn from what its integration takes: volume at the left, the four directions with OK in the
+   *  middle (back, home, menu and play in the corners), channels at the right, then sources and activities. A button
+   *  the remote has no word for is left out. Volume goes to the player on the same device where there is one, or to
+   *  another player the Studio names (a soundbar). A held volume, channel or direction button repeats. */
+  function remotePop(e, ctx, name, volume) {
+    const reg = HP.S.reg, plat = reg[e] && reg[e].plat, keys = KEYS[plat] || {}, isRemote = e.startsWith('remote.'), bits = id => (id && attr(id, 'supported_features')) || 0;
+    const mp = !isRemote ? e : Object.keys(HP.S.states).find(id => id.startsWith('media_player.') && !!reg[id] && !!reg[e] && !!reg[id].dev && reg[id].dev === reg[e].dev) || null;
+    const vol = volume && st(volume) ? volume : bits(mp) & 1028 ? mp : null;
+    const send = k => plat === 'webostv' ? ctx.service('webostv', 'button', e, {button: keys[k]}) : ctx.service('remote', 'send_command', e, {command: keys[k]});
+    const act = {};
+    Object.keys(keys).forEach(k => { act[k] = () => send(k); });
+    if (vol) { act.volup = () => ctx.service('media_player', 'volume_up', vol); act.voldown = () => ctx.service('media_player', 'volume_down', vol); }
+    if (vol && bits(vol) & 8) act.mute = () => ctx.service('media_player', 'volume_mute', vol, {is_volume_muted: !attr(vol, 'is_volume_muted')});
+    if (!act.play && bits(mp) & 16385) act.play = () => ctx.service('media_player', 'media_play_pause', mp);
+    HP.pop.open(name, (body, head) => {
+      const power = powerBtn(head, () => ctx.service(isRemote ? 'remote' : 'media_player', 'toggle', e));
+      const key = (k, extra) => act[k] ? `<div class="rb${extra || ''}" data-r="1" data-b="${k}">${k === 'home' ? U.icon('home') : k === 'play' ? U.icon('play') : FACE[k]}</div>` : '<div class="rb none"></div>';
+      const rocker = (a, b, word, more) => act[a] || act[b] ? `<div class="rk">${key(a, ' rep')}<span>${word}</span>${key(b, ' rep')}${more && act[more] ? key(more) : ''}</div>` : '';
+      const any = ['up', 'down', 'left', 'right', 'ok', 'back', 'home', 'menu', 'play'].some(k => act[k]);
+      body.innerHTML = rocker('volup', 'voldown', 'VOL', 'mute')
+        + (any ? '<div class="pad">' + ['back', 'up', 'home', 'left', 'ok', 'right', 'menu', 'down', 'play'].map(k => key(k, k.length < 6 && 'updownleftright'.includes(k) ? ' rep' : '')).join('') + '</div>' : '')
+        + rocker('chup', 'chdown', 'CH');
+      // a touch presses at once, and a held button repeats; the click that follows a touch is not a second press
+      const press = k => { if (act[k]) act[k](); };
+      let timer = 0; const stop = () => { clearInterval(timer); clearTimeout(timer); };
+      body.addEventListener('pointerdown', ev => { const b = ev.target.closest('[data-b]'); if (!b) return; b.hpDown = performance.now(); press(b.dataset.b); stop();
+        if (b.classList.contains('rep')) timer = setTimeout(() => { timer = setInterval(() => { HP.pop.touch(); press(b.dataset.b); }, 260); }, 450); });
+      ['pointerup', 'pointercancel', 'pointerleave'].forEach(n => body.addEventListener(n, stop));
+      body.addEventListener('click', ev => { const b = ev.target.closest('[data-b]'); if (b && !(performance.now() - (b.hpDown || 0) < 800)) press(b.dataset.b); });
+      const under = part(body.parentNode, 'rlists');
+      const src = bits(mp) & 2048 && (attr(mp, 'source_list') || []).length ? dropdown(under, () => [attr(mp, 'source_list') || [], attr(mp, 'source')], x => ctx.service('media_player', 'select_source', mp, {source: x}))
+        : act.source ? Object.assign(part(under, 'mb', '1', 'Source'), {onclick: () => act.source()}) : null;
+      const acts = isRemote && (attr(e, 'activity_list') || []).length ? dropdown(under, () => [attr(e, 'activity_list') || [], attr(e, 'current_activity')], x => ctx.service('remote', 'turn_on', e, {activity: x})) : null;
+      if (!src && !acts) under.remove();
+      return () => {
+        const s = st(e); if (!s) return 'Not found';
+        power.classList.toggle('lit', s.state !== 'off' && s.state !== 'standby' && s.state !== 'unavailable');
+        const mute = body.querySelector('[data-b=mute]'); if (mute) mute.classList.toggle('lit', !!(vol && attr(vol, 'is_volume_muted')));
+        if (src && src.classList.contains('dd')) src.firstChild.textContent = attr(mp, 'source') || 'Source';
+        if (acts) acts.firstChild.textContent = s.attributes.current_activity || 'Activity';
+        return [U.stateLabel(e), (mp && attr(mp, 'source')) || s.attributes.current_activity].filter(Boolean).join(' \u00b7 ');
+      };
+    });
+  }
+
   // Feature bit, service, label, the state it leads to. Home Assistant's own names for the modes.
   const ARM = [[2, 'arm_away', 'Arm away', 'armed_away'], [1, 'arm_home', 'Arm home', 'armed_home'], [4, 'arm_night', 'Arm night', 'armed_night'],
     [32, 'arm_vacation', 'Arm vacation', 'armed_vacation'], [16, 'arm_custom_bypass', 'Custom bypass', 'armed_custom_bypass'], [0, 'disarm', 'Disarm', 'disarmed']];
@@ -568,6 +630,16 @@
             + `<div class="ic">${U.icon(SKY[f.condition] || 'weather-cloudy')}</div><div class="fh">${deg(f.temperature)}</div><div class="fl">${deg(f.templow)}</div></div>`).join(''); });
     },
     update(t, body, ctx, i) { i.due(); },
+  });
+
+  /** A remote control on the dashboard: a touch opens its buttons. */
+  HP.tile('remote', {
+    create(t, body, ctx, i) { i.p = U.card(body, t.icon || 'television'); },
+    update(t, body, ctx, i) {
+      U.set(i.p.n, t.name || U.fname(t.entity)); U.set(i.p.l, U.stateLabel(t.entity));
+      i.el.classList.toggle('on', U.active(t.entity)); i.el.classList.toggle('off', !U.avail(t.entity));
+    },
+    tap: (t, ctx) => st(t.entity) ? () => remotePop(t.entity, ctx, t.name || U.fname(t.entity), t.volume) : null,
   });
 
   /** The batteries of things around the house on one button, the lowest first: what needs changing is on top, and

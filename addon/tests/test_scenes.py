@@ -38,4 +38,13 @@ assert got[0] == {"e": "light.a", "on": True, "bri": 200, "mode": "hs", "k": Non
 assert got[1]["k"] == 2700 and got[1]["rgb"][0] == 255 and got[1]["rgb"][0] > got[1]["rgb"][1] > got[1]["rgb"][2], got[1]
 assert got[2]["rgb"] == [1, 2, 3] and got[3] == {"e": "light.d", "on": False, "bri": None, "mode": None, "k": None, "hs": None, "rgb": None}
 assert lights_of({}) == []
+# televisions go into a saved scene as on or off with volume and source; speakers do not, and nothing is saved as "playing"
+ENTS2 = [{"entity_id": "remote.tv", "area_id": None, "device_id": "d1"}, {"entity_id": "media_player.tv", "area_id": None, "device_id": "d1"},
+         {"entity_id": "media_player.speaker", "area_id": "den", "device_id": None}, {"entity_id": "media_player.amp", "area_id": "den", "device_id": None},
+         {"entity_id": "media_player.gone", "area_id": "den", "device_id": None}]
+STATES2 = [st("remote.tv", "on", current_activity="app"), st("media_player.tv", "playing", volume_level=0.2, source="HDMI 1", media_title="Film"),
+           st("media_player.speaker", "playing", volume_level=0.5), st("media_player.amp", "standby", device_class="receiver", volume_level=0.4),
+           st("media_player.gone", "unavailable", device_class="tv")]
+tv = capture("area:den", AREAS, DEVICES, ENTS2, STATES2)
+assert tv == {"remote.tv": {"state": "on"}, "media_player.tv": {"state": "on", "volume_level": 0.2, "source": "HDMI 1"}, "media_player.amp": {"state": "off"}}, tv
 print("scenes: all checks passed")
