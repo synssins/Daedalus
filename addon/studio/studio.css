@@ -276,10 +276,7 @@ input[type=date] { height: 36px; padding: 0 9px; border: 0; border-bottom: 1px s
   body:has(.ed) #rail button span:not(.dot), body:has(.ed) #rail button.sub, body:has(.ed) #rail .none { display: none; }
   body:has(.ed) #rail button { justify-content: center; padding: 0; position: relative; }
   body:has(.ed) #rail button .dot { position: absolute; right: 8px; top: 6px; margin: 0; }
-  .palette { width: 52px; }
-  .palette h2 { visibility: hidden; height: 1px; margin: 6px 0; border-top: 1px solid var(--line); visibility: visible; font-size: 0; }
-  .palette button span { display: none; }
-  .palette button { justify-content: center; padding: 0; }
+  .palette { width: 168px; }  /* narrower, and still with its names: a touch screen has no pointer to hover with */
   .insp { width: 284px; }
   .bar .name { width: 140px; }
 }

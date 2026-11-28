@@ -247,7 +247,7 @@ The sheet scales the tablet's real pixel size down to fit and never scales above
 
 Inspector rows are a two-column grid: an 82px label and the control, 6px by 8px gaps, 7px between rows. Lists (rail, palette, tabs) use 2px gaps. Removal actions are set apart by empty space: 22px to the left of a delete button in a table row, and a 30px gap plus a soft seam above the delete row in the inspector.
 
-Below 1500px wide (the Home Assistant sidebar takes its share), the rail folds to 58px and the palette to 52px, both icon-only, and the inspector narrows to 272px, so the sheet keeps its size.
+Below 1500px wide (the Home Assistant sidebar takes its share), the rail folds to 58px icon-only, the palette narrows to 168px and keeps its names (a touch screen has no pointer to hover with), and the inspector narrows to 272px.
 
 ## Elevation & Depth
 

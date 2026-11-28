@@ -59,7 +59,7 @@
   });
 
   // ---------- what a touch does, by what the thing is ----------
-  const DOMAIN_ICON = {light: 'lightbulb', switch: 'power', fan: 'power', input_boolean: 'power', cover: 'garage', lock: 'lock', alarm_control_panel: 'lock', media_player: 'play', camera: 'video',
+  const DOMAIN_ICON = {light: 'lightbulb', switch: 'power', fan: 'power', input_boolean: 'power', cover: 'garage', lock: 'lock', alarm_control_panel: 'shield', vacuum: 'robot-vacuum', lawn_mower: 'robot-vacuum', media_player: 'play', camera: 'video',
     scene: 'star', script: 'star', button: 'gesture-tap', input_button: 'gesture-tap', climate: 'thermometer', person: 'account-multiple', weather: 'weather-cloudy'};
   /** Locks, doors and alarms ask before they act: for the code where Home Assistant wants one, else yes or no (when
    *  there is a question to ask). A panel can switch the asking off (design.guard === false, the Studio's Dashboard

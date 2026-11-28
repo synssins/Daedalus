@@ -8,7 +8,7 @@ const TYPES = {
   button: {label: 'Button', icon: 'gesture-tap', w: 14, h: 10, fields: []},
   entity: {label: 'Entity', icon: 'lightbulb', w: 10, h: 8, fields: [['entity', 'Entity', 'entity', ['light', 'switch', 'fan', 'cover', 'lock', 'climate', 'media_player', 'input_boolean', 'humidifier', 'siren', 'valve', 'vacuum', 'lawn_mower', 'water_heater', 'remote', 'automation', 'number', 'input_number', 'select', 'input_select', 'text', 'input_text', 'time', 'date', 'datetime', 'input_datetime', 'counter', 'timer', 'update']], ['name', 'Name', 'text'], ['battery', 'Battery', 'flag', t => hasBattery(t.entity)], ['icon', 'Icon', 'icon'], ['confirm', 'Confirmation', 'text', 'Question to ask before acting']]},
   action: {label: 'Scene or script', icon: 'star', w: 12, h: 6, fields: [['entity', 'Entity', 'entity', ['scene', 'script', 'button']], ['name', 'Name', 'text'], ['label', 'Subtitle', 'text'], ['icon', 'Icon', 'icon'], ['confirm', 'Confirmation', 'text', 'Question to ask before acting']]},
-  alarm: {label: 'Alarm panel', icon: 'lock', w: 10, h: 8, fields: [['entity', 'Entity', 'entity', ['alarm_control_panel']], ['name', 'Name', 'text'], ['icon', 'Icon', 'icon']]},
+  alarm: {label: 'Alarm panel', icon: 'shield', w: 10, h: 8, fields: [['entity', 'Entity', 'entity', ['alarm_control_panel']], ['name', 'Name', 'text'], ['icon', 'Icon', 'icon']]},
   scenes: {label: 'Scenes', icon: 'star', w: 12, h: 6, fields: [['scope', 'Room or floor', 'select', () => [['', 'All'], ...A.areas.map(a => ['area:' + a.id, a.name]), ...(A.floors || []).map(f => ['floor:' + f.id, f.name])]], ['name', 'Name', 'text'], ['icon', 'Icon', 'icon']]},
   savescene: {label: 'Save scene', icon: 'star', w: 10, h: 6, fields: [['scope', 'Room or floor', 'select', () => [['', 'Choose'], ...A.areas.map(a => ['area:' + a.id, a.name]), ...(A.floors || []).map(f => ['floor:' + f.id, f.name])]], ['name', 'Name', 'text', 'Save scene'], ['icon', 'Icon', 'icon']]},
   value: {label: 'Value', icon: 'thermometer', w: 10, h: 8, fields: [['entity', 'Entity', 'entity', ['sensor', 'binary_sensor', 'input_number', 'number', 'counter', 'sun', 'person', 'device_tracker', 'input_select', 'select', 'input_text', 'text']], ['name', 'Name', 'text'], ['icon', 'Icon', 'icon']]},
@@ -39,10 +39,10 @@ const TYPES = {
 };
 // What can be added by what it is in the house: [label, icon, tile type, the entity domains its picker offers].
 // Each is one of the tile types above with its picker narrowed; the full list of tile types is under Advanced.
-const KINDS = [['Light', 'lightbulb', 'entity', ['light']], ['Switch', 'power', 'entity', ['switch', 'input_boolean']], ['Fan', 'power', 'entity', ['fan']],
+const KINDS = [['Light', 'lightbulb', 'entity', ['light']], ['Switch', 'toggle-switch', 'entity', ['switch', 'input_boolean']], ['Fan', 'power', 'entity', ['fan']],
   ['Cover', 'garage', 'entity', ['cover', 'valve']], ['Lock', 'lock', 'entity', ['lock']], ['Climate', 'thermometer', 'entity', ['climate', 'humidifier', 'water_heater']],
   ['Media player', 'play', 'media', ['media_player']], ['Remote', 'television', 'remote', ['remote', 'media_player']], ['Camera', 'video', 'camera', ['camera']],
-  ['Sensor', 'thermometer', 'value', null], ['Vacuum', 'power', 'entity', ['vacuum', 'lawn_mower']], ['Scenes', 'star', 'scenes', null], ['Alarm panel', 'lock', 'alarm', null]];
+  ['Sensor', 'chart-line', 'value', null], ['Vacuum', 'robot-vacuum', 'entity', ['vacuum', 'lawn_mower']], ['Scenes', 'star', 'scenes', null], ['Alarm panel', 'shield', 'alarm', null]];
 const kindOf = t => (t && t.kind && KINDS.find(k => k[0] === t.kind)) || null;
 A.pipelines = []; A.wakewords = [];
 /** Does the device this entity belongs to report a battery? */
